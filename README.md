@@ -47,7 +47,17 @@ Repo zawiera poprawki pod praktyczne użycie z `wmbusmeters`, m.in.:
 
 ---
 
+## Instalacja (ESPHome external_components)
 
+W konfiguracji ESPHome dodaj:
+
+```yaml
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+	
+	
 ## Atrybucja i licencja
 - SzczepanLeon/esphome-components
 - wmbusmeters/wmbusmeters
