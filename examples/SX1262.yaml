@@ -1,0 +1,113 @@
+substitutions:
+  devicename: esphome-web-ca0448
+
+esphome:
+  name: ${devicename}
+  friendly_name: ESPHome Heltec V4
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  cpu_frequency: 240MHZ
+  framework:
+    type: esp-idf
+
+psram:
+  mode: quad
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+#logger:
+#  level: debug
+#  logs:
+#    mqtt: warn
+#    component: warn
+#    wmbus: debug
+#    SX1262: debug
+
+logger:
+  level: info                  # Zmień na 'warn' jeśli chcesz ciszej w logach
+  logs:
+    mqtt: warn                 # Ucisza MQTT (zostawia warningi)
+    component: warn           # Ucisza ogólne gadanie ESPHome
+    #wmbus: info              # (opcjonalnie) wymuś logi wmbus, jeśli kiedyś znikną
+mdns:
+  disabled: false
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: "192.168.100.82"
+  username: "z2m-mqtt"
+  password: "z2mmqtt"
+  log_topic:
+    topic: "${devicename}/debug"
+    level: DEBUG
+
+# SPI (Heltec V4)
+spi:
+  clk_pin: GPIO9
+  mosi_pin: GPIO10
+  miso_pin: GPIO11
+
+# Heltec V4 FEM (to robi różnicę: RX ma być LNA ON, PA OFF)
+# Ustawiamy na sztywno:
+#  - FEM_EN  = 1
+#  - V_FEM_Ctrl = 1
+#  - FEM_PA  = 0
+switch:
+  - platform: gpio
+    id: fem_en
+    pin: GPIO2
+    restore_mode: ALWAYS_ON
+
+  - platform: gpio
+    id: fem_ctrl
+    pin: GPIO7
+    restore_mode: ALWAYS_ON
+
+  - platform: gpio
+    id: fem_pa
+    pin: GPIO46
+    restore_mode: ALWAYS_OFF
+
+wmbus_radio:
+  radio_type: SX1262
+
+  cs_pin: GPIO8
+  reset_pin: GPIO12
+  busy_pin: GPIO13
+
+  irq_pin:
+    number: GPIO14
+    mode: input
+
+  # SX1262 tuning
+  dio2_rf_switch: true
+  rx_gain: BOOSTED
+  has_tcxo: true   # jakby było gorzej/„cisza”, zmień na false i tyle
+
+  on_frame:
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return frame->as_hex().size() >= 30;
+          then:
+            - mqtt.publish:
+                topic: "wmbus_bridge/telegram"
+                payload: !lambda |-
+                  return frame->as_hex();
