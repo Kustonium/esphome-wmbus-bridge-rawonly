@@ -3,12 +3,8 @@
 #include <algorithm>
 #include <ctime>
 
-// log macros
-#include "esphome/core/log.h"
-
-// NOTE: Do NOT include full wmbusmeters/wmbus_common here.
-// This file must stay lightweight to allow "RF -> RAW" usage.
 #include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
 
 #include "decode3of6.h"
 
@@ -21,14 +17,66 @@
 namespace esphome {
 namespace wmbus_radio {
 
-static const char *const TAG = "wmbus_radio.packet";
+static const char *TAG = "wmbus_radio.packet";
+
+// Remove DLL CRC bytes for WMBus Format A in-place.
+// wmbusmeters expects telegrams without DLL CRC bytes when feeding hex.
+// Layout (without CRC):
+//   block0: 10 bytes (includes L)
+//   block1: 16 bytes
+//   block2+: 16 bytes ...
+// With DLL CRC: after each block there are 2 CRC bytes.
+static bool strip_dll_crc_inplace(std::vector<uint8_t> &d) {
+  if (d.size() < 12)
+    return false;
+
+  const uint8_t l = d[0];
+  const size_t want = static_cast<size_t>(l) + 1;  // telegram without DLL CRC bytes
+  if (want < 2)
+    return false;
+
+  std::vector<uint8_t> out;
+  out.reserve(want);
+
+  size_t pos = 0;
+  int block = 0;
+
+  while (out.size() < want) {
+    const size_t data_len = (block == 0) ? 10 : 16;
+    const size_t need = want - out.size();
+    const size_t take = std::min(data_len, need);
+
+    if (pos + take > d.size())
+      return false;
+
+    out.insert(out.end(), d.begin() + pos, d.begin() + pos + take);
+
+    // advance over full block payload (not just 'take') because CRC belongs to block
+    if (pos + data_len > d.size())
+      return false;
+    pos += data_len;
+
+    // skip 2 CRC bytes if present
+    if (pos + 2 > d.size())
+      return false;
+    pos += 2;
+
+    block++;
+  }
+
+  if (out.size() != want)
+    return false;
+
+  d = std::move(out);
+  return true;
+}
 
 Packet::Packet() { this->data_.reserve(WMBUS_PREAMBLE_SIZE); }
 
 // Determine the link mode based on the first byte of the data
 LinkMode Packet::link_mode() {
   if (this->link_mode_ == LinkMode::UNKNOWN)
-    if (this->data_.size())
+    if (!this->data_.empty())
       if (this->data_[0] == WMBUS_MODE_C_PREAMBLE)
         this->link_mode_ = LinkMode::C1;
       else
@@ -74,16 +122,15 @@ size_t Packet::expected_size() {
     //   L-field = length without CRC fields and without L (1 byte)
     // Format B
     //   L-field = length with CRC fields and without L (1 byte)
-    auto l_field = this->l_field();
+    const auto l_field = this->l_field();
 
     // The 2 first blocks contains 25 bytes when excluding CRC and the L-field
     // The other blocks contains 16 bytes when excluding the CRC-fields
     // Less than 26 (15 + 10)
-    auto nrBlocks = l_field < 26 ? 2 : (l_field - 26) / 16 + 3;
+    const auto nrBlocks = l_field < 26 ? 2 : (l_field - 26) / 16 + 3;
 
-    // Add all extra fields, excluding the CRC fields + 2 CRC bytes for each
-    // block
-    auto nrBytes = l_field + 1 + 2 * nrBlocks;
+    // Add all extra fields, excluding the CRC fields + 2 CRC bytes for each block
+    const auto nrBytes = l_field + 1 + 2 * nrBlocks;
 
     if (this->link_mode() != LinkMode::C1) {
       this->expected_size_ = encoded_size(nrBytes);
@@ -109,12 +156,18 @@ std::optional<Frame> Packet::convert_to_frame() {
 
   // drop junk / partial frames (noise)
   const auto mode = this->link_mode();
-  if (mode == LinkMode::T1 && this->data_.size() < 60) { delete this; return {}; }
-  if (mode == LinkMode::C1 && this->data_.size() < 16) { delete this; return {}; }
+  if (mode == LinkMode::T1 && this->data_.size() < 60) {
+    delete this;
+    return {};
+  }
+  if (mode == LinkMode::C1 && this->data_.size() < 16) {
+    delete this;
+    return {};
+  }
 
-  // Must be able to determine full expected size and have at least that much data
   const size_t exp = this->expected_size();
   if (exp == 0 || this->data_.size() < exp) {
+    // not enough data / cannot determine size => DO NOT publish
     delete this;
     return {};
   }
@@ -129,12 +182,17 @@ std::optional<Frame> Packet::convert_to_frame() {
     // TODO: Remove assumption that T1 is always A
     this->frame_format_ = "A";
     auto decoded_data = decode3of6(this->data_);
-    if (!decoded_data) { delete this; return {}; }
+    if (!decoded_data) {
+      delete this;
+      return {};
+    }
     this->data_ = decoded_data.value();
 
   } else if (this->link_mode() == LinkMode::C1) {
-    // Need at least 2 bytes to check block preamble
-    if (this->data_.size() < 2) { delete this; return {}; }
+    if (this->data_.size() < 2) {
+      delete this;
+      return {};
+    }
 
     if (this->data_[1] == WMBUS_BLOCK_A_PREAMBLE) {
       this->frame_format_ = "A";
@@ -147,7 +205,10 @@ std::optional<Frame> Packet::convert_to_frame() {
     }
 
     // Remove C-mode suffix bytes
-    if (this->data_.size() < WMBUS_MODE_C_SUFIX_LEN) { delete this; return {}; }
+    if (this->data_.size() < WMBUS_MODE_C_SUFIX_LEN) {
+      delete this;
+      return {};
+    }
     this->data_.erase(this->data_.begin(), this->data_.begin() + WMBUS_MODE_C_SUFIX_LEN);
 
   } else {
@@ -155,16 +216,23 @@ std::optional<Frame> Packet::convert_to_frame() {
     return {};
   }
 
-  // OK -> publish
+  // Strip DLL CRC for Format A so wmbusmeters can parse the hex telegram.
+  if (this->frame_format_ == "A") {
+    if (!strip_dll_crc_inplace(this->data_)) {
+      delete this;
+      return {};
+    }
+  }
+
+  ESP_LOGD(TAG, "Have data from radio (%zu bytes)", this->data_.size());
+
   frame.emplace(this);
   delete this;
   return frame;
 }
 
-
 Frame::Frame(Packet *packet)
-    : data_(std::move(packet->data_)), link_mode_(packet->link_mode_),
-      rssi_(packet->rssi_), format_(packet->frame_format_) {}
+    : data_(std::move(packet->data_)), link_mode_(packet->link_mode_), rssi_(packet->rssi_), format_(packet->frame_format_) {}
 
 std::vector<uint8_t> &Frame::data() { return this->data_; }
 LinkMode Frame::link_mode() { return this->link_mode_; }
@@ -183,14 +251,14 @@ std::string Frame::as_rtlwmbus() {
   auto output = std::string{};
   output.reserve(2 + 5 + 24 + 1 + 4 + 5 + 2 * this->data_.size() + 1);
 
-  output += link_mode_name(this->link_mode_); // size 2
-  output += ";1;1;";                          // size 5
-  output += time_buffer;                      // size 24
-  output += ';';                              // size 1
-  output += std::to_string(this->rssi_);      // size up to 4
-  output += ";;;0x";                          // size 5
-  output += this->as_hex();                   // size 2 * frame.size()
-  output += "\n";                             // size 1
+  output += link_mode_name(this->link_mode_);
+  output += ";1;1;";
+  output += time_buffer;
+  output += ';';
+  output += std::to_string(this->rssi_);
+  output += ";;;0x";
+  output += this->as_hex();
+  output += "\n";
 
   return output;
 }
@@ -198,5 +266,5 @@ std::string Frame::as_rtlwmbus() {
 void Frame::mark_as_handled() { this->handlers_count_++; }
 uint8_t Frame::handlers_count() { return this->handlers_count_; }
 
-} // namespace wmbus_radio
-} // namespace esphome
+}  // namespace wmbus_radio
+}  // namespace esphome
