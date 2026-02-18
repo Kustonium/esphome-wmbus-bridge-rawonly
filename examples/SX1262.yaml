@@ -50,9 +50,9 @@ wifi:
   power_save_mode: none
 
 mqtt:
-  broker: "192.168.100.82"
-  username: "z2m-mqtt"
-  password: "z2mmqtt"
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
   log_topic:
     topic: "${devicename}/debug"
     level: DEBUG
