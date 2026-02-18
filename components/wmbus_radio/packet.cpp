@@ -112,46 +112,55 @@ std::optional<Frame> Packet::convert_to_frame() {
   if (mode == LinkMode::T1 && this->data_.size() < 60) { delete this; return {}; }
   if (mode == LinkMode::C1 && this->data_.size() < 16) { delete this; return {}; }
 
-  ESP_LOGD(TAG, "Have data from radio (%zu bytes)", this->data_.size());
-  // ... reszta Twojego kodu bez zmian
-
-  // Intentionally no wmbusmeters debugPayload() here to avoid pulling heavy code.
-
+  // Must be able to determine full expected size and have at least that much data
   const size_t exp = this->expected_size();
-  if (exp > 0 && this->data_.size() >= exp) {
-    if (this->data_.size() > exp) {
-      ESP_LOGV(TAG, "Trimming extra bytes: have %zu, expected %zu", this->data_.size(), exp);
-      this->data_.resize(exp);
-    }
-
-    if (this->link_mode() == LinkMode::T1) {
-      // TODO: Remove assumption that T1 is always A
-      this->frame_format_ = "A";
-      auto decoded_data = decode3of6(this->data_);
-      if (decoded_data)
-        this->data_ = decoded_data.value();
-
-    } else if (this->link_mode() == LinkMode::C1) {
-      if (this->data_[1] == WMBUS_BLOCK_A_PREAMBLE)
-        this->frame_format_ = "A";
-      else if (this->data_[1] == WMBUS_BLOCK_B_PREAMBLE)
-        this->frame_format_ = "B";
-
-      this->data_.erase(this->data_.begin(),
-                        this->data_.begin() + WMBUS_MODE_C_SUFIX_LEN);
-    } else {
-      ESP_LOGE(TAG, "unknown link mode!");
-    }
-  } else {
-    ESP_LOGE(TAG, "expected_size: %zu NOT size: %zu", exp, this->data_.size());
+  if (exp == 0 || this->data_.size() < exp) {
+    delete this;
+    return {};
   }
 
-  // RAW-only mode: we do NOT validate/trim via wmbusmeters.
-  frame.emplace(this);
+  // Trim extras (some radios can deliver a bit more than expected)
+  if (this->data_.size() > exp) {
+    this->data_.resize(exp);
+  }
 
+  // Convert into decoded frame bytes
+  if (this->link_mode() == LinkMode::T1) {
+    // TODO: Remove assumption that T1 is always A
+    this->frame_format_ = "A";
+    auto decoded_data = decode3of6(this->data_);
+    if (!decoded_data) { delete this; return {}; }
+    this->data_ = decoded_data.value();
+
+  } else if (this->link_mode() == LinkMode::C1) {
+    // Need at least 2 bytes to check block preamble
+    if (this->data_.size() < 2) { delete this; return {}; }
+
+    if (this->data_[1] == WMBUS_BLOCK_A_PREAMBLE) {
+      this->frame_format_ = "A";
+    } else if (this->data_[1] == WMBUS_BLOCK_B_PREAMBLE) {
+      this->frame_format_ = "B";
+    } else {
+      // Unknown / invalid C-mode preamble -> drop
+      delete this;
+      return {};
+    }
+
+    // Remove C-mode suffix bytes
+    if (this->data_.size() < WMBUS_MODE_C_SUFIX_LEN) { delete this; return {}; }
+    this->data_.erase(this->data_.begin(), this->data_.begin() + WMBUS_MODE_C_SUFIX_LEN);
+
+  } else {
+    delete this;
+    return {};
+  }
+
+  // OK -> publish
+  frame.emplace(this);
   delete this;
   return frame;
 }
+
 
 Frame::Frame(Packet *packet)
     : data_(std::move(packet->data_)), link_mode_(packet->link_mode_),
