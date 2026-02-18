@@ -57,7 +57,7 @@ external_components:
     components: [wmbus_radio]
     refresh: 0s
 	
-	
+```	
 ## Atrybucja i licencja
 - SzczepanLeon/esphome-components
 - wmbusmeters/wmbusmeters
