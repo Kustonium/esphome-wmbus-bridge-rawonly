@@ -20,7 +20,7 @@ DEPENDENCIES = ["esp32", "spi"]
 
 # Keep this component lightweight: decoding is meant to happen outside ESP.
 # Do not auto-load the full wmbus_common stack.
-AUTO_LOAD = ["wmbus_bridge_common"]
+#AUTO_LOAD = []
 
 MULTI_CONF = True
 

@@ -44,7 +44,7 @@ void Radio::loop() {
 
   ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
            frame->data().size(), frame->rssi(),
-           esphome::wmbus_common::linkModeName(frame->link_mode()),
+           link_mode_name(frame->link_mode()),
            frame->format().c_str());
 
   for (auto &handler : this->handlers_)

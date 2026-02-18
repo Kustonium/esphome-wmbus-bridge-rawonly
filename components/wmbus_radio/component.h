@@ -9,7 +9,7 @@
 
 #include "esphome/components/spi/spi.h"
 // Keep component lightweight (no full wmbusmeters stack)
-#include "esphome/components/wmbus_bridge_common/link_mode.h"
+#include "link_mode.h"
 
 #include "packet.h"
 #include "transceiver.h"

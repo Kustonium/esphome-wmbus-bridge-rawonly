@@ -8,7 +8,7 @@
 
 // Keep wmbus_radio lightweight: do NOT pull full wmbusmeters/wmbus_common.
 // We only need LinkMode names and basic helpers.
-#include "esphome/components/wmbus_bridge_common/link_mode.h"
+#include "link_mode.h"
 #include "esphome/core/helpers.h"
 
 namespace esphome {
