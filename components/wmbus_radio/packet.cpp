@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <ctime>
 
-#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include "esphome/core/helpers.h"
 
 #include "decode3of6.h"
 
@@ -17,66 +17,14 @@
 namespace esphome {
 namespace wmbus_radio {
 
-static const char *TAG = "wmbus_radio.packet";
-
-// Remove DLL CRC bytes for WMBus Format A in-place.
-// wmbusmeters expects telegrams without DLL CRC bytes when feeding hex.
-// Layout (without CRC):
-//   block0: 10 bytes (includes L)
-//   block1: 16 bytes
-//   block2+: 16 bytes ...
-// With DLL CRC: after each block there are 2 CRC bytes.
-static bool strip_dll_crc_inplace(std::vector<uint8_t> &d) {
-  if (d.size() < 12)
-    return false;
-
-  const uint8_t l = d[0];
-  const size_t want = static_cast<size_t>(l) + 1;  // telegram without DLL CRC bytes
-  if (want < 2)
-    return false;
-
-  std::vector<uint8_t> out;
-  out.reserve(want);
-
-  size_t pos = 0;
-  int block = 0;
-
-  while (out.size() < want) {
-    const size_t data_len = (block == 0) ? 10 : 16;
-    const size_t need = want - out.size();
-    const size_t take = std::min(data_len, need);
-
-    if (pos + take > d.size())
-      return false;
-
-    out.insert(out.end(), d.begin() + pos, d.begin() + pos + take);
-
-    // advance over full block payload (not just 'take') because CRC belongs to block
-    if (pos + data_len > d.size())
-      return false;
-    pos += data_len;
-
-    // skip 2 CRC bytes if present
-    if (pos + 2 > d.size())
-      return false;
-    pos += 2;
-
-    block++;
-  }
-
-  if (out.size() != want)
-    return false;
-
-  d = std::move(out);
-  return true;
-}
+static const char *const TAG = "wmbus_radio.packet";
 
 Packet::Packet() { this->data_.reserve(WMBUS_PREAMBLE_SIZE); }
 
 // Determine the link mode based on the first byte of the data
 LinkMode Packet::link_mode() {
   if (this->link_mode_ == LinkMode::UNKNOWN)
-    if (!this->data_.empty())
+    if (this->data_.size())
       if (this->data_[0] == WMBUS_MODE_C_PREAMBLE)
         this->link_mode_ = LinkMode::C1;
       else
@@ -87,23 +35,19 @@ LinkMode Packet::link_mode() {
 
 void Packet::set_rssi(int8_t rssi) { this->rssi_ = rssi; }
 
-// Get value of L-field
+// Get value of L-field (best-effort; for RAW-only we avoid depending on this early)
 uint8_t Packet::l_field() {
   switch (this->link_mode()) {
     case LinkMode::C1:
-      if (this->data_.size() < 3)
-        return 0;
+      if (this->data_.size() < 3) return 0;
       return this->data_[2];
 
     case LinkMode::T1: {
-      // For T-mode we only need enough coded bytes to decode the first decoded
-      // byte (L-field). Using the whole (possibly partial) buffer increases the
-      // risk of decode failure when only a header is present.
-      const size_t n = std::min<size_t>(this->data_.size(), 3);
+      // Decode a minimal prefix to obtain decoded[0] (L-field)
+      const size_t n = std::min<size_t>(this->data_.size(), 18);  // safer than 3
       std::vector<uint8_t> tmp(this->data_.begin(), this->data_.begin() + n);
       auto decoded = decode3of6(tmp);
-      if (decoded)
-        return (*decoded)[0];
+      if (decoded && !decoded->empty()) return (*decoded)[0];
       break;
     }
 
@@ -113,24 +57,17 @@ uint8_t Packet::l_field() {
   return 0;
 }
 
+// Keep expected_size() for callers that may want it, but RAW-only path below does not require it.
 size_t Packet::expected_size() {
-  if (this->data_.size() < WMBUS_PREAMBLE_SIZE)
-    return 0;
+  if (this->data_.size() < WMBUS_PREAMBLE_SIZE) return 0;
 
   if (!this->expected_size_) {
-    // Format A
-    //   L-field = length without CRC fields and without L (1 byte)
-    // Format B
-    //   L-field = length with CRC fields and without L (1 byte)
-    const auto l_field = this->l_field();
+    auto l_field = this->l_field();
+    if (l_field == 0) return 0;
 
-    // The 2 first blocks contains 25 bytes when excluding CRC and the L-field
-    // The other blocks contains 16 bytes when excluding the CRC-fields
-    // Less than 26 (15 + 10)
-    const auto nrBlocks = l_field < 26 ? 2 : (l_field - 26) / 16 + 3;
-
-    // Add all extra fields, excluding the CRC fields + 2 CRC bytes for each block
-    const auto nrBytes = l_field + 1 + 2 * nrBlocks;
+    // Number of blocks (format A/B framing rules)
+    auto nrBlocks = l_field < 26 ? 2 : (l_field - 26) / 16 + 3;
+    auto nrBytes = l_field + 1 + 2 * nrBlocks;
 
     if (this->link_mode() != LinkMode::C1) {
       this->expected_size_ = encoded_size(nrBytes);
@@ -151,88 +88,108 @@ uint8_t *Packet::append_space(size_t len) {
   return this->data_.data() + old;
 }
 
+// Strip DLL CRC bytes from a decoded *Format A* frame in-place.
+// Input d must start with L-field at d[0] and still include DLL CRC bytes.
+// Output will be exactly (L+1) bytes if successful.
+static bool strip_dll_crc_format_a_inplace(std::vector<uint8_t> &d) {
+  if (d.empty()) return false;
+  const size_t want = static_cast<size_t>(d[0]) + 1;  // DLL without CRC bytes
+  if (want < 2) return false;
+  if (d.size() < want) return false;                  // must at least contain header+payload sans CRC
+
+  std::vector<uint8_t> out;
+  out.reserve(want);
+
+  size_t pos = 0;
+  int block = 0;
+
+  while (out.size() < want && pos < d.size()) {
+    const size_t data_len = (block == 0) ? 10 : 16;   // bytes per block excluding CRC
+    const size_t need = want - out.size();
+    const size_t take = std::min(data_len, need);
+
+    if (pos + take > d.size()) return false;
+    out.insert(out.end(), d.begin() + pos, d.begin() + pos + take);
+    pos += data_len;
+
+    // skip 2 CRC bytes after each block (if present)
+    if (pos + 2 <= d.size()) pos += 2;
+    block++;
+  }
+
+  if (out.size() != want) return false;
+  d = std::move(out);
+  return true;
+}
+
 std::optional<Frame> Packet::convert_to_frame() {
   std::optional<Frame> frame = {};
 
   // drop junk / partial frames (noise)
   const auto mode = this->link_mode();
-  if (mode == LinkMode::T1 && this->data_.size() < 60) {
-    delete this;
-    return {};
-  }
-  if (mode == LinkMode::C1 && this->data_.size() < 16) {
-    delete this;
-    return {};
-  }
+  if (mode == LinkMode::T1 && this->data_.size() < 60) { delete this; return {}; }
+  if (mode == LinkMode::C1 && this->data_.size() < 16) { delete this; return {}; }
 
-  const size_t exp = this->expected_size();
-  if (exp == 0 || this->data_.size() < exp) {
-    // not enough data / cannot determine size => DO NOT publish
-    delete this;
-    return {};
-  }
-
-  // Trim extras (some radios can deliver a bit more than expected)
-  if (this->data_.size() > exp) {
-    this->data_.resize(exp);
-  }
-
-  // Convert into decoded frame bytes
-  if (this->link_mode() == LinkMode::T1) {
-    // TODO: Remove assumption that T1 is always A
-    this->frame_format_ = "A";
+  // RAW-only: do not rely on expected_size gating (it can be wrong on partial prefixes).
+  // We instead require successful decode/sanity and then trim based on decoded L-field.
+  if (mode == LinkMode::T1) {
+    this->frame_format_ = "A";  // assumption (good enough for water meters you're seeing)
     auto decoded_data = decode3of6(this->data_);
-    if (!decoded_data) {
-      delete this;
-      return {};
-    }
+    if (!decoded_data || decoded_data->size() < 2) { delete this; return {}; }
     this->data_ = decoded_data.value();
 
-  } else if (this->link_mode() == LinkMode::C1) {
-    if (this->data_.size() < 2) {
-      delete this;
-      return {};
+    // Sanity based on L-field
+    const size_t want = static_cast<size_t>(this->data_[0]) + 1;
+    if (want < 12 || want > 260 || this->data_.size() < want) { delete this; return {}; }
+
+    // Keep only what we need (drop any trailing garbage)
+    if (this->data_.size() > want + 64) {  // hard safety
+      this->data_.resize(want + 64);
     }
 
+    // For format A, remove DLL CRC bytes so wmbusmeters hex input doesn't choke (F8/FE CI)
+    if (!strip_dll_crc_format_a_inplace(this->data_)) { delete this; return {}; }
+
+  } else if (mode == LinkMode::C1) {
+    if (this->data_.size() < 3) { delete this; return {}; }
     if (this->data_[1] == WMBUS_BLOCK_A_PREAMBLE) {
       this->frame_format_ = "A";
     } else if (this->data_[1] == WMBUS_BLOCK_B_PREAMBLE) {
       this->frame_format_ = "B";
     } else {
-      // Unknown / invalid C-mode preamble -> drop
       delete this;
       return {};
     }
 
-    // Remove C-mode suffix bytes
-    if (this->data_.size() < WMBUS_MODE_C_SUFIX_LEN) {
-      delete this;
-      return {};
-    }
+    // remove C-mode suffix bytes
+    if (this->data_.size() < WMBUS_MODE_C_SUFIX_LEN) { delete this; return {}; }
     this->data_.erase(this->data_.begin(), this->data_.begin() + WMBUS_MODE_C_SUFIX_LEN);
+
+    // Sanity based on L-field now at [0]
+    const size_t want = static_cast<size_t>(this->data_[0]) + 1;
+    if (want < 12 || want > 260 || this->data_.size() < want) { delete this; return {}; }
+    if (this->data_.size() > want) this->data_.resize(want);
+
+    // Only strip DLL CRC for format A; format B here is already shorter and typically without intermediate CRC bytes
+    if (this->frame_format_ == "A") {
+      // C1(A) still has DLL CRC bytes in the decoded stream -> strip them
+      if (!strip_dll_crc_format_a_inplace(this->data_)) { delete this; return {}; }
+    }
 
   } else {
     delete this;
     return {};
   }
 
-  // Strip DLL CRC for Format A so wmbusmeters can parse the hex telegram.
-  if (this->frame_format_ == "A") {
-    if (!strip_dll_crc_inplace(this->data_)) {
-      delete this;
-      return {};
-    }
-  }
-
-  ESP_LOGD(TAG, "Have data from radio (%zu bytes)", this->data_.size());
-
+  // OK -> publish
   frame.emplace(this);
   delete this;
   return frame;
 }
 
 Frame::Frame(Packet *packet)
-    : data_(std::move(packet->data_)), link_mode_(packet->link_mode_), rssi_(packet->rssi_), format_(packet->frame_format_) {}
+    : data_(std::move(packet->data_)), link_mode_(packet->link_mode_),
+      rssi_(packet->rssi_), format_(packet->frame_format_) {}
 
 std::vector<uint8_t> &Frame::data() { return this->data_; }
 LinkMode Frame::link_mode() { return this->link_mode_; }
