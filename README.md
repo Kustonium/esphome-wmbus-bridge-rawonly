@@ -1,5 +1,3 @@
----
-
 # ESPHome wM-Bus Bridge (RAW-only)
 
 Minimalny mostek **RF → MQTT**, który robi z ESP tylko „radio” do wM-Bus.
@@ -314,5 +312,3 @@ This project is based on experience and parts of the ecosystem:
 
 Licencja: **GPL-3.0-or-later** (patrz `LICENSE` i `NOTICE`).
 License: **GPL-3.0-or-later** (see `LICENSE` and `NOTICE`).
-
----
