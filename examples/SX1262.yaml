@@ -2,8 +2,8 @@ substitutions:
   devicename: esphome-web-ca0448
 
 esphome:
-  name: ${devicename}
-  friendly_name: ESPHome Heltec V4
+  name: esphome-web-ca0448
+  friendly_name: Heltec V4
   min_version: 2026.1.3
   name_add_mac_suffix: false
 
@@ -30,6 +30,9 @@ external_components:
 #    wmbus: debug
 #    SX1262: debug
 
+# Włącza gotowe sensory diagnostyczne w ESPHome
+debug:
+  
 logger:
   level: info                  # Zmień na 'warn' jeśli chcesz ciszej w logach
   logs:
@@ -50,9 +53,9 @@ wifi:
   power_save_mode: none
 
 mqtt:
-  broker: !secret mqtt_broker
-  username: !secret mqtt_user
-  password: !secret mqtt_password
+  broker: "192.168.100.82"
+  username: "z2m-mqtt"
+  password: "z2mmqtt"
   log_topic:
     topic: "${devicename}/debug"
     level: DEBUG
@@ -83,7 +86,7 @@ switch:
     id: fem_pa
     pin: GPIO46
     restore_mode: ALWAYS_OFF
-
+          
 wmbus_radio:
   radio_type: SX1262
 
@@ -95,9 +98,14 @@ wmbus_radio:
     number: GPIO14
     mode: input
 
+  diagnostic_topic: "wmbus/diag/error"
+  diagnostic_verbose: false          # startowo cisza
+  diagnostic_publish_raw: false      # startowo bez raw
+  diagnostic_summary_interval: 60s   # summary co 60s
+ 
   # SX1262 tuning
   dio2_rf_switch: true
-  rx_gain: BOOSTED
+  rx_gain: boosted
   has_tcxo: true   # jakby było gorzej/„cisza”, zmień na false i tyle
 
   on_frame:
