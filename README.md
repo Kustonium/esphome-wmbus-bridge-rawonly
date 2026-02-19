@@ -1,47 +1,56 @@
 # ESPHome wM-Bus Bridge (RAW-only)
-RF → HEX → MQTT → wmbusmeters (Home Assistant)
 
-To repo zawiera **lekki komponent do ESPHome**, którego zadanie jest proste: **odebrać telegram wM-Bus z radia i oddać go dalej**.
-Dekodowanie (zamiana na wartości/liczniki) robi **wmbusmeters po stronie Home Assistant / Linux**.
+Minimalny mostek **RF → MQTT**, który robi z ESP tylko „radio” do wM‑Bus.
 
-## Co to robi / czego nie robi
+- ESPHome odbiera telegram wM‑Bus z modułu **SX1262** lub **SX1276**.
+- Wykrywa **tryb link layer (T1/C1)**.
+- Składa ramkę i publikuje ją jako **HEX** na MQTT.
+- Dekodowanie licznika (driver, wartości, jednostki) robisz **po stronie Home Assistant / Linux** w **wmbusmeters**.
 
-✅ odbiera telegramy wM-Bus z radia (m.in. **SX1262**, **SX1276** / pliki `transceiver_*.cpp`)  
-✅ rozpoznaje tryb link-layer **T1** lub **C1** i składa ramkę do postaci „przyjaznej” do dalszej obróbki  
-✅ pozwala opublikować odebrane ramki jako **HEX** na MQTT (przez `on_frame`)  
-✅ ma **diagnostykę**: raporty + zdarzenia „dropped” na osobnym topicu MQTT
+To repo jest celowo „odchudzone”: **bez dekodowania na ESP**, bez dobierania sterowników, bez „kombajnu”.
 
-❌ nie dekoduje liczników na ESP (brak driverów xmq, brak parsowania pól)  
-❌ nie tworzy encji HA ani „kombajnu” – to ma być radio+transport
+---
 
-W praktyce: ESP działa jak **gateway RF → MQTT**, a HA robi całą „mądrą” robotę.
+## Dla kogo to jest?
+
+Dla osób, które:
+- i tak używają **wmbusmeters** (np. w Home Assistant),
+- chcą mieć **stabilne radio na ESP + MQTT**,
+- wolą debugować/dekodować na HA (mniej bólu przy aktualizacjach, mniej RAM/CPU na ESP).
+
+---
+
+## Co dostajesz
+
+✅ obsługa **SX1262** i **SX1276** (SPI)
+
+✅ wykrywanie i obsługa ramek **T1** i **C1**
+
+✅ publikacja telegramu jako **HEX** (payload do wmbusmeters)
+
+✅ diagnostyka (opcjonalnie):
+- zliczanie zdarzeń `dropped` (np. `decode_failed`, `too_short`)
+- okresowe `summary` na MQTT
+- (opcjonalnie) publikacja `raw(hex)` przy dropach
+
+❌ brak dekodowania liczników na ESP (to robi wmbusmeters)
 
 ---
 
 ## Wymagania
 
-- ESPHome (testowane u Ciebie na **2026.2.0** / ESP32‑S3)
-- Broker MQTT (np. Mosquitto w HA)
+- **ESPHome**: 2026.1.x+ (testowane na 2026.2.x)
+- **ESP32 / ESP32‑S3** (S3 działa bardzo stabilnie)
+- **MQTT broker** (np. Mosquitto w HA)
 - Radio:
   - **SX1262** (np. Heltec WiFi LoRa 32 V4.x)
-  - **SX1276** (moduły/boardy LoRa)
+  - **SX1276** (moduły/płytki LoRa z SX1276)
 
 ---
 
-## Jak to działa (w skrócie)
+## Szybki start (ESPHome)
 
-1) ESP odbiera pakiet z radia  
-2) wykrywa tryb **T1** albo **C1**  
-3) próbuje złożyć ramkę; jeśli się uda – odpala `on_frame` (ty decydujesz co dalej)  
-4) `wmbusmeters` na HA subskrybuje MQTT i dekoduje telegramy
-
-W logach widzisz np. „Have data … mode: T1 A”.【1414:3†logs_heltec_run.txt†L1-L6】【1414:8†logs_heltec_run.txt†L11-L22】
-
----
-
-## Instalacja (external_components)
-
-W konfiguracji ESPHome dodaj:
+Dodaj komponent jako `external_components`:
 
 ```yaml
 external_components:
@@ -49,37 +58,19 @@ external_components:
     components: [wmbus_radio]
     refresh: 0s
 ```
-【1414:1†48159577-a515-4eac-92f2-4291a96ece3b.md†L50-L60】
 
----
+Następnie skonfiguruj `wmbus_radio` i publikację telegramów na MQTT.
 
-## Przykładowa konfiguracja (SX1262 / Heltec V4)
+Repo ma gotowe przykłady:
+- `examples/SX1262.yaml`
+- `examples/SX1276.yaml`
 
-Poniżej sensowny „szkielet” (u Ciebie działa na takich pinach). Kluczowe rzeczy:
-- `rx_gain` (BOOSTED / POWER_SAVING) – tryb czułości SX1262
-- `dio2_rf_switch`/`has_tcxo` – zależnie od płytki
-- `diagnostic_topic` – gdzie leci diagnostyka
-- `on_frame` – tu publikujesz HEX na MQTT
+Najprostszy wzór publikacji:
 
 ```yaml
 wmbus_radio:
-  id: wmbus_radio_1
-  radio_type: SX1262
-
-  cs_pin: GPIO8
-  reset_pin: GPIO12
-  busy_pin: GPIO13
-  irq_pin:
-    number: GPIO14
-    mode: input
-
-  # diagnostyka (patrz sekcja niżej)
-  diagnostic_topic: "wmbus/diag/heltec"
-
-  # SX1262 tuning
-  dio2_rf_switch: true
-  rx_gain: BOOSTED        # albo POWER_SAVING
-  has_tcxo: true
+  radio_type: SX1262   # albo SX1276
+  # ... piny SPI/radia ...
 
   on_frame:
     then:
@@ -89,66 +80,97 @@ wmbus_radio:
             return frame->as_hex();
 ```
 
-Uwaga: w YAML możesz wpisać `rx_gain: boosted`, ale pod spodem i tak mapuje się to na enum
-`BOOSTED/POWER_SAVING` (ESPHome robi `upper=True`).【1414:16†__init__.py†L19-L24】
+### Heltec V4 (SX1262) – ważna uwaga o FEM
+
+Heltec V4 ma układ FEM (tor RF) i dla dobrego RX zwykle pomaga ustawić:
+- LNA ON
+- PA OFF
+
+W przykładzie `examples/SX1262.yaml` jest to już uwzględnione (GPIO2/GPIO7/GPIO46).
 
 ---
 
-## Diagnostyka (MQTT)
+## MQTT – jakie tematy?
 
-Komponent potrafi publikować JSON‑y na `diagnostic_topic`:
+### Telegramy do wmbusmeters
 
-### 1) Summary (co X sekund)
-Przykład:
-```json
-{"event":"summary","truncated":0,"dropped":7,"dropped_by_reason":{"too_short":0,"decode_failed":7,"dll_crc_strip_failed":0,"unknown_preamble":0,"l_field_invalid":0,"unknown_link_mode":0,"other":0}}
+Domyślnie w przykładach:
+
+- `wmbus_bridge/telegram` → **HEX telegramu** (to jest to, co ma czytać wmbusmeters)
+
+Możesz zmienić topic na własny.
+
+### Diagnostyka (opcjonalnie)
+
+W `wmbus_radio` możesz włączyć publikowanie diagnostyki:
+
+```yaml
+wmbus_radio:
+  diagnostic_topic: "wmbus/diag/heltec"
+  diagnostic_summary_interval: 60s
+  diagnostic_verbose: false
+  diagnostic_publish_raw: false
 ```
-W logach zobaczysz też info, że poszedł summary:  
-„DIAG summary published to wmbus/diag/heltec …”【1414:3†logs_heltec_run.txt†L10-L12】【1414:5†logs_heltec_run.txt†L1-L3】
 
-### 2) Dropped (gdy pakiet nie przeszedł składania/CRC)
-Przykład z Twoich logów:
-- `reason=decode_failed` w trybie **T1**【1414:8†logs_heltec_run.txt†L18-L20】
-- `reason=dll_crc_strip_failed` w trybie **C1**【1414:7†logs_heltec_run.txt†L2-L4】
+Wtedy na `diagnostic_topic` pojawiają się JSON-y:
 
-Dla `dropped` (jeśli włączysz publikację raw) wpadnie też:
-- RSSI
-- `raw_got` (ile bajtów przyszło z radia)
-- `raw` (HEX)
+- `{"event":"summary", ...}` – podsumowanie liczników (truncated/dropped itd.)
+- `{"event":"dropped", "reason":"decode_failed", ...}` – pojedynczy drop (opcjonalnie z `raw`)
 
-To jest po to, żebyś mógł:
-- ocenić jakość RF (RSSI, częstotliwość dropów),
-- zebrać przykładowe ramki do analizy,
-- odsiać „śmieci”/zakłócenia od realnych telegramów.
-
-**Ważne:** `dropped` to nie jest „telegram od licznika, który na pewno ma sens”.
-To jest „coś odebrane radiowo, ale nie przeszło weryfikacji” – często zakłócenia albo uszkodzona ramka.
+**Ważne:** `decode_failed` w dropach nie oznacza „błąd MQTT” – to zwykle:
+- zakłócenie,
+- ucięty telegram,
+- śmieci z eteru,
+- ramka nie pasująca do prostych reguł składania (np. nietypowy preamble).
 
 ---
 
-## T1 / C1 / T2 – jak jest w tym repo
+## Jak podłączyć to do wmbusmeters (HA)
 
-- W logach i w kodzie konfiguracji repo działa i raportuje **T1** oraz **C1**.【1414:3†logs_heltec_run.txt†L1-L6】【1414:7†logs_heltec_run.txt†L2-L4】
-- W dostarczonych materiałach nie widać obsługi/rozpoznawania **T2** (brak takich logów, brak odniesień w plikach konfiguracyjnych).
+Idea jest prosta:
+1) ESP publikuje telegramy **HEX** na MQTT.
+2) `wmbusmeters` subskrybuje ten topic i dekoduje liczniki.
 
-Jeśli kiedyś trafisz na realny T2 (i pokażesz surowy HEX), wtedy ma sens dopinać wykrywanie/obsługę.
-
----
-
-## FAQ
-
-### Czy to „dekoduje licznik” na ESP?
-Nie. ESP tylko odbiera i przekazuje dalej. Dekoduje **wmbusmeters** na HA.【1414:1†48159577-a515-4eac-92f2-4291a96ece3b.md†L69-L75】
-
-### Czy mogę usunąć katalog `wmbus_common`?
-Jeśli ESPHome nie kompiluje go (bo nie jest już podpinany przez loader/manifest), to samo istnienie katalogu w repo nie szkodzi.
-Realnie liczy się to, co jest importowane przez komponent (`__init__.py` + pliki źródłowe, które loader bierze).【1414:16†__init__.py†L3-L7】【1414:16†__init__.py†L9-L15】
+Jak to skonfigurować dokładnie zależy od Twojej instalacji wmbusmeters (addon/standalone) i sposobu wczytywania z MQTT.
+W praktyce interesuje Cię tylko, żeby wmbusmeters „dostał” payload **HEX** z topicu `wmbus_bridge/telegram`.
 
 ---
 
-## Atrybucja i licencja
+## T1 / C1 / T2 – co z T2?
 
-- inspiracja/baza: `SzczepanLeon/esphome-components`
-- dekoder po stronie HA: `wmbusmeters/wmbusmeters`
+Ten komponent skupia się na **T1 i C1** (najczęstsze w praktyce).
 
-GPL-3.0-or-later – patrz `LICENSE` i `NOTICE`.
+Tryb „T2” bywa spotykany rzadziej i zależy od regionu/licznika. Jeśli chcesz sprawdzić, czy masz T2 w eterze:
+- włącz na chwilę logi `wmbus` na `debug` i obserwuj `mode: ...` w logu,
+- albo korzystaj z diagnostyki `dropped`/`summary`.
+
+---
+
+## Najczęstsze problemy
+
+### 1) ESPHome nie widzi komponentu
+Upewnij się, że:
+- repo ma katalog `components/` w root (to repo ma),
+- w `external_components` wskazujesz `components: [wmbus_radio]`.
+
+### 2) Widzisz dużo „DROPPED decode_failed”
+To normalne w eterze, szczególnie w blokach/miastach.
+Jeśli chcesz diagnozować:
+- włącz `diagnostic_publish_raw: true`,
+- podeślij `raw(hex)` do analizy w `wmbusmeters.org/analyze/…`.
+
+### 3) Heltec V4 – słaby odbiór
+Sprawdź:
+- piny SPI i radia (zgodne z przykładem),
+- ustawienia FEM (LNA/PA),
+- `has_tcxo` (czasem `false` działa lepiej, zależnie od płytki).
+
+---
+
+## Atrybucja
+
+Projekt bazuje na doświadczeniach i fragmentach ekosystemu:
+- SzczepanLeon/esphome-components
+- wmbusmeters/wmbusmeters
+
+Licencja: **GPL-3.0-or-later** (patrz `LICENSE` i `NOTICE`).
