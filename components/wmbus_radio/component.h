@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <string>
 
 #include "freertos/FreeRTOS.h"
 
@@ -20,6 +21,7 @@ namespace wmbus_radio {
 class Radio : public Component {
 public:
   void set_radio(RadioTransceiver *radio) { this->radio = radio; };
+  void set_diag_topic(const std::string &topic) { this->diag_topic_ = topic; }
 
   void setup() override;
   void loop() override;
@@ -36,6 +38,8 @@ protected:
   QueueHandle_t packet_queue_{nullptr};
 
   std::vector<std::function<void(Frame *)>> handlers_;
+
+  std::string diag_topic_{"wmbus/diag"};
 };
 } // namespace wmbus_radio
 } // namespace esphome

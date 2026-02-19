@@ -34,6 +34,17 @@ public:
 
   std::optional<Frame> convert_to_frame();
 
+  // Basic getters for diagnostics
+  LinkMode get_link_mode() { return this->link_mode(); }
+  int8_t get_rssi() const { return this->rssi_; }
+
+  // Diagnostics (populated when convert_to_frame() rejects a packet)
+  bool is_truncated() const { return this->truncated_; }
+  size_t want_len() const { return this->want_len_; }
+  size_t got_len() const { return this->got_len_; }
+  size_t raw_got_len() const { return this->raw_got_len_; }
+  const std::string &drop_reason() const { return this->drop_reason_; }
+
 protected:
   std::vector<uint8_t> data_;
 
@@ -47,7 +58,12 @@ protected:
 
   std::string frame_format_;
 
-  bool t2_hint_ = false;
+  // Diagnostics
+  bool truncated_{false};
+  size_t want_len_{0};
+  size_t got_len_{0};
+  size_t raw_got_len_{0};
+  std::string drop_reason_{};
 };
 
 struct Frame {
@@ -58,7 +74,6 @@ public:
   LinkMode link_mode();
   int8_t rssi();
   std::string format();
-  bool t2_hint();
 
   std::vector<uint8_t> as_raw();
   std::string as_hex();
@@ -72,7 +87,6 @@ protected:
   LinkMode link_mode_;
   int8_t rssi_;
   std::string format_;
-  bool t2_hint_ = false;
   uint8_t handlers_count_ = 0;
 };
 

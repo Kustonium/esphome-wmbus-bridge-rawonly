@@ -16,7 +16,7 @@ from pathlib import Path
 
 CODEOWNERS = ["@SzczepanLeon", "@kubasaw"]
 
-DEPENDENCIES = ["esp32", "spi"]
+DEPENDENCIES = ["esp32", "spi", "mqtt"]
 
 # Keep this component lightweight: decoding is meant to happen outside ESP.
 # Do not auto-load the full wmbus_common stack.
@@ -37,6 +37,9 @@ CONF_HAS_TCXO = "has_tcxo"
 
 # RX gain option (datasheet: boosted / power_saving)
 CONF_RX_GAIN = "rx_gain"
+
+# Diagnostics
+CONF_DIAG_TOPIC = "diagnostic_topic"
 
 # Heltec V4 FEM pins (SX1262 external front-end)
 CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
@@ -86,6 +89,9 @@ CONFIG_SCHEMA = (
                     cv.Optional(CONF_MARK_AS_HANDLED, default=False): cv.boolean,
                 }
             ),
+
+            # Publish diagnostics (e.g. truncated frames) to MQTT
+            cv.Optional(CONF_DIAG_TOPIC, default="wmbus/diag"): cv.string,
         }
     )
     .extend(spi.spi_device_schema())
@@ -143,6 +149,8 @@ async def to_code(config):
     cg.add(cg.LineComment("WMBus Component"))
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_radio(radio_var))
+
+    cg.add(var.set_diag_topic(config.get(CONF_DIAG_TOPIC, "wmbus/diag")))
 
     await cg.register_component(var, config)
 

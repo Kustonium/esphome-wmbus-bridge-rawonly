@@ -3,6 +3,11 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include "esphome/core/log.h"
+
+// Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
+#include "esphome/components/mqtt/mqtt_client.h"
+
 #define WMBUS_PREAMBLE_SIZE (3)
 
 #define ASSERT(expr, expected, before_exit)                                    \
@@ -39,18 +44,38 @@ void Radio::loop() {
     return;
 
   auto frame = p->convert_to_frame();
-  if (!frame)
-    return;
+  if (!frame) {
+    // Diagnostics: truncated frame detection
+    if (p->is_truncated()) {
+      const char *mode = link_mode_name(p->get_link_mode());
 
-  const char *hint = "";
-  if (frame->t2_hint()) {
-    hint = (frame->link_mode() == LinkMode::C1) ? " [C2?]" : " [T2?]";
+      // Build a small JSON payload (no dynamic allocation explosions)
+      char payload[256];
+      snprintf(payload, sizeof(payload),
+               "{\"event\":\"truncated\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
+               mode, (int) p->get_rssi(), (unsigned) p->want_len(),
+               (unsigned) p->got_len(), (unsigned) p->raw_got_len());
+
+      ESP_LOGW(TAG,
+               "TRUNCATED frame: mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
+               mode, (unsigned) p->want_len(), (unsigned) p->got_len(),
+               (unsigned) p->raw_got_len(), (int) p->get_rssi());
+
+      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+      }
+    } else if (!p->drop_reason().empty()) {
+      ESP_LOGV(TAG, "Dropped packet (%s)", p->drop_reason().c_str());
+    }
+
+    delete p;
+    return;
   }
 
-  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s%s]",
+  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
            frame->data().size(), frame->rssi(),
            link_mode_name(frame->link_mode()),
-           frame->format().c_str(), hint);
+           frame->format().c_str());
 
   for (auto &handler : this->handlers_)
     handler(&frame.value());
@@ -59,6 +84,8 @@ void Radio::loop() {
     ESP_LOGI(TAG, "Telegram handled by %d handlers", frame->handlers_count());
   else
     ESP_LOGD(TAG, "Telegram not handled by any handler");
+
+  delete p;
 }
 
 void Radio::wakeup_receiver_task_from_isr(TaskHandle_t *arg) {
