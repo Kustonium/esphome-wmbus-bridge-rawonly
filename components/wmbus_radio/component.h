@@ -27,6 +27,14 @@ public:
   void set_radio(RadioTransceiver *radio) { this->radio = radio; };
   void set_diag_topic(const std::string &topic) { this->diag_topic_ = topic; }
 
+  // Diagnostics runtime controls (can be toggled from YAML via template switches)
+  void set_diag_verbose(bool enabled) { this->diag_verbose_ = enabled; }
+  void set_diag_publish_raw(bool enabled) { this->diag_publish_raw_ = enabled; }
+  void set_diag_summary_interval_ms(uint32_t interval_ms) {
+    // Keep it sane: minimum 5s
+    this->diag_summary_interval_ms_ = interval_ms < 5000 ? 5000 : interval_ms;
+  }
+
   void setup() override;
   void loop() override;
   void receive_frame();
@@ -44,8 +52,13 @@ protected:
   std::vector<std::function<void(Frame *)>> handlers_;
 
 
-  // Diagnostics counters (published every 60s if diagnostic_topic is set)
-  static constexpr uint32_t DIAG_SUMMARY_INTERVAL_MS = 60000;
+  // Diagnostics counters (published periodically if diagnostic_topic is set)
+  uint32_t diag_summary_interval_ms_{60000};
+
+  // When false, only the periodic summary is published (still counts internally)
+  bool diag_verbose_{true};
+  // When false, per-packet payloads/logs omit the raw hex (much less spam)
+  bool diag_publish_raw_{true};
 
   enum DropBucket : uint8_t {
     DB_TOO_SHORT = 0,

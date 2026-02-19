@@ -40,6 +40,9 @@ CONF_RX_GAIN = "rx_gain"
 
 # Diagnostics
 CONF_DIAG_TOPIC = "diagnostic_topic"
+CONF_DIAG_VERBOSE = "diagnostic_verbose"
+CONF_DIAG_PUBLISH_RAW = "diagnostic_publish_raw"
+CONF_DIAG_SUMMARY_INTERVAL = "diagnostic_summary_interval"
 
 # Heltec V4 FEM pins (SX1262 external front-end)
 CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
@@ -92,6 +95,11 @@ CONFIG_SCHEMA = (
 
             # Publish diagnostics (e.g. truncated frames) to MQTT
             cv.Optional(CONF_DIAG_TOPIC, default="wmbus/diag"): cv.string,
+
+            # Diagnostics verbosity (runtime can also be changed via template switches)
+            cv.Optional(CONF_DIAG_VERBOSE, default=True): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_RAW, default=True): cv.boolean,
+            cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
         }
     )
     .extend(spi.spi_device_schema())
@@ -151,6 +159,10 @@ async def to_code(config):
     cg.add(var.set_radio(radio_var))
 
     cg.add(var.set_diag_topic(config.get(CONF_DIAG_TOPIC, "wmbus/diag")))
+
+    cg.add(var.set_diag_verbose(config.get(CONF_DIAG_VERBOSE, True)))
+    cg.add(var.set_diag_publish_raw(config.get(CONF_DIAG_PUBLISH_RAW, True)))
+    cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
 
     await cg.register_component(var, config)
 

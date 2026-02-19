@@ -46,7 +46,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
     return;
   }
   uint32_t elapsed = now_ms - this->last_diag_summary_ms_;
-  if (elapsed < DIAG_SUMMARY_INTERVAL_MS) return;
+  if (elapsed < this->diag_summary_interval_ms_) return;
   this->last_diag_summary_ms_ = now_ms;
 
   // Publish summary only if MQTT is available and connected
@@ -82,6 +82,11 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   mqtt->publish(this->diag_topic_, payload);
   ESP_LOGI(TAG, "DIAG summary published to %s (truncated=%u dropped=%u)",
            this->diag_topic_.c_str(), (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_);
+
+  // Report per-window stats (so it is easy to spot spikes)
+  this->diag_truncated_ = 0;
+  this->diag_dropped_ = 0;
+  this->diag_dropped_by_bucket_.fill(0);
 }
 
 void Radio::setup() {
@@ -104,49 +109,74 @@ void Radio::loop() {
 
   auto frame = p->convert_to_frame();
   if (!frame) {
-    // Diagnostics: truncated frame detection
+    // ---- Diagnostics accounting (always count, even if verbose is disabled)
+    const char *mode = link_mode_name(p->get_link_mode());
     if (p->is_truncated()) {
       this->diag_truncated_++;
-      const char *mode = link_mode_name(p->get_link_mode());
 
-      // Build a small JSON payload (no dynamic allocation explosions)
-      char payload[900];
-      snprintf(payload, sizeof(payload),
-               "{\"event\":\"truncated\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
-               mode, (int) p->get_rssi(), (unsigned) p->want_len(),
-               (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
-               p->raw_hex().c_str());
+      if (this->diag_verbose_) {
+        // Build payload (optionally with raw)
+        char payload[900];
+        if (this->diag_publish_raw_) {
+          snprintf(payload, sizeof(payload),
+                   "{\"event\":\"truncated\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
+                   mode, (int) p->get_rssi(), (unsigned) p->want_len(),
+                   (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
+                   p->raw_hex().c_str());
+        } else {
+          snprintf(payload, sizeof(payload),
+                   "{\"event\":\"truncated\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
+                   mode, (int) p->get_rssi(), (unsigned) p->want_len(),
+                   (unsigned) p->got_len(), (unsigned) p->raw_got_len());
+        }
 
-      ESP_LOGW(TAG,
-               "TRUNCATED frame: mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
-               mode, (unsigned) p->want_len(), (unsigned) p->got_len(),
-               (unsigned) p->raw_got_len(), (int) p->get_rssi());
+        ESP_LOGW(TAG,
+                 "TRUNCATED frame: mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
+                 mode, (unsigned) p->want_len(), (unsigned) p->got_len(),
+                 (unsigned) p->raw_got_len(), (int) p->get_rssi());
 
-      ESP_LOGW(TAG, "TRUNCATED raw(hex)=%s", p->raw_hex().c_str());
+        if (this->diag_publish_raw_) {
+          ESP_LOGW(TAG, "TRUNCATED raw(hex)=%s", p->raw_hex().c_str());
+        }
 
-      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+        if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+          mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+        }
       }
     } else if (!p->drop_reason().empty()) {
-      const char *mode = link_mode_name(p->get_link_mode());
+      this->diag_dropped_++;
+      auto bucket = bucket_for_reason_(p->drop_reason());
+      this->diag_dropped_by_bucket_[bucket]++;
 
-      char payload[900];
-      snprintf(payload, sizeof(payload),
-               "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
-               p->drop_reason().c_str(), mode, (int) p->get_rssi(),
-               (unsigned) p->want_len(), (unsigned) p->got_len(),
-               (unsigned) p->raw_got_len(), p->raw_hex().c_str());
+      if (this->diag_verbose_) {
+        char payload[900];
+        if (this->diag_publish_raw_) {
+          snprintf(payload, sizeof(payload),
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
+                   p->drop_reason().c_str(), mode, (int) p->get_rssi(),
+                   (unsigned) p->want_len(), (unsigned) p->got_len(),
+                   (unsigned) p->raw_got_len(), p->raw_hex().c_str());
+        } else {
+          snprintf(payload, sizeof(payload),
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
+                   p->drop_reason().c_str(), mode, (int) p->get_rssi(),
+                   (unsigned) p->want_len(), (unsigned) p->got_len(),
+                   (unsigned) p->raw_got_len());
+        }
 
-      ESP_LOGW(TAG,
-               "DROPPED packet: reason=%s mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
-               p->drop_reason().c_str(), mode, (unsigned) p->want_len(),
-               (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
-               (int) p->get_rssi());
+        ESP_LOGW(TAG,
+                 "DROPPED packet: reason=%s mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
+                 p->drop_reason().c_str(), mode, (unsigned) p->want_len(),
+                 (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
+                 (int) p->get_rssi());
 
-      ESP_LOGW(TAG, "DROPPED raw(hex)=%s", p->raw_hex().c_str());
+        if (this->diag_publish_raw_) {
+          ESP_LOGW(TAG, "DROPPED raw(hex)=%s", p->raw_hex().c_str());
+        }
 
-      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+        if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+          mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+        }
       }
     }
 
