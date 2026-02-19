@@ -106,7 +106,7 @@ W `wmbus_radio` możesz włączyć publikowanie diagnostyki:
 
 ```yaml
 wmbus_radio:
-  diagnostic_topic: "wmbus/diag/heltec"
+  diagnostic_topic: "wmbus/diag/error"
   diagnostic_summary_interval: 60s
   diagnostic_verbose: false
   diagnostic_publish_raw: false
