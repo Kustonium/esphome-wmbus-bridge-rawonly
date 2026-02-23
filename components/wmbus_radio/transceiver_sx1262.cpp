@@ -262,13 +262,15 @@ void SX1262::setup() {
 }
 
 void SX1262::restart_rx() {
-  // stały sync
-  const uint8_t sync2 = 0x3D;
+  // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
+  // by changing the 2nd sync byte. This lets us catch both variants
+  // without user-side configuration.
+  const uint8_t sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
+  this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
   this->set_sync_word_(sync2);
 
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
-
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
 
