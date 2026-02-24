@@ -8,7 +8,7 @@
 
 #include "decode3of6.h"
 // Lightweight DLL CRC validation/removal helpers (EN13757 CRC16)
-#include "../wmbus_bridge_common/dll_crc.h"
+#include "dll_crc.h"
 
 #define WMBUS_PREAMBLE_SIZE (3)
 #define WMBUS_MODE_C_SUFIX_LEN (2)
