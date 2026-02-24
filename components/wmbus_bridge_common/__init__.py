@@ -1,1 +1,0 @@
-CODEOWNERS = ["@your_github"]
