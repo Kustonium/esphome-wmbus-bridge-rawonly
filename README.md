@@ -281,6 +281,26 @@ Optionally (when `diagnostic_publish_raw: true`) you’ll also get `raw(hex)` fo
 
 ---
 
+---
+
+## Dedykowany dodatek do Home Assistant (decoder)
+
+## Dedicated Home Assistant add-on (decoder)
+
+**PL:** Ten komponent jest zaprojektowany do pracy z dedykowanym dodatkiem HA:
+**`Kustonium/homeassistant-wmbus-mqtt-bridge`**.
+
+Dodatek subskrybuje surowe telegramy **HEX** z MQTT (np. `wmbus_bridge/telegram`), podaje je do `wmbusmeters` przez `stdin:hex`, a wynik publikuje ponownie na MQTT (JSON) + wspiera HA Discovery.
+
+**EN:** This component is designed to work with the dedicated HA add-on:
+**`Kustonium/homeassistant-wmbus-mqtt-bridge`**.
+
+The add-on subscribes to raw **HEX** telegrams from MQTT (e.g. `wmbus_bridge/telegram`), feeds them into `wmbusmeters` via `stdin:hex`, then republishes decoded JSON to MQTT and supports HA Discovery.
+
+Repo dodatku / Add-on repo:
+`https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge`
+
+
 ## Jak podłączyć to do wmbusmeters (HA)
 
 ## How to connect this to wmbusmeters (HA)
