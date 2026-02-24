@@ -7,6 +7,8 @@
 #include "esphome/core/helpers.h"
 
 #include "decode3of6.h"
+// Lightweight DLL CRC validation/removal helpers (EN13757 CRC16)
+#include "../wmbus_bridge_common/dll_crc.h"
 
 #define WMBUS_PREAMBLE_SIZE (3)
 #define WMBUS_MODE_C_SUFIX_LEN (2)
@@ -102,38 +104,21 @@ uint8_t *Packet::append_space(size_t len) {
   return this->data_.data() + old;
 }
 
-// Strip DLL CRC bytes from a decoded *Format A* frame in-place.
-// Input d must start with L-field at d[0] and still include DLL CRC bytes.
-// Output will be exactly (L+1) bytes if successful.
-static bool strip_dll_crc_format_a_inplace(std::vector<uint8_t> &d) {
-  if (d.empty()) return false;
-  const size_t want = static_cast<size_t>(d[0]) + 1;  // DLL without CRC bytes
-  if (want < 2) return false;
-  if (d.size() < want) return false;                  // must at least contain header+payload sans CRC
+// Helpers for DLL size calculation
+static inline size_t blocks_for_l_(uint8_t l_field) {
+  // EN13757-3: number of blocks depends on L-field
+  return (l_field < 26) ? 2 : (size_t) ((l_field - 26) / 16 + 3);
+}
 
-  std::vector<uint8_t> out;
-  out.reserve(want);
+static inline size_t total_len_format_a_with_crc_(uint8_t l_field) {
+  // L counts bytes excluding itself and excluding CRC bytes.
+  // Total bytes *including* CRC bytes = (L+1) + 2*nrBlocks
+  return (size_t) l_field + 1 + 2 * blocks_for_l_(l_field);
+}
 
-  size_t pos = 0;
-  int block = 0;
-
-  while (out.size() < want && pos < d.size()) {
-    const size_t data_len = (block == 0) ? 10 : 16;   // bytes per block excluding CRC
-    const size_t need = want - out.size();
-    const size_t take = std::min(data_len, need);
-
-    if (pos + take > d.size()) return false;
-    out.insert(out.end(), d.begin() + pos, d.begin() + pos + take);
-    pos += data_len;
-
-    // skip 2 CRC bytes after each block (if present)
-    if (pos + 2 <= d.size()) pos += 2;
-    block++;
-  }
-
-  if (out.size() != want) return false;
-  d = std::move(out);
-  return true;
+static inline size_t total_len_format_b_with_crc_(uint8_t l_field) {
+  // In format B, L includes CRC bytes (already part of L bytes).
+  return (size_t) l_field + 1;
 }
 
 std::optional<Frame> Packet::convert_to_frame() {
@@ -173,27 +158,26 @@ std::optional<Frame> Packet::convert_to_frame() {
     this->data_ = decoded_data.value();
 
     // Sanity based on L-field
-    const size_t want = static_cast<size_t>(this->data_[0]) + 1;
-    this->want_len_ = want;
+    const uint8_t l = this->data_[0];
+    const size_t want = (size_t) l + 1;
+    const size_t need_total = total_len_format_a_with_crc_(l);
+    this->want_len_ = need_total;
     this->got_len_ = this->data_.size();
     if (want < 12 || want > 260) {
       this->drop_reason_ = "l_field_invalid";
       return {};
     }
-    if (this->data_.size() < want) {
+    if (this->data_.size() < need_total) {
       this->truncated_ = true;
       this->drop_reason_ = "truncated";
       return {};
     }
 
     // Keep only what we need (drop any trailing garbage)
-    if (this->data_.size() > want + 64) {  // hard safety
-      this->data_.resize(want + 64);
-    }
+    if (this->data_.size() > need_total) this->data_.resize(need_total);
 
-    // For format A, remove DLL CRC bytes so wmbusmeters hex input doesn't choke (F8/FE CI)
-    if (!strip_dll_crc_format_a_inplace(this->data_)) {
-      // If we had enough bytes per L-field but stripping failed, treat as malformed.
+    // Validate and strip DLL CRC bytes (Format A)
+    if (!wmbus_common::trim_dll_crc_format_a(this->data_)) {
       this->drop_reason_ = "dll_crc_strip_failed";
       return {};
     }
@@ -220,24 +204,32 @@ std::optional<Frame> Packet::convert_to_frame() {
     this->data_.erase(this->data_.begin(), this->data_.begin() + WMBUS_MODE_C_SUFIX_LEN);
 
     // Sanity based on L-field now at [0]
-    const size_t want = static_cast<size_t>(this->data_[0]) + 1;
-    this->want_len_ = want;
+    const uint8_t l = this->data_[0];
+    const size_t want = (size_t) l + 1;
+    const size_t need_total = (this->frame_format_ == "A")
+                                 ? total_len_format_a_with_crc_(l)
+                                 : total_len_format_b_with_crc_(l);
+    this->want_len_ = need_total;
     this->got_len_ = this->data_.size();
     if (want < 12 || want > 260) {
       this->drop_reason_ = "l_field_invalid";
       return {};
     }
-    if (this->data_.size() < want) {
+    if (this->data_.size() < need_total) {
       this->truncated_ = true;
       this->drop_reason_ = "truncated";
       return {};
     }
-    if (this->data_.size() > want) this->data_.resize(want);
+    if (this->data_.size() > need_total) this->data_.resize(need_total);
 
-    // Only strip DLL CRC for format A; format B here is already shorter and typically without intermediate CRC bytes
+    // Validate and strip DLL CRC bytes for both formats
     if (this->frame_format_ == "A") {
-      // C1(A) still has DLL CRC bytes in the decoded stream -> strip them
-      if (!strip_dll_crc_format_a_inplace(this->data_)) {
+      if (!wmbus_common::trim_dll_crc_format_a(this->data_)) {
+        this->drop_reason_ = "dll_crc_strip_failed";
+        return {};
+      }
+    } else {  // "B"
+      if (!wmbus_common::trim_dll_crc_format_b(this->data_)) {
         this->drop_reason_ = "dll_crc_strip_failed";
         return {};
       }
