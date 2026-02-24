@@ -6,6 +6,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
+#include <cstring>
+
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
 
@@ -16,19 +18,6 @@
     auto result = (expr);                                                      \
     if (!!result != expected) {                                                \
       ESP_LOGE(TAG, "Assertion failed: %s -> %d", #expr, result);              \
-
-
-// Minimal ELL bidirectional flag detector (ELL CC bit 0x80).
-// IMPORTANT: This is NOT a PHY-mode (T2/C2) detector. It is only a hint from the ELL header.
-static bool ell_bidir_flag(const std::vector<uint8_t> &dll_frame) {
-  // DLL header: L(1) C(1) M(2) A(6) CI(1) ... => CI at offset 10
-  if (dll_frame.size() < 12) return false;
-  const uint8_t ci = dll_frame[10];
-  // Common ELL CI values in wM-Bus/OMS: 0x8D, 0x8E, 0x8F
-  if (ci != 0x8D && ci != 0x8E && ci != 0x8F) return false;
-  const uint8_t cc = dll_frame[11];
-  return (cc & 0x80) != 0;
-}
       before_exit;                                                             \
       return;                                                                  \
     }                                                                          \
@@ -111,17 +100,6 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       this->diag_dropped_by_bucket_[DB_OTHER];
   const uint32_t reasons_sum_mismatch = (reasons_sum != this->diag_dropped_) ? 1U : 0U;
 
-const uint32_t ell_bidir_count = this->diag_ell_bidir_count_;
-const uint32_t t1_ell_bidir_count = this->diag_mode_ell_bidir_count_[T1];
-const uint32_t c1_ell_bidir_count = this->diag_mode_ell_bidir_count_[C1];
-const uint32_t ell_bidir_seen = (ell_bidir_count > 0) ? 1U : 0U;
-const char *note_en = "";
-const char *note_pl = "";
-if (ell_bidir_seen) {
-  note_en = "ELL bidirectional flag seen (FYI only; does not imply T2/C2 PHY mode).";
-  note_pl = "Wykryto flagę ELL 'bidirectional' (informacyjnie; nie oznacza trybu PHY T2/C2).";
-}
-
   // Human-friendly hint based on diagnostics (kept short; intended for quick triage).
   const char *hint_code = "OK";
   const char *hint_en = "looks good";
@@ -142,7 +120,17 @@ if (ell_bidir_seen) {
         hint_en = "C1 frames fail DLL CRC despite decent RSSI; check interference/RX settings";
         hint_pl = "C1: CRC DLL nie przechodzi mimo niezłego RSSI; sprawdź zakłócenia/ustawienia RX";
       }
-    } else if (drop_pct >= 60 && avg_drop_rssi <= -92) {
+    // Overload / near-field multipath suspicion: drops/CRC failures despite strong RSSI.
+    // Common when a meter is very close to the antenna (front-end overload) or in reflective environments (pipes/metal).
+    } else if (c1_total > 0 && c1_crc > 0 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+      hint_code = "C1_OVERLOAD_OR_MULTIPATH";
+      hint_en = "C1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move antenna 0.5-2m, change polarization, or attenuate.";
+      hint_pl = "C1: CRC pada mimo dobrego RSSI; możliwy przester odbiornika lub wielodrogowość. Odsuń antenę 0,5-2m, zmień polaryzację lub stłum sygnał.";
+    } else if (t1_total > 0 && t1_crc > 0 && t1_avg_ok_rssi >= -65 && t1_avg_drop_rssi >= -80) {
+      hint_code = "T1_OVERLOAD_OR_MULTIPATH";
+      hint_en = "T1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move/rotate antenna or attenuate.";
+      hint_pl = "T1: CRC pada mimo dobrego RSSI; możliwy przester lub wielodrogowość. Przestaw/obróć antenę lub stłum sygnał.";
+else if (drop_pct >= 60 && avg_drop_rssi <= -92) {
       hint_code = "WEAK_SIGNAL";
       hint_en = "many drops at very low RSSI; improve antenna/placement";
       hint_pl = "dużo dropów przy bardzo niskim RSSI; popraw antenę/pozycję";
@@ -173,11 +161,6 @@ if (ell_bidir_seen) {
            "\"trunc_pct\":%u,"
            "\"avg_ok_rssi\":%d,"
            "\"avg_drop_rssi\":%d,"
-           "\\"ell_bidir_seen\\":%u,
-"\\"ell_bidir_count\\":%u,
-"\\"t1_ell_bidir_count\\":%u,
-"\\"c1_ell_bidir_count\\":%u,
-
            "\"t1\":{"
              "\"total\":%u,\"ok\":%u,\"dropped\":%u,\"per_pct\":%u,"
              "\"crc_failed\":%u,\"crc_pct\":%u,\"avg_ok_rssi\":%d,\"avg_drop_rssi\":%d,"
@@ -199,7 +182,7 @@ if (ell_bidir_seen) {
            "\"reasons_sum\":%u,"
            "\"reasons_sum_mismatch\":%u,"
            "\"hint_code\":\"%s\","
-           "\\"hint_en\\":\\"%s\\",\\"hint_pl\\":\\"%s\\",\\"note_en\\":\\"%s\\",\\"note_pl\\":\\"%s\\""
+           "\"hint_en\":\"%s\",\"hint_pl\":\"%s\""
            "}",
            (unsigned) total,
            (unsigned) this->diag_ok_,
@@ -211,10 +194,6 @@ if (ell_bidir_seen) {
            (unsigned) trunc_pct,
            (int) avg_ok_rssi,
            (int) avg_drop_rssi,
-(unsigned) ell_bidir_seen,
-(unsigned) ell_bidir_count,
-(unsigned) t1_ell_bidir_count,
-(unsigned) c1_ell_bidir_count,
            (unsigned) t1_total,
            (unsigned) t1_ok,
            (unsigned) t1_drop,
@@ -245,16 +224,22 @@ if (ell_bidir_seen) {
            (unsigned) reasons_sum_mismatch,
            hint_code,
            hint_en,
-           hint_pl,
-           note_en,
-           note_pl);
+           hint_pl);
 
   mqtt->publish(this->diag_topic_, payload);
   ESP_LOGI(TAG, "DIAG summary published to %s (total=%u ok=%u truncated=%u dropped=%u crc_failed=%u)",
            this->diag_topic_.c_str(), (unsigned) total, (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
 
-  // Report per-window stats (so it is easy to spot spikes)
+  
+
+// Print hint to logs for quick triage (same content as in MQTT diag summary).
+if (std::strcmp(hint_code, "OK") == 0) {
+  ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, hint_pl);
+} else {
+  ESP_LOGW(TAG, "DIAG hint: %s | %s", hint_code, hint_pl);
+}
+// Report per-window stats (so it is easy to spot spikes)
   this->diag_total_ = 0;
   this->diag_ok_ = 0;
   this->diag_truncated_ = 0;
@@ -274,8 +259,6 @@ if (ell_bidir_seen) {
   this->diag_mode_rssi_drop_n_.fill(0);
   this->diag_t1_symbols_total_ = 0;
   this->diag_t1_symbols_invalid_ = 0;
-  this->diag_ell_bidir_count_ = 0;
-  this->diag_mode_ell_bidir_count_.fill(0);
 }
 
 void Radio::setup() {
@@ -404,15 +387,6 @@ void Radio::loop() {
     this->diag_mode_rssi_ok_sum_[mode_idx] += (int32_t) frame->rssi();
     this->diag_mode_rssi_ok_n_[mode_idx]++;
   }
-
-
-// ELL bidirectional flag hint (FYI only; not a PHY-mode detector)
-if (ell_bidir_flag(frame->data())) {
-  this->diag_ell_bidir_count_++;
-  if (mode_idx < this->diag_mode_ell_bidir_count_.size()) {
-    this->diag_mode_ell_bidir_count_[mode_idx]++;
-  }
-}
 
   ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
            frame->data().size(), frame->rssi(),
