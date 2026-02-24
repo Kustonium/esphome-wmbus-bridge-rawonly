@@ -130,7 +130,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       hint_code = "T1_OVERLOAD_OR_MULTIPATH";
       hint_en = "T1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move/rotate antenna or attenuate.";
       hint_pl = "T1: CRC pada mimo dobrego RSSI; możliwy przester lub wielodrogowość. Przestaw/obróć antenę lub stłum sygnał.";
-else if (drop_pct >= 60 && avg_drop_rssi <= -92) {
+    } else if (drop_pct >= 60 && avg_drop_rssi <= -92) {
       hint_code = "WEAK_SIGNAL";
       hint_en = "many drops at very low RSSI; improve antenna/placement";
       hint_pl = "dużo dropów przy bardzo niskim RSSI; popraw antenę/pozycję";
