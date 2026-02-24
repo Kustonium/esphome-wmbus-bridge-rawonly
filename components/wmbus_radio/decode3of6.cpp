@@ -9,7 +9,7 @@ namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "3of6";
 std::optional<std::vector<uint8_t>>
-decode3of6(std::vector<uint8_t> &coded_data) {
+decode3of6(std::vector<uint8_t> &coded_data, Decode3of6Stats *stats) {
 
   static const std::map<uint8_t, uint8_t> lookupTable = {
       {0b010110, 0x0}, {0b001101, 0x1}, {0b001110, 0x2}, {0b001011, 0x3},
@@ -26,6 +26,12 @@ decode3of6(std::vector<uint8_t> &coded_data) {
   // against reading past the end of the buffer.
   auto segments = coded_data.size() * 8 / 6;
   auto data = coded_data.data();
+
+  uint16_t invalid = 0;
+  if (stats != nullptr) {
+    stats->symbols_total = (uint16_t) segments;
+    stats->symbols_invalid = 0;
+  }
 
   for (size_t i = 0; i < segments; i++) {
     auto bit_idx = i * 6;
@@ -44,14 +50,29 @@ decode3of6(std::vector<uint8_t> &coded_data) {
 
     auto it = lookupTable.find(code);
     if (it == lookupTable.end()) {
-      // ESP_LOGW(TAG, "Invalid code: 0x%02X", code);
-      return {};
+      // Invalid 6-bit symbol.
+      invalid++;
+      // Keep alignment so we can continue counting and preserve nibble pairing.
+      // We still return nullopt at the end if any invalid symbols were seen.
+      if (i % 2 == 0)
+        decodedBytes.push_back(0x00);
+      else
+        decodedBytes.back() |= 0x00;
+      continue;
     }
 
     if (i % 2 == 0)
       decodedBytes.push_back(it->second << 4);
     else
       decodedBytes.back() |= it->second;
+  }
+
+  if (stats != nullptr) {
+    stats->symbols_invalid = invalid;
+  }
+
+  if (invalid > 0) {
+    return {};
   }
 
   // ESP_LOGV(TAG, "Successfully decoded %zu bytes", decodedBytes.size());

@@ -62,7 +62,7 @@ uint8_t Packet::l_field() {
       // Decode a minimal prefix to obtain decoded[0] (L-field)
       const size_t n = std::min<size_t>(this->data_.size(), 18);  // safer than 3
       std::vector<uint8_t> tmp(this->data_.begin(), this->data_.begin() + n);
-      auto decoded = decode3of6(tmp);
+      auto decoded = decode3of6(tmp, nullptr);
       if (decoded && !decoded->empty()) return (*decoded)[0];
       break;
     }
@@ -130,6 +130,8 @@ std::optional<Frame> Packet::convert_to_frame() {
   this->got_len_ = 0;
   this->raw_got_len_ = this->data_.size();
   this->drop_reason_.clear();
+  this->t1_symbols_total_ = 0;
+  this->t1_symbols_invalid_ = 0;
 
   // Capture raw bytes (hex) early for diagnostics. Keep it bounded.
   // 256 bytes -> 512 hex chars, enough for typical dropped packets.
@@ -150,7 +152,10 @@ std::optional<Frame> Packet::convert_to_frame() {
   // We instead require successful decode/sanity and then trim based on decoded L-field.
   if (mode == LinkMode::T1) {
     this->frame_format_ = "A";  // assumption (good enough for water meters you're seeing)
-    auto decoded_data = decode3of6(this->data_);
+    Decode3of6Stats st;
+    auto decoded_data = decode3of6(this->data_, &st);
+    this->t1_symbols_total_ = st.symbols_total;
+    this->t1_symbols_invalid_ = st.symbols_invalid;
     if (!decoded_data || decoded_data->size() < 2) {
       this->drop_reason_ = "decode_failed";
       return {};

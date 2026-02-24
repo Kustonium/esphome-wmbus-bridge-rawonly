@@ -54,7 +54,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
-  char payload[900];
+  char payload[1100];
   const uint32_t crc_failed = this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED];
   const uint32_t total = this->diag_total_;
   // Percent as integer (0..100). Avoid floats to keep it light.
@@ -83,6 +83,10 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   const int32_t t1_avg_drop_rssi = (this->diag_mode_rssi_drop_n_[T1] == 0) ? 0 : (this->diag_mode_rssi_drop_sum_[T1] / (int32_t) this->diag_mode_rssi_drop_n_[T1]);
   const int32_t c1_avg_drop_rssi = (this->diag_mode_rssi_drop_n_[C1] == 0) ? 0 : (this->diag_mode_rssi_drop_sum_[C1] / (int32_t) this->diag_mode_rssi_drop_n_[C1]);
 
+  const uint32_t t1_sym_total = this->diag_t1_symbols_total_;
+  const uint32_t t1_sym_invalid = this->diag_t1_symbols_invalid_;
+  const uint32_t t1_sym_invalid_pct = (t1_sym_total == 0) ? 0 : (t1_sym_invalid * 100U) / t1_sym_total;
+
   const uint32_t reasons_sum =
       this->diag_dropped_by_bucket_[DB_TOO_SHORT] +
       this->diag_dropped_by_bucket_[DB_DECODE_FAILED] +
@@ -107,7 +111,8 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            "\"avg_drop_rssi\":%d,"
            "\"t1\":{"
              "\"total\":%u,\"ok\":%u,\"dropped\":%u,\"per_pct\":%u,"
-             "\"crc_failed\":%u,\"crc_pct\":%u,\"avg_ok_rssi\":%d,\"avg_drop_rssi\":%d"
+             "\"crc_failed\":%u,\"crc_pct\":%u,\"avg_ok_rssi\":%d,\"avg_drop_rssi\":%d,"
+             "\"sym_total\":%u,\"sym_invalid\":%u,\"sym_invalid_pct\":%u"
            "},"
            "\"c1\":{"
              "\"total\":%u,\"ok\":%u,\"dropped\":%u,\"per_pct\":%u,"
@@ -143,6 +148,9 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) t1_crc_pct,
            (int) t1_avg_ok_rssi,
            (int) t1_avg_drop_rssi,
+           (unsigned) t1_sym_total,
+           (unsigned) t1_sym_invalid,
+           (unsigned) t1_sym_invalid_pct,
            (unsigned) c1_total,
            (unsigned) c1_ok,
            (unsigned) c1_drop,
@@ -184,6 +192,8 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   this->diag_mode_rssi_ok_n_.fill(0);
   this->diag_mode_rssi_drop_sum_.fill(0);
   this->diag_mode_rssi_drop_n_.fill(0);
+  this->diag_t1_symbols_total_ = 0;
+  this->diag_t1_symbols_invalid_ = 0;
 }
 
 void Radio::setup() {
@@ -210,6 +220,13 @@ void Radio::loop() {
   if (mode_idx < this->diag_mode_total_.size()) this->diag_mode_total_[mode_idx]++;
 
   auto frame = p->convert_to_frame();
+
+  // T1 symbol-level diagnostics (available after convert_to_frame() ran)
+  if (mode_idx == (uint8_t) LinkMode::T1) {
+    this->diag_t1_symbols_total_ += (uint32_t) p->t1_symbols_total();
+    this->diag_t1_symbols_invalid_ += (uint32_t) p->t1_symbols_invalid();
+  }
+
   if (!frame) {
     // ---- Diagnostics accounting (always count, even if verbose is disabled)
     const char *mode = link_mode_name(p->get_link_mode());

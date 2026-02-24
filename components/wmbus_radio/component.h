@@ -94,6 +94,10 @@ protected:
   std::array<uint32_t, 3> diag_mode_rssi_drop_n_{};
 
   std::array<uint32_t, DB_COUNT> diag_dropped_by_bucket_{};
+
+  // T1 symbol-level diagnostics (windowed, reset after each summary)
+  uint32_t diag_t1_symbols_total_{0};
+  uint32_t diag_t1_symbols_invalid_{0};
   uint32_t last_diag_summary_ms_{0};
 
   static DropBucket bucket_for_reason_(const std::string &reason);

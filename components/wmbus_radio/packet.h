@@ -49,6 +49,10 @@ public:
   // Intended for diagnostics; may be truncated to keep MQTT/log payloads small.
   const std::string &raw_hex() const { return this->raw_hex_; }
 
+  // T1 (3-of-6) symbol diagnostics (only meaningful for LinkMode::T1)
+  uint16_t t1_symbols_total() const { return this->t1_symbols_total_; }
+  uint16_t t1_symbols_invalid() const { return this->t1_symbols_invalid_; }
+
 protected:
   std::vector<uint8_t> data_;
 
@@ -69,6 +73,10 @@ protected:
   size_t raw_got_len_{0};
   std::string drop_reason_{};
   std::string raw_hex_{};
+
+  // T1 (3-of-6) symbol diagnostics
+  uint16_t t1_symbols_total_{0};
+  uint16_t t1_symbols_invalid_{0};
 };
 
 struct Frame {
