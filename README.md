@@ -353,13 +353,13 @@ If you want to diagnose:
 * włącz `diagnostic_publish_raw: true`,
   enable `diagnostic_publish_raw: true`,
 
-* podeślij `raw(hex)` do analizy w `wmbusmeters.org/analyze/…`.
-  submit `raw(hex)` for analysis at `wmbusmeters.org/analyze/…`.
+* podeślij **sam** `raw(hex)` (bez całego JSON-a) do **online analyzera** `wmbusmeters.org/analyze/…`.
+  submit **only** `raw(hex)` (not the whole JSON) to the **online analyzer** at `wmbusmeters.org/analyze/…`.
 
 
-### 4) wmbusmeters pokazuje “wrong key” / “payload crc failed”
+### 3) wmbusmeters pokazuje “wrong key” / “payload crc failed”
 
-### 4) wmbusmeters shows “wrong key” / “payload crc failed”
+### 3) wmbusmeters shows “wrong key” / “payload crc failed”
 
 **PL:**
 `wmbusmeters` potrafi wyświetlić „wrong key”, gdy telegram jest **uszkodzony radiowo** (bitflipy / ucięcie).
@@ -379,9 +379,9 @@ What to do:
   - if `ok=0` and `crc_failed=total` at very low RSSI → RF issue (antenna/placement/interference),
   - if `ok>0` but wmbusmeters still complains → key/config or a previous blacklist.
 
-### 3) Heltec V4 – słaby odbiór
+### 4) Heltec V4 – słaby odbiór
 
-### 3) Heltec V4 – poor reception
+### 4) Heltec V4 – poor reception
 
 Sprawdź:
 Check:
