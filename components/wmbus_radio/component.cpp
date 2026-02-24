@@ -54,13 +54,34 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
-  char payload[512];
+  char payload[900];
   const uint32_t crc_failed = this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED];
   const uint32_t total = this->diag_total_;
   // Percent as integer (0..100). Avoid floats to keep it light.
   const uint32_t crc_fail_pct = (total == 0) ? 0 : (crc_failed * 100U) / total;
   const uint32_t drop_pct = (total == 0) ? 0 : (this->diag_dropped_ * 100U) / total;
   const uint32_t trunc_pct = (total == 0) ? 0 : (this->diag_truncated_ * 100U) / total;
+  const int32_t avg_ok_rssi = (this->diag_rssi_ok_n_ == 0) ? 0 : (this->diag_rssi_ok_sum_ / (int32_t) this->diag_rssi_ok_n_);
+  const int32_t avg_drop_rssi = (this->diag_rssi_drop_n_ == 0) ? 0 : (this->diag_rssi_drop_sum_ / (int32_t) this->diag_rssi_drop_n_);
+  // Per-mode indices: 1=T1, 2=C1 (0 is unknown)
+  const uint8_t T1 = (uint8_t) LinkMode::T1;
+  const uint8_t C1 = (uint8_t) LinkMode::C1;
+  const uint32_t t1_total = this->diag_mode_total_[T1];
+  const uint32_t c1_total = this->diag_mode_total_[C1];
+  const uint32_t t1_ok = this->diag_mode_ok_[T1];
+  const uint32_t c1_ok = this->diag_mode_ok_[C1];
+  const uint32_t t1_drop = this->diag_mode_dropped_[T1];
+  const uint32_t c1_drop = this->diag_mode_dropped_[C1];
+  const uint32_t t1_crc = this->diag_mode_crc_failed_[T1];
+  const uint32_t c1_crc = this->diag_mode_crc_failed_[C1];
+  const uint32_t t1_per_pct = (t1_total == 0) ? 0 : (t1_drop * 100U) / t1_total;
+  const uint32_t c1_per_pct = (c1_total == 0) ? 0 : (c1_drop * 100U) / c1_total;
+  const uint32_t t1_crc_pct = (t1_total == 0) ? 0 : (t1_crc * 100U) / t1_total;
+  const uint32_t c1_crc_pct = (c1_total == 0) ? 0 : (c1_crc * 100U) / c1_total;
+  const int32_t t1_avg_ok_rssi = (this->diag_mode_rssi_ok_n_[T1] == 0) ? 0 : (this->diag_mode_rssi_ok_sum_[T1] / (int32_t) this->diag_mode_rssi_ok_n_[T1]);
+  const int32_t c1_avg_ok_rssi = (this->diag_mode_rssi_ok_n_[C1] == 0) ? 0 : (this->diag_mode_rssi_ok_sum_[C1] / (int32_t) this->diag_mode_rssi_ok_n_[C1]);
+  const int32_t t1_avg_drop_rssi = (this->diag_mode_rssi_drop_n_[T1] == 0) ? 0 : (this->diag_mode_rssi_drop_sum_[T1] / (int32_t) this->diag_mode_rssi_drop_n_[T1]);
+  const int32_t c1_avg_drop_rssi = (this->diag_mode_rssi_drop_n_[C1] == 0) ? 0 : (this->diag_mode_rssi_drop_sum_[C1] / (int32_t) this->diag_mode_rssi_drop_n_[C1]);
   snprintf(payload, sizeof(payload),
            "{"
            "\"event\":\"summary\","
@@ -90,6 +111,24 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) crc_fail_pct,
            (unsigned) drop_pct,
            (unsigned) trunc_pct,
+           (int) avg_ok_rssi,
+           (int) avg_drop_rssi,
+           (unsigned) t1_total,
+           (unsigned) t1_ok,
+           (unsigned) t1_drop,
+           (unsigned) t1_per_pct,
+           (unsigned) t1_crc,
+           (unsigned) t1_crc_pct,
+           (int) t1_avg_ok_rssi,
+           (int) t1_avg_drop_rssi,
+           (unsigned) c1_total,
+           (unsigned) c1_ok,
+           (unsigned) c1_drop,
+           (unsigned) c1_per_pct,
+           (unsigned) c1_crc,
+           (unsigned) c1_crc_pct,
+           (int) c1_avg_ok_rssi,
+           (int) c1_avg_drop_rssi,
            (unsigned) this->diag_dropped_by_bucket_[DB_TOO_SHORT],
            (unsigned) this->diag_dropped_by_bucket_[DB_DECODE_FAILED],
            (unsigned) this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED],
@@ -109,6 +148,18 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   this->diag_truncated_ = 0;
   this->diag_dropped_ = 0;
   this->diag_dropped_by_bucket_.fill(0);
+  this->diag_rssi_ok_sum_ = 0;
+  this->diag_rssi_ok_n_ = 0;
+  this->diag_rssi_drop_sum_ = 0;
+  this->diag_rssi_drop_n_ = 0;
+  this->diag_mode_total_.fill(0);
+  this->diag_mode_ok_.fill(0);
+  this->diag_mode_dropped_.fill(0);
+  this->diag_mode_crc_failed_.fill(0);
+  this->diag_mode_rssi_ok_sum_.fill(0);
+  this->diag_mode_rssi_ok_n_.fill(0);
+  this->diag_mode_rssi_drop_sum_.fill(0);
+  this->diag_mode_rssi_drop_n_.fill(0);
 }
 
 void Radio::setup() {
@@ -131,6 +182,8 @@ void Radio::loop() {
 
   // Every item dequeued is a "received attempt" for diagnostics.
   this->diag_total_++;
+  const uint8_t mode_idx = (uint8_t) p->get_link_mode();
+  if (mode_idx < this->diag_mode_total_.size()) this->diag_mode_total_[mode_idx]++;
 
   auto frame = p->convert_to_frame();
   if (!frame) {
@@ -170,8 +223,18 @@ void Radio::loop() {
       }
     } else if (!p->drop_reason().empty()) {
       this->diag_dropped_++;
+      this->diag_rssi_drop_sum_ += (int32_t) p->get_rssi();
+      this->diag_rssi_drop_n_++;
+      if (mode_idx < this->diag_mode_dropped_.size()) {
+        this->diag_mode_dropped_[mode_idx]++;
+        this->diag_mode_rssi_drop_sum_[mode_idx] += (int32_t) p->get_rssi();
+        this->diag_mode_rssi_drop_n_[mode_idx]++;
+      }
       auto bucket = bucket_for_reason_(p->drop_reason());
       this->diag_dropped_by_bucket_[bucket]++;
+      if (bucket == DB_DLL_CRC_FAILED && mode_idx < this->diag_mode_crc_failed_.size()) {
+        this->diag_mode_crc_failed_[mode_idx]++;
+      }
 
       if (this->diag_verbose_) {
         char payload[900];
@@ -211,6 +274,13 @@ void Radio::loop() {
 
   // Successful decode/validation
   this->diag_ok_++;
+  this->diag_rssi_ok_sum_ += (int32_t) frame->rssi();
+  this->diag_rssi_ok_n_++;
+  if (mode_idx < this->diag_mode_ok_.size()) {
+    this->diag_mode_ok_[mode_idx]++;
+    this->diag_mode_rssi_ok_sum_[mode_idx] += (int32_t) frame->rssi();
+    this->diag_mode_rssi_ok_n_[mode_idx]++;
+  }
 
   ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
            frame->data().size(), frame->rssi(),

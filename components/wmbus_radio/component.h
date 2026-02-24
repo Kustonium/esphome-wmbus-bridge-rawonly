@@ -77,6 +77,22 @@ protected:
   uint32_t diag_ok_{0};
   uint32_t diag_truncated_{0};
   uint32_t diag_dropped_{0};
+  // RSSI aggregates (integer averages)
+  int32_t diag_rssi_ok_sum_{0};
+  uint32_t diag_rssi_ok_n_{0};
+  int32_t diag_rssi_drop_sum_{0};
+  uint32_t diag_rssi_drop_n_{0};
+
+  // Per-mode window stats (index: (uint8_t)LinkMode)
+  std::array<uint32_t, 3> diag_mode_total_{};
+  std::array<uint32_t, 3> diag_mode_ok_{};
+  std::array<uint32_t, 3> diag_mode_dropped_{};
+  std::array<uint32_t, 3> diag_mode_crc_failed_{};
+  std::array<int32_t, 3> diag_mode_rssi_ok_sum_{};
+  std::array<uint32_t, 3> diag_mode_rssi_ok_n_{};
+  std::array<int32_t, 3> diag_mode_rssi_drop_sum_{};
+  std::array<uint32_t, 3> diag_mode_rssi_drop_n_{};
+
   std::array<uint32_t, DB_COUNT> diag_dropped_by_bucket_{};
   uint32_t last_diag_summary_ms_{0};
 
