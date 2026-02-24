@@ -178,7 +178,7 @@ std::optional<Frame> Packet::convert_to_frame() {
 
     // Validate and strip DLL CRC bytes (Format A)
     if (!wmbus_common::trim_dll_crc_format_a(this->data_)) {
-      this->drop_reason_ = "dll_crc_strip_failed";
+      this->drop_reason_ = "dll_crc_failed";
       return {};
     }
 
@@ -225,12 +225,12 @@ std::optional<Frame> Packet::convert_to_frame() {
     // Validate and strip DLL CRC bytes for both formats
     if (this->frame_format_ == "A") {
       if (!wmbus_common::trim_dll_crc_format_a(this->data_)) {
-        this->drop_reason_ = "dll_crc_strip_failed";
+        this->drop_reason_ = "dll_crc_failed";
         return {};
       }
     } else {  // "B"
       if (!wmbus_common::trim_dll_crc_format_b(this->data_)) {
-        this->drop_reason_ = "dll_crc_strip_failed";
+        this->drop_reason_ = "dll_crc_failed";
         return {};
       }
     }

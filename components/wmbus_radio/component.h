@@ -63,7 +63,8 @@ protected:
   enum DropBucket : uint8_t {
     DB_TOO_SHORT = 0,
     DB_DECODE_FAILED,
-    DB_DLL_CRC_STRIP_FAILED,
+    // DLL CRC failed (we drop the packet before publishing to avoid poisoning downstream decoders)
+    DB_DLL_CRC_FAILED,
     DB_UNKNOWN_PREAMBLE,
     DB_L_FIELD_INVALID,
     DB_UNKNOWN_LINK_MODE,
@@ -71,6 +72,9 @@ protected:
     DB_COUNT
   };
 
+  // Windowed counters (reset after each published summary)
+  uint32_t diag_total_{0};
+  uint32_t diag_ok_{0};
   uint32_t diag_truncated_{0};
   uint32_t diag_dropped_{0};
   std::array<uint32_t, DB_COUNT> diag_dropped_by_bucket_{};

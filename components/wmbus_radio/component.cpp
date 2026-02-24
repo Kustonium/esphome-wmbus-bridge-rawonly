@@ -32,7 +32,8 @@ Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
   // Keep this stable: these strings come from Packet::set_drop_reason()
   if (reason == "too_short") return DB_TOO_SHORT;
   if (reason == "decode_failed") return DB_DECODE_FAILED;
-  if (reason == "dll_crc_strip_failed") return DB_DLL_CRC_STRIP_FAILED;
+  // Backwards compatible: older builds used dll_crc_strip_failed
+  if (reason == "dll_crc_failed" || reason == "dll_crc_strip_failed") return DB_DLL_CRC_FAILED;
   if (reason == "unknown_preamble") return DB_UNKNOWN_PREAMBLE;
   if (reason == "l_field_invalid") return DB_L_FIELD_INVALID;
   if (reason == "unknown_link_mode") return DB_UNKNOWN_LINK_MODE;
@@ -54,36 +55,57 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   char payload[512];
+  const uint32_t crc_failed = this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED];
+  const uint32_t total = this->diag_total_;
+  // Percent as integer (0..100). Avoid floats to keep it light.
+  const uint32_t crc_fail_pct = (total == 0) ? 0 : (crc_failed * 100U) / total;
+  const uint32_t drop_pct = (total == 0) ? 0 : (this->diag_dropped_ * 100U) / total;
+  const uint32_t trunc_pct = (total == 0) ? 0 : (this->diag_truncated_ * 100U) / total;
   snprintf(payload, sizeof(payload),
            "{"
            "\"event\":\"summary\","
+           "\"total\":%u,"
+           "\"ok\":%u,"
            "\"truncated\":%u,"
            "\"dropped\":%u,"
+           "\"crc_failed\":%u,"
+           "\"crc_fail_pct\":%u,"
+           "\"drop_pct\":%u,"
+           "\"trunc_pct\":%u,"
            "\"dropped_by_reason\":{"
            "\"too_short\":%u,"
            "\"decode_failed\":%u,"
-           "\"dll_crc_strip_failed\":%u,"
+           "\"dll_crc_failed\":%u,"
            "\"unknown_preamble\":%u,"
            "\"l_field_invalid\":%u,"
            "\"unknown_link_mode\":%u,"
            "\"other\":%u"
            "}"
            "}",
+           (unsigned) total,
+           (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_,
            (unsigned) this->diag_dropped_,
+           (unsigned) crc_failed,
+           (unsigned) crc_fail_pct,
+           (unsigned) drop_pct,
+           (unsigned) trunc_pct,
            (unsigned) this->diag_dropped_by_bucket_[DB_TOO_SHORT],
            (unsigned) this->diag_dropped_by_bucket_[DB_DECODE_FAILED],
-           (unsigned) this->diag_dropped_by_bucket_[DB_DLL_CRC_STRIP_FAILED],
+           (unsigned) this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED],
            (unsigned) this->diag_dropped_by_bucket_[DB_UNKNOWN_PREAMBLE],
            (unsigned) this->diag_dropped_by_bucket_[DB_L_FIELD_INVALID],
            (unsigned) this->diag_dropped_by_bucket_[DB_UNKNOWN_LINK_MODE],
            (unsigned) this->diag_dropped_by_bucket_[DB_OTHER]);
 
   mqtt->publish(this->diag_topic_, payload);
-  ESP_LOGI(TAG, "DIAG summary published to %s (truncated=%u dropped=%u)",
-           this->diag_topic_.c_str(), (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_);
+  ESP_LOGI(TAG, "DIAG summary published to %s (total=%u ok=%u truncated=%u dropped=%u crc_failed=%u)",
+           this->diag_topic_.c_str(), (unsigned) total, (unsigned) this->diag_ok_,
+           (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
 
   // Report per-window stats (so it is easy to spot spikes)
+  this->diag_total_ = 0;
+  this->diag_ok_ = 0;
   this->diag_truncated_ = 0;
   this->diag_dropped_ = 0;
   this->diag_dropped_by_bucket_.fill(0);
@@ -106,6 +128,9 @@ void Radio::loop() {
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
+
+  // Every item dequeued is a "received attempt" for diagnostics.
+  this->diag_total_++;
 
   auto frame = p->convert_to_frame();
   if (!frame) {
@@ -183,6 +208,9 @@ void Radio::loop() {
     delete p;
     return;
   }
+
+  // Successful decode/validation
+  this->diag_ok_++;
 
   ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
            frame->data().size(), frame->rssi(),
