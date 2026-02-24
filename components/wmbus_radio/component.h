@@ -98,6 +98,12 @@ protected:
   // T1 symbol-level diagnostics (windowed, reset after each summary)
   uint32_t diag_t1_symbols_total_{0};
   uint32_t diag_t1_symbols_invalid_{0};
+
+
+// ELL bidirectional flag (CC bit 0x80) diagnostics (windowed, reset after each summary)
+// NOTE: This is NOT a PHY mode detector (T2/C2). It is only a hint from the ELL header.
+uint32_t diag_ell_bidir_count_{0};
+std::array<uint32_t, 3> diag_mode_ell_bidir_count_{};
   uint32_t last_diag_summary_ms_{0};
 
   static DropBucket bucket_for_reason_(const std::string &reason);
