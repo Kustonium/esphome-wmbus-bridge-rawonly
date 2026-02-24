@@ -80,6 +80,11 @@ wmbus_radio:
     mode:
       input: true
       pullup: true
+  diagnostic_topic: "wmbus/diag/error"
+  diagnostic_verbose: false          # startowo cisza
+  diagnostic_publish_raw: false      # startowo bez raw
+  diagnostic_summary_interval: 60s   # summary co 60s
+
 
   on_frame:
     then:
