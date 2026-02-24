@@ -82,6 +82,16 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   const int32_t c1_avg_ok_rssi = (this->diag_mode_rssi_ok_n_[C1] == 0) ? 0 : (this->diag_mode_rssi_ok_sum_[C1] / (int32_t) this->diag_mode_rssi_ok_n_[C1]);
   const int32_t t1_avg_drop_rssi = (this->diag_mode_rssi_drop_n_[T1] == 0) ? 0 : (this->diag_mode_rssi_drop_sum_[T1] / (int32_t) this->diag_mode_rssi_drop_n_[T1]);
   const int32_t c1_avg_drop_rssi = (this->diag_mode_rssi_drop_n_[C1] == 0) ? 0 : (this->diag_mode_rssi_drop_sum_[C1] / (int32_t) this->diag_mode_rssi_drop_n_[C1]);
+
+  const uint32_t reasons_sum =
+      this->diag_dropped_by_bucket_[DB_TOO_SHORT] +
+      this->diag_dropped_by_bucket_[DB_DECODE_FAILED] +
+      this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED] +
+      this->diag_dropped_by_bucket_[DB_UNKNOWN_PREAMBLE] +
+      this->diag_dropped_by_bucket_[DB_L_FIELD_INVALID] +
+      this->diag_dropped_by_bucket_[DB_UNKNOWN_LINK_MODE] +
+      this->diag_dropped_by_bucket_[DB_OTHER];
+  const uint32_t reasons_sum_mismatch = (reasons_sum != this->diag_dropped_) ? 1U : 0U;
   snprintf(payload, sizeof(payload),
            "{"
            "\"event\":\"summary\","
@@ -93,15 +103,27 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            "\"crc_fail_pct\":%u,"
            "\"drop_pct\":%u,"
            "\"trunc_pct\":%u,"
+           "\"avg_ok_rssi\":%d,"
+           "\"avg_drop_rssi\":%d,"
+           "\"t1\":{"
+             "\"total\":%u,\"ok\":%u,\"dropped\":%u,\"per_pct\":%u,"
+             "\"crc_failed\":%u,\"crc_pct\":%u,\"avg_ok_rssi\":%d,\"avg_drop_rssi\":%d"
+           "},"
+           "\"c1\":{"
+             "\"total\":%u,\"ok\":%u,\"dropped\":%u,\"per_pct\":%u,"
+             "\"crc_failed\":%u,\"crc_pct\":%u,\"avg_ok_rssi\":%d,\"avg_drop_rssi\":%d"
+           "},"
            "\"dropped_by_reason\":{"
-           "\"too_short\":%u,"
-           "\"decode_failed\":%u,"
-           "\"dll_crc_failed\":%u,"
-           "\"unknown_preamble\":%u,"
-           "\"l_field_invalid\":%u,"
-           "\"unknown_link_mode\":%u,"
-           "\"other\":%u"
-           "}"
+             "\"too_short\":%u,"
+             "\"decode_failed\":%u,"
+             "\"dll_crc_failed\":%u,"
+             "\"unknown_preamble\":%u,"
+             "\"l_field_invalid\":%u,"
+             "\"unknown_link_mode\":%u,"
+             "\"other\":%u"
+           "},"
+           "\"reasons_sum\":%u,"
+           "\"reasons_sum_mismatch\":%u"
            "}",
            (unsigned) total,
            (unsigned) this->diag_ok_,
@@ -135,7 +157,9 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_dropped_by_bucket_[DB_UNKNOWN_PREAMBLE],
            (unsigned) this->diag_dropped_by_bucket_[DB_L_FIELD_INVALID],
            (unsigned) this->diag_dropped_by_bucket_[DB_UNKNOWN_LINK_MODE],
-           (unsigned) this->diag_dropped_by_bucket_[DB_OTHER]);
+           (unsigned) this->diag_dropped_by_bucket_[DB_OTHER],
+           (unsigned) reasons_sum,
+           (unsigned) reasons_sum_mismatch);
 
   mqtt->publish(this->diag_topic_, payload);
   ESP_LOGI(TAG, "DIAG summary published to %s (total=%u ok=%u truncated=%u dropped=%u crc_failed=%u)",
