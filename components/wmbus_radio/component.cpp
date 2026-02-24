@@ -96,6 +96,45 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       this->diag_dropped_by_bucket_[DB_UNKNOWN_LINK_MODE] +
       this->diag_dropped_by_bucket_[DB_OTHER];
   const uint32_t reasons_sum_mismatch = (reasons_sum != this->diag_dropped_) ? 1U : 0U;
+
+  // Human-friendly hint based on diagnostics (kept short; intended for quick triage).
+  const char *hint_code = "OK";
+  const char *hint_en = "looks good";
+  const char *hint_pl = "wygląda dobrze";
+  if (total == 0) {
+    hint_code = "NO_DATA";
+    hint_en = "no packets received yet";
+    hint_pl = "brak odebranych ramek";
+  } else {
+    // C1 triage: most common confusion is 'wrong key' vs RF corruption.
+    if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
+      if (c1_avg_drop_rssi <= -95) {
+        hint_code = "C1_WEAK_SIGNAL";
+        hint_en = "C1 frames fail DLL CRC at very low RSSI; improve antenna/placement";
+        hint_pl = "C1: CRC DLL nie przechodzi przy bardzo niskim RSSI; popraw antenę/pozycję";
+      } else {
+        hint_code = "C1_INTERFERENCE_OR_RX";
+        hint_en = "C1 frames fail DLL CRC despite decent RSSI; check interference/RX settings";
+        hint_pl = "C1: CRC DLL nie przechodzi mimo niezłego RSSI; sprawdź zakłócenia/ustawienia RX";
+      }
+    } else if (drop_pct >= 60 && avg_drop_rssi <= -92) {
+      hint_code = "WEAK_SIGNAL";
+      hint_en = "many drops at very low RSSI; improve antenna/placement";
+      hint_pl = "dużo dropów przy bardzo niskim RSSI; popraw antenę/pozycję";
+    } else if (t1_total > 0 && t1_sym_total >= 200 && t1_sym_invalid_pct >= 5) {
+      hint_code = "T1_SYMBOL_ERRORS";
+      hint_en = "T1 has many invalid 3-of-6 symbols; likely bit errors/interference";
+      hint_pl = "T1: dużo błędnych symboli 3-of-6; możliwe błędy bitów/zakłócenia";
+    } else if (t1_total > 0 && t1_crc_pct >= 10 && t1_sym_invalid_pct < 2) {
+      hint_code = "T1_BITFLIPS";
+      hint_en = "T1 mostly decodes but often fails DLL CRC; likely occasional bitflips";
+      hint_pl = "T1: dekoduje się, ale często pada CRC DLL; możliwe sporadyczne bitflipy";
+    } else if (ok > 0 && drop_pct <= 10) {
+      hint_code = "GOOD";
+      hint_en = "RF link looks stable";
+      hint_pl = "łącze radiowe wygląda stabilnie";
+    }
+  }
   snprintf(payload, sizeof(payload),
            "{"
            "\"event\":\"summary\","
@@ -128,7 +167,9 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
              "\"other\":%u"
            "},"
            "\"reasons_sum\":%u,"
-           "\"reasons_sum_mismatch\":%u"
+           "\"reasons_sum_mismatch\":%u,"
+           "\"hint_code\":\"%s\","
+           "\"hint_en\":\"%s\",\"hint_pl\":\"%s\""
            "}",
            (unsigned) total,
            (unsigned) this->diag_ok_,
@@ -167,7 +208,10 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_dropped_by_bucket_[DB_UNKNOWN_LINK_MODE],
            (unsigned) this->diag_dropped_by_bucket_[DB_OTHER],
            (unsigned) reasons_sum,
-           (unsigned) reasons_sum_mismatch);
+           (unsigned) reasons_sum_mismatch,
+           hint_code,
+           hint_en,
+           hint_pl);
 
   mqtt->publish(this->diag_topic_, payload);
   ESP_LOGI(TAG, "DIAG summary published to %s (total=%u ok=%u truncated=%u dropped=%u crc_failed=%u)",
