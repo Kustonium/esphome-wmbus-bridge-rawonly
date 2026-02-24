@@ -57,6 +57,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   char payload[1100];
   const uint32_t crc_failed = this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED];
   const uint32_t total = this->diag_total_;
+  const uint32_t ok = this->diag_ok_;
   // Percent as integer (0..100). Avoid floats to keep it light.
   const uint32_t crc_fail_pct = (total == 0) ? 0 : (crc_failed * 100U) / total;
   const uint32_t drop_pct = (total == 0) ? 0 : (this->diag_dropped_ * 100U) / total;
