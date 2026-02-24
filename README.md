@@ -175,7 +175,7 @@ In `wmbus_radio` you can enable diagnostic publishing:
 
 ```yaml
 wmbus_radio:
-  diagnostic_topic: "wmbus/diag/error"
+  diagnostic_topic: "wmbus/diag"
   diagnostic_summary_interval: 60s
   diagnostic_verbose: false
   diagnostic_publish_raw: false
@@ -184,26 +184,100 @@ wmbus_radio:
 Wtedy na `diagnostic_topic` pojawiają się JSON-y:
 Then JSON messages appear on `diagnostic_topic`:
 
-* `{"event":"summary", ...}` – podsumowanie liczników (truncated/dropped itd.)
-  `{"event":"summary", ...}` – counters summary (truncated/dropped etc.)
+#### 1) Summary (co interval)
 
-* `{"event":"dropped", "reason":"decode_failed", ...}` – pojedynczy drop (opcjonalnie z `raw`)
-  `{"event":"dropped", "reason":"decode_failed", ...}` – a single drop (optionally with `raw`)
+#### 1) Summary (every interval)
 
-**Ważne:** `decode_failed` w dropach nie oznacza „błąd MQTT” – to zwykle:
-**Important:** `decode_failed` does not mean “MQTT error” — it’s usually:
+```json
+{
+  "event": "summary",
+  "total": 30,
+  "ok": 23,
+  "truncated": 0,
+  "dropped": 7,
+  "crc_failed": 2,
+  "crc_fail_pct": 6,
+  "drop_pct": 23,
+  "trunc_pct": 0,
 
-* zakłócenie,
-  interference,
+  "avg_ok_rssi": -74,
+  "avg_drop_rssi": -97,
 
-* ucięty telegram,
-  truncated telegram,
+  "t1": {
+    "total": 28,
+    "ok": 23,
+    "dropped": 5,
+    "per_pct": 17,
+    "crc_failed": 0,
+    "crc_pct": 0,
+    "avg_ok_rssi": -74,
+    "avg_drop_rssi": -96,
 
-* śmieci z eteru,
-  RF garbage/noise,
+    "sym_total": 1234,
+    "sym_invalid": 12,
+    "sym_invalid_pct": 1
+  },
+  "c1": {
+    "total": 2,
+    "ok": 0,
+    "dropped": 2,
+    "per_pct": 100,
+    "crc_failed": 2,
+    "crc_pct": 100,
+    "avg_ok_rssi": 0,
+    "avg_drop_rssi": -99
+  },
 
-* ramka nie pasująca do prostych reguł składania (np. nietypowy preamble).
-  a frame that doesn’t match simple assembly rules (e.g. unusual preamble).
+  "dropped_by_reason": {
+    "too_short": 0,
+    "decode_failed": 5,
+    "dll_crc_failed": 2,
+    "unknown_preamble": 0,
+    "l_field_invalid": 0,
+    "unknown_link_mode": 0,
+    "other": 0
+  },
+
+  "reasons_sum": 7,
+  "reasons_sum_mismatch": 0,
+
+  "hint_code": "C1_WEAK_SIGNAL",
+  "hint_en": "C1 frames fail DLL CRC at very low RSSI; improve antenna/placement.",
+  "hint_pl": "Ramy C1 padają na CRC DLL przy bardzo niskim RSSI; popraw antenę/pozycję."
+}
+```
+
+**Jak czytać summary (praktycznie):**
+**How to read the summary (practical):**
+
+- `avg_ok_rssi` vs `avg_drop_rssi` – najszybsza odpowiedź czy problem jest radiowy.
+  `avg_ok_rssi` vs `avg_drop_rssi` – fastest way to see if it’s RF related.
+
+- `t1.per_pct` / `c1.per_pct` (PER) – procent ramek odrzuconych w danym trybie.
+  `t1.per_pct` / `c1.per_pct` (PER) – dropped packet rate per mode.
+
+- `*_crc_pct` – ile % ramek w trybie padło na CRC DLL (bitflipy / słaby RF).
+  `*_crc_pct` – how many % failed DLL CRC (bitflips / poor RF).
+
+- `t1.sym_invalid_pct` – „quasi-BER” dla T1 (3-of-6): ile symboli 6-bit było nielegalnych.
+  `t1.sym_invalid_pct` – T1 quasi-BER (3-of-6): percent of invalid 6-bit symbols.
+
+- `hint_*` – automatyczna podpowiedź co robić (PL/EN) na podstawie bieżących statystyk.
+  `hint_*` – automatic PL/EN suggestion based on the current stats.
+
+> Uwaga: `reasons_sum_mismatch=1` oznacza błąd spójności liczenia (diagnostyka nadal działa, ale liczby mogą być niepewne).
+> Note: `reasons_sum_mismatch=1` means counters mismatch (diagnostics still works but numbers may be unreliable).
+
+#### 2) Dropped (pojedynczy drop)
+
+#### 2) Dropped (single drop)
+
+```json
+{"event":"dropped","reason":"dll_crc_failed","mode":"C1","want":60,"got":60,"raw_got":62,"rssi":-99}
+```
+
+Opcjonalnie (gdy `diagnostic_publish_raw: true`) pojawi się też `raw(hex)` dla analizy.
+Optionally (when `diagnostic_publish_raw: true`) you’ll also get `raw(hex)` for analysis.
 
 ---
 
@@ -281,6 +355,29 @@ If you want to diagnose:
 
 * podeślij `raw(hex)` do analizy w `wmbusmeters.org/analyze/…`.
   submit `raw(hex)` for analysis at `wmbusmeters.org/analyze/…`.
+
+
+### 4) wmbusmeters pokazuje “wrong key” / “payload crc failed”
+
+### 4) wmbusmeters shows “wrong key” / “payload crc failed”
+
+**PL:**
+`wmbusmeters` potrafi wyświetlić „wrong key”, gdy telegram jest **uszkodzony radiowo** (bitflipy / ucięcie).
+Dlatego ten projekt odrzuca śmieci **przed** wmbusmeters: sprawdza CRC na warstwie łącza (DLL) i nie publikuje błędnych ramek.
+
+Co zrobić:
+- sprawdź `wmbus/diag` → sekcję `c1`/`t1`:
+  - jeśli `ok=0` i `crc_failed=total` przy bardzo niskim RSSI → problem RF (antena/pozycja/zakłócenia),
+  - jeśli `ok>0`, a wmbusmeters nadal krzyczy → wtedy dopiero klucz/konfiguracja lub blacklist po wcześniejszych próbach.
+
+**EN:**
+`wmbusmeters` may report “wrong key” when the telegram is **RF-corrupted** (bitflips / truncated frame).
+This project drops garbage **before** wmbusmeters by validating DLL CRC and rejecting bad frames.
+
+What to do:
+- check `wmbus/diag` → `c1`/`t1`:
+  - if `ok=0` and `crc_failed=total` at very low RSSI → RF issue (antenna/placement/interference),
+  - if `ok>0` but wmbusmeters still complains → key/config or a previous blacklist.
 
 ### 3) Heltec V4 – słaby odbiór
 
