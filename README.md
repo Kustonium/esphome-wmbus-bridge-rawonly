@@ -329,18 +329,6 @@ In practice, you only need wmbusmeters to receive the **HEX** payload from `wmbu
 Ten komponent skupia się na **T1 i C1** (najczęstsze w praktyce).
 This component focuses on **T1 and C1** (most common in practice).
 
-Tryb „T2” bywa spotykany rzadziej i zależy od regionu/licznika.
-“T2” is less common and depends on region/meter type.
-
-Jeśli chcesz sprawdzić, czy masz T2 w eterze:
-If you want to check whether you have T2 on air:
-
-* włącz na chwilę logi `wmbus` na `debug` i obserwuj `mode: ...` w logu,
-  enable `wmbus` logs to `debug` briefly and watch `mode: ...` in logs,
-
-* albo korzystaj z diagnostyki `dropped`/`summary`.
-  or use `dropped`/`summary` diagnostics.
-
 ---
 
 ## Najczęstsze problemy
