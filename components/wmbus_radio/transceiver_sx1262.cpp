@@ -297,31 +297,22 @@ optional<uint8_t> SX1262::read() {
 }
 
 int8_t SX1262::get_rssi() {
-  // GET_PACKET_STATUS returns 3 bytes *after* a mandatory NOP/status byte:
-  //   b1 = RSSI_sync
-  //   b2 = SNR (signed, 2's complement, 0.25 dB steps)
-  //   b3 = RSSI_avg
-  // RSSI[dBm] ~= -(RSSI_* / 2)
-  //
-  // Wcześniej czytaliśmy to przez cmd_read_ (który „zjada” status/NOP), więc
-  // nie widziałeś surowych bajtów w logu. Ten wariant czyta „ręcznie” i loguje.
+  // SX126x "GetPacketStatus" returns 3 bytes.
+  // For GFSK typically:
+  //   st[0] = Rx status
+  //   st[1] = RSSI on sync (rssiSync)
+  //   st[2] = RSSI average (rssiAvg)
+  // Values are 0.5 dB steps, returned as unsigned where dBm = -value/2.
+  uint8_t st[3]{};
+  this->cmd_read_(CMD_GET_PACKET_STATUS, {}, st, sizeof(st));
 
-  uint8_t nop = 0, b1 = 0, b2 = 0, b3 = 0;
+  const int rssi_sync = -((int) st[1]) / 2;
+  const int rssi_avg = -((int) st[2]) / 2;
+  ESP_LOGD(TAG, "PKT_STATUS: rx=%02X sync=%02X avg=%02X -> rssi_sync=%ddBm rssi_avg=%ddBm", st[0], st[1], st[2], rssi_sync,
+           rssi_avg);
 
-  this->wait_busy();
-  this->delegate_->begin_transaction();
-  this->delegate_->transfer(CMD_GET_PACKET_STATUS);
-  nop = this->delegate_->transfer(0x00);
-  b1 = this->delegate_->transfer(0x00);
-  b2 = this->delegate_->transfer(0x00);
-  b3 = this->delegate_->transfer(0x00);
-  this->delegate_->end_transaction();
-
-  ESP_LOGD(TAG, "PKT_STATUS: nop=%02X b1=%02X b2=%02X b3=%02X | rssi_sync=%d dBm rssi_avg=%d dBm",
-           nop, b1, b2, b3, -((int) b1) / 2, -((int) b3) / 2);
-
-  // b3 (RSSI_avg) jest zwykle najbardziej stabilny do raportowania.
-  return (int8_t) (-((int) b3) / 2);
+  // Keep previous behaviour: return average RSSI.
+  return (int8_t) rssi_avg;
 }
 
 const char *SX1262::get_name() { return TAG; }
