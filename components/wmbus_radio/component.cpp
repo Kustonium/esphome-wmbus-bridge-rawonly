@@ -508,9 +508,9 @@ void Radio::loop() {
     handler(&frame.value());
 
   if (frame->handlers_count())
-    ESP_LOGI(TAG, "Telegram handled by %d handlers", frame->handlers_count());
+    ESP_LOGD(TAG, "Telegram handled by %d handlers", frame->handlers_count());
   else
-    ESP_LOGD(TAG, "Telegram not handled by any handler");
+    ESP_LOGV(TAG, "Telegram not handled by any handler");
 
   delete p;
 }
