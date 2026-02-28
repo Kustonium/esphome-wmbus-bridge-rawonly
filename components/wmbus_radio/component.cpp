@@ -388,6 +388,17 @@ void Radio::loop() {
     this->diag_mode_rssi_ok_n_[mode_idx]++;
   }
 
+auto &d = frame->data();
+char hdr[3*12 + 1];
+hdr[0] = 0;
+size_t n = std::min<size_t>(12, d.size());
+for (size_t i = 0; i < n; i++) {
+  char tmp[4];
+  snprintf(tmp, sizeof(tmp), "%02X ", d[i]);
+  strncat(hdr, tmp, sizeof(hdr) - strlen(hdr) - 1);
+}
+
+ESP_LOGI(TAG, "HDR[%zu]: %s", n, hdr);
   ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
            frame->data().size(), frame->rssi(),
            link_mode_name(frame->link_mode()),
