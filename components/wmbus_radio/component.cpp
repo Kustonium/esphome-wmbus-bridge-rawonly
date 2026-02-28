@@ -7,9 +7,6 @@
 #include "esphome/core/helpers.h"
 
 #include <cstring>
-#include <cstdio>
-#include <string>
-#include <vector>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -31,97 +28,6 @@
 namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "wmbus";
-
-// Best-effort extraction of Meter address fields (Manufacturer + ID + version + device type)
-// from a decoded DLL frame. This is intentionally defensive:
-//  - supports buffers with and without L-field
-//  - validates BCD ID, otherwise falls back to HEX
-//  - validates manufacturer 5-bit letters, otherwise replaces with '?'
-static bool try_extract_address_(const std::vector<uint8_t> &d, std::string &mfr, std::string &id,
-                                 uint8_t &ver, uint8_t &dev_type, uint8_t &ci) {
-  mfr = "???";
-  id = "????????";
-  ver = 0xFF;
-  dev_type = 0xFF;
-  ci = 0xFF;
-  if (d.size() < 9) return false;
-
-  auto decode_mfr = [](uint16_t m) -> std::string {
-    auto to_char = [](uint8_t v) -> char {
-      // EN13757: letters 1..26 map to 'A'..'Z'
-      if (v >= 1 && v <= 26) return (char) ('A' + (v - 1));
-      return '?';
-    };
-    char c1 = to_char((m >> 10) & 0x1F);
-    char c2 = to_char((m >> 5) & 0x1F);
-    char c3 = to_char(m & 0x1F);
-    return std::string() + c1 + c2 + c3;
-  };
-
-  auto is_bcd4 = [](uint8_t b) -> bool {
-    return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
-  };
-
-  auto fmt_bcd_id_le = [](const uint8_t *p4) -> std::string {
-    // p4 points to ID bytes in little-endian order; print as 8 digits.
-    auto add_bcd = [](std::string &out, uint8_t b) {
-      out.push_back((char) ('0' + ((b >> 4) & 0x0F)));
-      out.push_back((char) ('0' + (b & 0x0F)));
-    };
-    std::string out;
-    out.reserve(8);
-    add_bcd(out, p4[3]);
-    add_bcd(out, p4[2]);
-    add_bcd(out, p4[1]);
-    add_bcd(out, p4[0]);
-    return out;
-  };
-
-  auto fmt_hex_id_le = [](const uint8_t *p4) -> std::string {
-    // Print 4 bytes (little-endian) as 8 hex chars, MSB first.
-    char buf[9];
-    snprintf(buf, sizeof(buf), "%02X%02X%02X%02X", p4[3], p4[2], p4[1], p4[0]);
-    return std::string(buf);
-  };
-
-  // Candidate layouts:
-  // 1) With L-field: [0]=L, [1]=C, [2..3]=M, [4..7]=ID, [8]=ver, [9]=type, [10]=CI
-  // 2) Without L-field: [0]=C, [1..2]=M, [3..6]=ID, [7]=ver, [8]=type, [9]=CI
-  struct Layout {
-    size_t c_idx;
-    bool looks_valid;
-  };
-
-  Layout candidates[2] = {
-      {1, (d.size() >= 11) && (d[0] + 1U == d.size()) && (d[0] >= 9)},  // strong signal: L matches buffer
-      {0, (d.size() >= 10)}                                             // fallback: no L
-  };
-
-  for (auto &lay : candidates) {
-    if (!lay.looks_valid) continue;
-
-    const size_t m_idx = lay.c_idx + 1;
-    const size_t id_idx = lay.c_idx + 3;
-    const size_t ver_idx = lay.c_idx + 7;
-    const size_t type_idx = lay.c_idx + 8;
-    const size_t ci_idx = lay.c_idx + 9;
-    if (d.size() <= type_idx) continue;
-
-    uint16_t m = (uint16_t) d[m_idx] | ((uint16_t) d[m_idx + 1] << 8);
-    mfr = decode_mfr(m);
-
-    const uint8_t *idp = &d[id_idx];
-    const bool bcd_ok = is_bcd4(idp[0]) && is_bcd4(idp[1]) && is_bcd4(idp[2]) && is_bcd4(idp[3]);
-    id = bcd_ok ? fmt_bcd_id_le(idp) : fmt_hex_id_le(idp);
-
-    ver = d[ver_idx];
-    dev_type = d[type_idx];
-    if (d.size() > ci_idx) ci = d[ci_idx];
-    return true;
-  }
-
-  return false;
-}
 
 
 Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
@@ -392,8 +298,9 @@ void Radio::loop() {
     if (p->is_truncated()) {
       this->diag_truncated_++;
 
-      if (this->diag_verbose_) {
-        // Build payload (optionally with raw)
+      // Publish diagnostics to MQTT regardless of diag_verbose_
+      // (so YAML can silence logs but still get drop/trunc events).
+      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
         char payload[900];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
@@ -407,7 +314,10 @@ void Radio::loop() {
                    mode, (int) p->get_rssi(), (unsigned) p->want_len(),
                    (unsigned) p->got_len(), (unsigned) p->raw_got_len());
         }
+        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+      }
 
+      if (this->diag_verbose_) {
         ESP_LOGW(TAG,
                  "TRUNCATED frame: mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
                  mode, (unsigned) p->want_len(), (unsigned) p->got_len(),
@@ -415,10 +325,6 @@ void Radio::loop() {
 
         if (this->diag_publish_raw_) {
           ESP_LOGW(TAG, "TRUNCATED raw(hex)=%s", p->raw_hex().c_str());
-        }
-
-        if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-          mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
         }
       }
     } else if (!p->drop_reason().empty()) {
@@ -436,7 +342,9 @@ void Radio::loop() {
         this->diag_mode_crc_failed_[mode_idx]++;
       }
 
-      if (this->diag_verbose_) {
+      // Publish diagnostics to MQTT regardless of diag_verbose_
+      // (so YAML can silence logs but still get drop/trunc events).
+      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
         char payload[900];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
@@ -451,7 +359,10 @@ void Radio::loop() {
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
                    (unsigned) p->raw_got_len());
         }
+        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+      }
 
+      if (this->diag_verbose_) {
         ESP_LOGW(TAG,
                  "DROPPED packet: reason=%s mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
                  p->drop_reason().c_str(), mode, (unsigned) p->want_len(),
@@ -460,10 +371,6 @@ void Radio::loop() {
 
         if (this->diag_publish_raw_) {
           ESP_LOGW(TAG, "DROPPED raw(hex)=%s", p->raw_hex().c_str());
-        }
-
-        if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-          mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
         }
       }
     }
@@ -482,35 +389,18 @@ void Radio::loop() {
     this->diag_mode_rssi_ok_n_[mode_idx]++;
   }
 
-  auto &d = frame->data();
-  std::string mfr;
-  std::string id;
-  uint8_t ver = 0xFF;
-  uint8_t dev_type = 0xFF;
-  uint8_t ci = 0xFF;
-  const bool have_addr = try_extract_address_(d, mfr, id, ver, dev_type, ci);
-
-  if (have_addr) {
-    ESP_LOGI(TAG,
-             "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-             d.size(), frame->rssi(),
-             link_mode_name(frame->link_mode()),
-             frame->format().c_str(),
-             mfr.c_str(), id.c_str(), (unsigned) ver, (unsigned) dev_type, (unsigned) ci);
-  } else {
-    ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
-             d.size(), frame->rssi(),
-             link_mode_name(frame->link_mode()),
-             frame->format().c_str());
-  }
+  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s]",
+           frame->data().size(), frame->rssi(),
+           link_mode_name(frame->link_mode()),
+           frame->format().c_str());
 
   for (auto &handler : this->handlers_)
     handler(&frame.value());
 
   if (frame->handlers_count())
-    ESP_LOGD(TAG, "Telegram handled by %d handlers", frame->handlers_count());
+    ESP_LOGI(TAG, "Telegram handled by %d handlers", frame->handlers_count());
   else
-    ESP_LOGV(TAG, "Telegram not handled by any handler");
+    ESP_LOGD(TAG, "Telegram not handled by any handler");
 
   delete p;
 }
