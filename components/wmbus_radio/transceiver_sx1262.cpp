@@ -3,19 +3,56 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 
-// Semtech reference driver (Clear BSD) - avoids command-level bugs.
-extern "C" {
-#include "sx126x_hal.h"
-#include "sx126x.h"
-}
-
 namespace esphome {
 namespace wmbus_radio {
 
 static const char *TAG = "SX1262";
 
-// DIO3 TCXO voltage (datasheet encoding; Semtech driver uses same values)
+// SX126x commands (subset)
+static constexpr uint8_t CMD_SET_STANDBY = 0x80;
+static constexpr uint8_t CMD_SET_PACKET_TYPE = 0x8A;
+static constexpr uint8_t CMD_SET_RF_FREQUENCY = 0x86;
+static constexpr uint8_t CMD_SET_BUFFER_BASE_ADDRESS = 0x8F;
+static constexpr uint8_t CMD_SET_MODULATION_PARAMS = 0x8B;
+static constexpr uint8_t CMD_SET_PACKET_PARAMS = 0x8C;
+static constexpr uint8_t CMD_SET_DIO_IRQ_PARAMS = 0x08;
+static constexpr uint8_t CMD_SET_RX = 0x82;
+static constexpr uint8_t CMD_GET_IRQ_STATUS = 0x12;
+static constexpr uint8_t CMD_CLEAR_IRQ_STATUS = 0x02;
+static constexpr uint8_t CMD_GET_RX_BUFFER_STATUS = 0x13;
+static constexpr uint8_t CMD_READ_BUFFER = 0x1E;
+static constexpr uint8_t CMD_GET_PACKET_STATUS = 0x14;
+static constexpr uint8_t CMD_SET_DIO2_AS_RF_SWITCH_CTRL = 0x9D;
+static constexpr uint8_t CMD_SET_DIO3_AS_TCXO_CTRL = 0x97;
+static constexpr uint8_t CMD_CALIBRATE_IMAGE = 0x98;
+static constexpr uint8_t CMD_WRITE_REGISTER = 0x0D;
+
+// SX126x constants (subset)
+static constexpr uint8_t STANDBY_RC = 0x00;
+static constexpr uint8_t STANDBY_XOSC = 0x01;
+
+static constexpr uint8_t PACKET_TYPE_GFSK = 0x00;
+
+// GFSK settings
+static constexpr uint8_t GFSK_PULSE_SHAPE_BT_0_5 = 0x09;
+static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;
+static constexpr uint8_t GFSK_PREAMBLE_DETECT_16 = 0x05;
+static constexpr uint8_t GFSK_ADDRESS_FILT_OFF = 0x00;
+
+// NOTE: SX126x uses 0x00 for variable length, 0x01 for fixed length.
+// If set wrong, RX payload_len will be truncated (often to a small fixed size).
+static constexpr uint8_t GFSK_PACKET_VARIABLE = 0x00;
+
+static constexpr uint8_t GFSK_CRC_OFF = 0x01;
+static constexpr uint8_t GFSK_WHITENING_OFF = 0x00;
+
+// DIO3 TCXO voltage
 static constexpr uint8_t DIO3_OUTPUT_3_0 = 0x06;
+
+// IRQ mask bits
+static constexpr uint16_t IRQ_RX_DONE = 0x0002;
+static constexpr uint16_t IRQ_TIMEOUT = 0x0200;   // RxTxTimeout
+static constexpr uint16_t IRQ_CRC_ERROR = 0x0040; // CRC error
 
 // Sync word base register
 static constexpr uint16_t REG_SYNC_WORD_0 = 0x06C0;
@@ -29,8 +66,8 @@ static constexpr uint8_t RX_GAIN_BOOSTED = 0x96;
 static constexpr uint32_t XTAL_FREQ = 32000000UL;
 
 static inline void u16_to_be(uint16_t v, uint8_t &msb, uint8_t &lsb) {
-  msb = (uint8_t) ((v >> 8) & 0xFF);
-  lsb = (uint8_t) (v & 0xFF);
+  msb = (uint8_t)((v >> 8) & 0xFF);
+  lsb = (uint8_t)(v & 0xFF);
 }
 
 void SX1262::wait_while_busy_() {
@@ -46,7 +83,59 @@ void SX1262::wait_while_busy_() {
   }
 }
 
-// Legacy helpers kept for troubleshooting; Semtech driver is used for all radio ops.
+// --- Semtech sx126x_driver HAL helpers ---
+bool SX1262::semtech_hal_write(const uint8_t *command, uint16_t command_length, const uint8_t *data,
+                               uint16_t data_length) {
+  if (this->delegate_ == nullptr)
+    return false;
+  this->wait_while_busy_();
+  this->delegate_->begin_transaction();
+  for (uint16_t i = 0; i < command_length; i++)
+    this->delegate_->transfer(command[i]);
+  for (uint16_t i = 0; i < data_length; i++)
+    this->delegate_->transfer(data[i]);
+  this->delegate_->end_transaction();
+  this->wait_while_busy_();
+  return true;
+}
+
+bool SX1262::semtech_hal_read(const uint8_t *command, uint16_t command_length, uint8_t *data, uint16_t data_length) {
+  if (this->delegate_ == nullptr)
+    return false;
+  this->wait_while_busy_();
+  this->delegate_->begin_transaction();
+  for (uint16_t i = 0; i < command_length; i++)
+    this->delegate_->transfer(command[i]);
+  for (uint16_t i = 0; i < data_length; i++)
+    data[i] = this->delegate_->transfer(0x00);
+  this->delegate_->end_transaction();
+  this->wait_while_busy_();
+  return true;
+}
+
+bool SX1262::semtech_hal_reset() {
+  if (this->reset_pin_ == nullptr)
+    return false;
+  // Same sequence as RadioTransceiver::reset(), but explicit.
+  this->reset_pin_->digital_write(false);
+  delay(10);
+  this->reset_pin_->digital_write(true);
+  delay(10);
+  return true;
+}
+
+bool SX1262::semtech_hal_wakeup() {
+  if (this->delegate_ == nullptr)
+    return false;
+  // Semtech wake-up: NSS low + 1 byte, then wait for BUSY low.
+  this->wait_while_busy_();
+  this->delegate_->begin_transaction();
+  (void) this->delegate_->transfer(0x00);
+  this->delegate_->end_transaction();
+  this->wait_while_busy_();
+  return true;
+}
+
 void SX1262::cmd_write_(uint8_t cmd, std::initializer_list<uint8_t> args) {
   this->wait_while_busy_();
   this->delegate_->begin_transaction();
@@ -71,13 +160,12 @@ void SX1262::cmd_read_(uint8_t cmd, std::initializer_list<uint8_t> args, uint8_t
 }
 
 void SX1262::write_register_(uint16_t addr, std::initializer_list<uint8_t> data) {
-  // Keep a small helper for single-register tweaks.
-  // Main init uses sx126x_write_register.
   uint8_t msb, lsb;
   u16_to_be(addr, msb, lsb);
+
   this->wait_while_busy_();
   this->delegate_->begin_transaction();
-  this->delegate_->transfer(0x0D);  // WriteRegister
+  this->delegate_->transfer(CMD_WRITE_REGISTER);
   this->delegate_->transfer(msb);
   this->delegate_->transfer(lsb);
   for (auto b : data)
@@ -87,52 +175,50 @@ void SX1262::write_register_(uint16_t addr, std::initializer_list<uint8_t> data)
 }
 
 void SX1262::set_rf_frequency_(uint32_t freq_hz) {
-  (void) sx126x_set_rf_freq(this, freq_hz);
+  uint64_t rf = ((uint64_t) freq_hz << 25) / XTAL_FREQ;
+  cmd_write_(CMD_SET_RF_FREQUENCY,
+             {(uint8_t) ((rf >> 24) & 0xFF), (uint8_t) ((rf >> 16) & 0xFF), (uint8_t) ((rf >> 8) & 0xFF),
+              (uint8_t) (rf & 0xFF)});
 }
 
 void SX1262::set_sync_word_(uint8_t sync2) {
-  // 16-bit sync word: 0x54?? (Block A/B selector in 2nd byte)
-  const uint8_t sw[2] = {0x54, sync2};
-  (void) sx126x_set_gfsk_sync_word(this, sw, sizeof(sw));
+  this->write_register_(REG_SYNC_WORD_0, {0x54, sync2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
 }
 
 bool SX1262::has_rx_done_() {
-  sx126x_irq_mask_t irq = SX126X_IRQ_NONE;
-  (void) sx126x_get_irq_status(this, &irq);
-  return (irq & SX126X_IRQ_RX_DONE) != 0;
+  uint8_t irq[2]{};
+  this->cmd_read_(CMD_GET_IRQ_STATUS, {}, irq, sizeof(irq));
+  const uint16_t flags = ((uint16_t) irq[0] << 8) | irq[1];
+  return (flags & IRQ_RX_DONE) != 0;
 }
 
 bool SX1262::load_rx_buffer_() {
-  sx126x_irq_mask_t irq = SX126X_IRQ_NONE;
-  (void) sx126x_get_irq_status(this, &irq);
-  if ((irq & SX126X_IRQ_RX_DONE) == 0)
+  if (!this->has_rx_done_())
     return false;
 
-  // If CRC error, drop without touching buffer (mirrors Semtech flow).
-  if ((irq & SX126X_IRQ_CRC_ERROR) != 0) {
-    (void) sx126x_clear_irq_status(this, SX126X_IRQ_ALL);
-    return false;
-  }
-
-  sx126x_rx_buffer_status_t rxbs;
-  (void) sx126x_get_rx_buffer_status(this, &rxbs);
-  const uint8_t payload_len = rxbs.pld_len_in_bytes;
-  const uint8_t start_ptr = rxbs.buffer_start_pointer;
+  uint8_t st[2]{};
+  this->cmd_read_(CMD_GET_RX_BUFFER_STATUS, {}, st, sizeof(st));
+  const uint8_t payload_len = st[0];
+  const uint8_t start_ptr = st[1];
 
   if (payload_len == 0) {
-    (void) sx126x_clear_irq_status(this, SX126X_IRQ_ALL);
+    this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
     return false;
-  }
-
-  // Hard hint: payload_len is uint8 -> 255 is the max in packet mode.
-  if (payload_len == 0xFF) {
-    ESP_LOGW(TAG, "RX payload_len==255 (hit packet-mode limit) -> may be truncated/drop for long telegrams");
   }
 
   this->rx_buffer_.assign(payload_len, 0);
-  (void) sx126x_read_buffer(this, start_ptr, this->rx_buffer_.data(), payload_len);
 
-  (void) sx126x_clear_irq_status(this, SX126X_IRQ_ALL);
+  this->wait_while_busy_();
+  this->delegate_->begin_transaction();
+  this->delegate_->transfer(CMD_READ_BUFFER);
+  this->delegate_->transfer(start_ptr);
+  (void) this->delegate_->transfer(0x00);
+  for (size_t i = 0; i < this->rx_buffer_.size(); i++)
+    this->rx_buffer_[i] = this->delegate_->transfer(0x00);
+  this->delegate_->end_transaction();
+  this->wait_while_busy_();
+
+  this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
 
   this->rx_idx_ = 0;
   this->rx_len_ = this->rx_buffer_.size();
@@ -162,58 +248,67 @@ void SX1262::setup() {
     this->fem_pa_pin_->digital_write(false);
   }
 
-  // Reset via Semtech HAL
-  (void) sx126x_reset(this);
+  this->reset();
   delay(10);
 
   // Apply RX gain (datasheet values)
   const uint8_t gain =
       (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? RX_GAIN_POWER_SAVING : RX_GAIN_BOOSTED;
-  (void) sx126x_write_register(this, REG_RX_GAIN, &gain, 1);
+  this->write_register_(REG_RX_GAIN, {gain});
   ESP_LOGI(TAG, "RX gain: %s", (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? "POWER_SAVING" : "BOOSTED");
 
-  (void) sx126x_set_standby(this, SX126X_STANDBY_CFG_RC);
+  this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
 
   // DIO2 RF switch
-  (void) sx126x_set_dio2_as_rf_sw_ctrl(this, this->dio2_rf_switch_);
+  this->cmd_write_(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, {uint8_t(this->dio2_rf_switch_ ? 0x01 : 0x00)});
 
   // TCXO only if enabled
   if (this->has_tcxo_) {
-    // 0x000040 ~= 1ms in Semtech RTC steps (matches old behaviour)
-    (void) sx126x_set_dio3_as_tcxo_ctrl(this, (sx126x_tcxo_ctrl_voltages_t) DIO3_OUTPUT_3_0, 0x000040);
+    this->cmd_write_(CMD_SET_DIO3_AS_TCXO_CTRL, {DIO3_OUTPUT_3_0, 0x00, 0x00, 0x40});
     delay(5);
   }
 
-  (void) sx126x_cal_img(this, 0xD7, 0xDB);
+  this->cmd_write_(CMD_CALIBRATE_IMAGE, {0xD7, 0xDB});
 
-  (void) sx126x_set_pkt_type(this, SX126X_PKT_TYPE_GFSK);
+  this->cmd_write_(CMD_SET_PACKET_TYPE, {PACKET_TYPE_GFSK});
   this->set_rf_frequency_(868950000UL);
 
-  (void) sx126x_set_buffer_base_address(this, 0x00, 0x00);
+  this->cmd_write_(CMD_SET_BUFFER_BASE_ADDRESS, {0x00, 0x00});
 
-  // Modulation params: 100 kbps, BT=0.5, BW=234.3k, fdev=50k
-  sx126x_mod_params_gfsk_t mp{};
-  mp.br_in_bps = 100000;
-  mp.fdev_in_hz = 50000;
-  mp.pulse_shape = SX126X_GFSK_PULSE_SHAPE_BT_05;
-  mp.bw_dsb_param = SX126X_GFSK_BW_234300;
-  (void) sx126x_set_gfsk_mod_params(this, &mp);
+  // Modulation params: 100 kbps, BT=0.5, BW, fdev=50k
+  const uint32_t bitrate = 100000;
+  const uint32_t br = (XTAL_FREQ * 32UL) / bitrate;
 
-  // Packet params (variable length, 16-bit sync, no CRC/whitening)
-  sx126x_pkt_params_gfsk_t pp{};
-  pp.preamble_len_in_bits = 64;
-  pp.preamble_detector = SX126X_GFSK_PREAMBLE_DETECTOR_MIN_16BITS;
-  pp.sync_word_len_in_bits = 16;
-  pp.address_filtering = SX126X_GFSK_ADDRESS_FILTERING_DISABLE;
-  pp.header_type = SX126X_GFSK_PKT_VAR_LEN;
-  pp.pld_len_in_bytes = 0xFF;  // max payload accepted
-  pp.crc_type = SX126X_GFSK_CRC_OFF;
-  pp.dc_free = SX126X_GFSK_DC_FREE_OFF;
-  (void) sx126x_set_gfsk_pkt_params(this, &pp);
+  const uint32_t freq_dev = 50000;
+  const uint32_t fdev = ((uint64_t) freq_dev << 25) / XTAL_FREQ;
+
+  this->cmd_write_(CMD_SET_MODULATION_PARAMS,
+                   {(uint8_t) ((br >> 16) & 0xFF), (uint8_t) ((br >> 8) & 0xFF), (uint8_t) (br & 0xFF),
+                    GFSK_PULSE_SHAPE_BT_0_5, GFSK_RX_BW_234_3, (uint8_t) ((fdev >> 16) & 0xFF),
+                    (uint8_t) ((fdev >> 8) & 0xFF), (uint8_t) (fdev & 0xFF)});
+
+  // Packet params
+  const uint16_t preamble_bits = 64;
+  const uint8_t preamble_msb = (uint8_t) ((preamble_bits >> 8) & 0xFF);
+  const uint8_t preamble_lsb = (uint8_t) (preamble_bits & 0xFF);
+
+  this->cmd_write_(CMD_SET_PACKET_PARAMS,
+                   {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_16,
+                    0x10,  // 16 bits sync
+                    GFSK_ADDRESS_FILT_OFF, GFSK_PACKET_VARIABLE,
+                    0xFF,  // max payload
+                    GFSK_CRC_OFF, GFSK_WHITENING_OFF});
 
   // IRQ routing -> DIO1
-  const sx126x_irq_mask_t mask = (sx126x_irq_mask_t) (SX126X_IRQ_RX_DONE | SX126X_IRQ_CRC_ERROR | SX126X_IRQ_TIMEOUT);
-  (void) sx126x_set_dio_irq_params(this, mask, mask, SX126X_IRQ_NONE, SX126X_IRQ_NONE);
+  const uint16_t mask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT;
+  const uint8_t mask_msb = (uint8_t) ((mask >> 8) & 0xFF);
+  const uint8_t mask_lsb = (uint8_t) (mask & 0xFF);
+
+  this->cmd_write_(CMD_SET_DIO_IRQ_PARAMS,
+                   {mask_msb, mask_lsb,  // IRQ mask
+                    mask_msb, mask_lsb,  // DIO1 mask
+                    0x00, 0x00,          // DIO2 mask
+                    0x00, 0x00});        // DIO3 mask
 
   this->restart_rx();
   ESP_LOGV(TAG, "SX1262 setup done");
@@ -229,11 +324,11 @@ void SX1262::restart_rx() {
 
   this->set_sync_word_(sync2);
 
-  (void) sx126x_clear_irq_status(this, SX126X_IRQ_ALL);
-  (void) sx126x_set_standby(this, SX126X_STANDBY_CFG_XOSC);
+  this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
+  this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
 
   // RX continuous
-  (void) sx126x_set_rx(this, SX126X_RX_CONTINUOUS);
+  this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
 
   this->rx_loaded_ = false;
   this->rx_idx_ = 0;
@@ -255,10 +350,22 @@ optional<uint8_t> SX1262::read() {
 }
 
 int8_t SX1262::get_rssi() {
-  sx126x_pkt_status_gfsk_t st{};
-  (void) sx126x_get_gfsk_pkt_status(this, &st);
-  ESP_LOGD(TAG, "PKT_STATUS: rssi_sync=%ddBm rssi_avg=%ddBm", (int) st.rssi_sync, (int) st.rssi_avg);
-  return st.rssi_avg;
+  // SX126x "GetPacketStatus" returns 3 bytes.
+  // For GFSK typically:
+  //   st[0] = Rx status
+  //   st[1] = RSSI on sync (rssiSync)
+  //   st[2] = RSSI average (rssiAvg)
+  // Values are 0.5 dB steps, returned as unsigned where dBm = -value/2.
+  uint8_t st[3]{};
+  this->cmd_read_(CMD_GET_PACKET_STATUS, {}, st, sizeof(st));
+
+  const int rssi_sync = -((int) st[1]) / 2;
+  const int rssi_avg = -((int) st[2]) / 2;
+  ESP_LOGD(TAG, "PKT_STATUS: rx=%02X sync=%02X avg=%02X -> rssi_sync=%ddBm rssi_avg=%ddBm", st[0], st[1], st[2], rssi_sync,
+           rssi_avg);
+
+  // Keep previous behaviour: return average RSSI.
+  return (int8_t) rssi_avg;
 }
 
 const char *SX1262::get_name() { return TAG; }

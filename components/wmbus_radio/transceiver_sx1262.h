@@ -3,12 +3,6 @@
 #include "transceiver.h"
 #include "esphome/core/hal.h"
 
-// Semtech reference driver HAL (Clear BSD). We use it to avoid command-level bugs.
-// Files are vendored under components/wmbus_radio/semtech_sx126x_driver/
-extern "C" {
-#include "sx126x_hal.h"
-}
-
 #include <vector>
 
 namespace esphome {
@@ -24,6 +18,15 @@ enum SX1262RxGain : uint8_t {
 class SX1262 : public RadioTransceiver {
  public:
   SX1262() { this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE; }
+
+  // --- Semtech sx126x_driver HAL helpers ---
+  // These wrappers exist so the C HAL (sx126x_hal_*.c) does not need to access
+  // protected members of SPIClient / RadioTransceiver.
+  bool semtech_hal_write(const uint8_t *command, uint16_t command_length, const uint8_t *data,
+                         uint16_t data_length);
+  bool semtech_hal_read(const uint8_t *command, uint16_t command_length, uint8_t *data, uint16_t data_length);
+  bool semtech_hal_reset();
+  bool semtech_hal_wakeup();
 
   // RX gain (BOOSTED/POWER_SAVING)
   void set_rx_gain(SX1262RxGain gain) { this->rx_gain_ = gain; }
@@ -42,33 +45,6 @@ class SX1262 : public RadioTransceiver {
   optional<uint8_t> read() override;
   int8_t get_rssi() override;
   const char *get_name() override;
-
-  // Public SPI helpers for Semtech HAL (avoid accessing protected SPIClient members from C HAL)
-  bool spi_delegate_ready_() const { return this->delegate_ != nullptr; }
-  void spi_begin_for_semtech_() {
-    this->wait_while_busy_();
-    this->delegate_->begin_transaction();
-  }
-  void spi_end_for_semtech_() {
-    this->delegate_->end_transaction();
-    this->wait_while_busy_();
-  }
-  uint8_t spi_transfer_for_semtech_(uint8_t v) { return this->delegate_->transfer(v); }
-  bool reset_pin_ready_() const { return this->reset_pin_ != nullptr; }
-  void reset_pulse_for_semtech_() {
-    this->reset_pin_->digital_write(false);
-    esphome::delay(10);
-    this->reset_pin_->digital_write(true);
-    esphome::delay(10);
-  }
-
-  // Semtech HAL entry points (friend to access protected pins/spi)
-  friend sx126x_hal_status_t sx126x_hal_write(const void *context, const uint8_t *command, const uint16_t command_length,
-                                              const uint8_t *data, const uint16_t data_length);
-  friend sx126x_hal_status_t sx126x_hal_read(const void *context, const uint8_t *command, const uint16_t command_length,
-                                             uint8_t *data, const uint16_t data_length);
-  friend sx126x_hal_status_t sx126x_hal_reset(const void *context);
-  friend sx126x_hal_status_t sx126x_hal_wakeup(const void *context);
 
  protected:
   void wait_while_busy_();
