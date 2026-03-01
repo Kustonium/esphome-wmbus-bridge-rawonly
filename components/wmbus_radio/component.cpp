@@ -452,8 +452,13 @@ ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver
          d.size(), frame->rssi(),
          link_mode_name(frame->link_mode()),
          frame->format().c_str(),
-         mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);for (auto &handler : this->handlers_)
-    handler(&frame.value());
+         mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);
+
+auto len = d.size();
+if (len >= 240) ESP_LOGW(TAG, "Large telegram (%zu bytes) close to SX1262 limit (255) – risk of truncate/drop", len);
+
+for (auto &handler : this->handlers_)
+  handler(&frame.value());
 
   if (frame->handlers_count())
     ESP_LOGI(TAG, "Telegram handled by %d handlers", frame->handlers_count());
