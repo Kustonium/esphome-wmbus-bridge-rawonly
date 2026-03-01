@@ -1,10 +1,10 @@
 #include "transceiver_sx1262.h"
 #include "esphome/core/log.h"
 
-// Semtech headers needed for sx126x_hal_status_t and SX126X_NOP
 extern "C" {
 #include "sx126x_hal.h"
 #include "sx126x.h"
+}
 }
 namespace {
 static const char *TAG = "SX1262_HAL";
