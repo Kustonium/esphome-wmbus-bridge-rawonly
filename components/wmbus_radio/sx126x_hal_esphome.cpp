@@ -3,8 +3,8 @@
 
 // Semtech headers needed for sx126x_hal_status_t and SX126X_NOP
 extern "C" {
-#include "semtech_sx126x_driver/sx126x_hal.h"
-#include "semtech_sx126x_driver/sx126x.h"
+#include "sx126x_hal.h"
+#include "sx126x.h"
 }
 namespace {
 static const char *TAG = "SX1262_HAL";

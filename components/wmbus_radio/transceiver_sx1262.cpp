@@ -5,8 +5,8 @@
 
 // Semtech reference driver (Clear BSD) - avoids command-level bugs.
 extern "C" {
-#include "semtech_sx126x_driver/sx126x.h"
-}
+#include "sx126x_hal.h"
+#include "sx126x.h"
 
 namespace esphome {
 namespace wmbus_radio {
