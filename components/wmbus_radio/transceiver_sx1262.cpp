@@ -83,59 +83,6 @@ void SX1262::wait_while_busy_() {
   }
 }
 
-// --- Semtech sx126x_driver HAL helpers ---
-bool SX1262::semtech_hal_write(const uint8_t *command, uint16_t command_length, const uint8_t *data,
-                               uint16_t data_length) {
-  if (this->delegate_ == nullptr)
-    return false;
-  this->wait_while_busy_();
-  this->delegate_->begin_transaction();
-  for (uint16_t i = 0; i < command_length; i++)
-    this->delegate_->transfer(command[i]);
-  for (uint16_t i = 0; i < data_length; i++)
-    this->delegate_->transfer(data[i]);
-  this->delegate_->end_transaction();
-  this->wait_while_busy_();
-  return true;
-}
-
-bool SX1262::semtech_hal_read(const uint8_t *command, uint16_t command_length, uint8_t *data, uint16_t data_length) {
-  if (this->delegate_ == nullptr)
-    return false;
-  this->wait_while_busy_();
-  this->delegate_->begin_transaction();
-  for (uint16_t i = 0; i < command_length; i++)
-    this->delegate_->transfer(command[i]);
-  for (uint16_t i = 0; i < data_length; i++)
-    data[i] = this->delegate_->transfer(0x00);
-  this->delegate_->end_transaction();
-  this->wait_while_busy_();
-  return true;
-}
-
-bool SX1262::semtech_hal_reset() {
-  if (this->reset_pin_ == nullptr)
-    return false;
-  // Same sequence as RadioTransceiver::reset(), but explicit.
-  this->reset_pin_->digital_write(false);
-  delay(10);
-  this->reset_pin_->digital_write(true);
-  delay(10);
-  return true;
-}
-
-bool SX1262::semtech_hal_wakeup() {
-  if (this->delegate_ == nullptr)
-    return false;
-  // Semtech wake-up: NSS low + 1 byte, then wait for BUSY low.
-  this->wait_while_busy_();
-  this->delegate_->begin_transaction();
-  (void) this->delegate_->transfer(0x00);
-  this->delegate_->end_transaction();
-  this->wait_while_busy_();
-  return true;
-}
-
 void SX1262::cmd_write_(uint8_t cmd, std::initializer_list<uint8_t> args) {
   this->wait_while_busy_();
   this->delegate_->begin_transaction();
@@ -315,18 +262,17 @@ void SX1262::setup() {
 }
 
 void SX1262::restart_rx() {
-  // NOTE:
-  // The previous "ping-pong" sync switching (0x3D/0xCD) can increase false
-  // locks on noise in some installations and then you see lots of 3-of-6 symbol
-  // errors (dropped packets), which *looks* like "slower reading".
-  // For WM-Bus T-mode-only setups, locking to a single sync variant is usually
-  // more stable.
-  // Default lock: 0x3D (common).
-  this->set_sync_word_(0x3D);
+  // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
+  // by changing the 2nd sync byte. This lets us catch both variants
+  // without user-side configuration.
+  // Bias towards Block B: every 4th hop uses Block A.
+  const uint8_t sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
+  this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
+
+  this->set_sync_word_(sync2);
 
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
-  // Keep RC standby (faster, less churn) then go to RX.
-  this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
+  this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
 
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});

@@ -19,15 +19,6 @@ class SX1262 : public RadioTransceiver {
  public:
   SX1262() { this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE; }
 
-  // --- Semtech sx126x_driver HAL helpers ---
-  // These wrappers exist so the C HAL (sx126x_hal_*.c) does not need to access
-  // protected members of SPIClient / RadioTransceiver.
-  bool semtech_hal_write(const uint8_t *command, uint16_t command_length, const uint8_t *data,
-                         uint16_t data_length);
-  bool semtech_hal_read(const uint8_t *command, uint16_t command_length, uint8_t *data, uint16_t data_length);
-  bool semtech_hal_reset();
-  bool semtech_hal_wakeup();
-
   // RX gain (BOOSTED/POWER_SAVING)
   void set_rx_gain(SX1262RxGain gain) { this->rx_gain_ = gain; }
 
