@@ -6,7 +6,7 @@
 // Semtech reference driver HAL (Clear BSD). We use it to avoid command-level bugs.
 // Files are vendored under components/wmbus_radio/semtech_sx126x_driver/
 extern "C" {
-#include "semtech_sx126x_driver/sx126x_hal.h"
+#include "sx126x_hal.h"
 }
 
 #include <vector>
