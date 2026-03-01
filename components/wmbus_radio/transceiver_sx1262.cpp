@@ -315,17 +315,18 @@ void SX1262::setup() {
 }
 
 void SX1262::restart_rx() {
-  // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
-  // by changing the 2nd sync byte. This lets us catch both variants
-  // without user-side configuration.
-  // Bias towards Block B: every 4th hop uses Block A.
-  const uint8_t sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-  this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-
-  this->set_sync_word_(sync2);
+  // NOTE:
+  // The previous "ping-pong" sync switching (0x3D/0xCD) can increase false
+  // locks on noise in some installations and then you see lots of 3-of-6 symbol
+  // errors (dropped packets), which *looks* like "slower reading".
+  // For WM-Bus T-mode-only setups, locking to a single sync variant is usually
+  // more stable.
+  // Default lock: 0x3D (common).
+  this->set_sync_word_(0x3D);
 
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
-  this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
+  // Keep RC standby (faster, less churn) then go to RX.
+  this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
 
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});

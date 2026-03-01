@@ -388,75 +388,67 @@ void Radio::loop() {
     this->diag_mode_rssi_ok_sum_[mode_idx] += (int32_t) frame->rssi();
     this->diag_mode_rssi_ok_n_[mode_idx]++;
   }
-auto &d = frame->data();
 
-const char *mfr = "???";
-char id_str[9] = "????????";
-uint8_t ver = 0xFF;
-uint8_t dev = 0xFF;
-uint8_t ci  = 0xFF;
+  // Best-effort header decode so the user can see *what* is being received.
+  // Works both for frames with L-field (first byte == len) and without.
+  auto &d = frame->data();
 
-auto is_bcd = [](uint8_t b) -> bool {
-  return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
-};
+  const char *mfr = "???";
+  char id_str[9] = "????????";
+  uint8_t ver = 0xFF;
+  uint8_t dev = 0xFF;
+  uint8_t ci = 0xFF;
 
-auto decode_mfr = [](uint16_t m, char out[4]) {
-  out[0] = (char)(((m >> 10) & 0x1F) + 64);
-  out[1] = (char)(((m >> 5) & 0x1F) + 64);
-  out[2] = (char)((m & 0x1F) + 64);
-  out[3] = 0;
-  auto ok = [](char c) { return c >= 'A' && c <= 'Z'; };
-  if (!ok(out[0]) || !ok(out[1]) || !ok(out[2])) {
-    out[0] = out[1] = out[2] = '?';
-  }
-};
+  auto is_bcd = [](uint8_t b) -> bool { return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9); };
+  auto decode_mfr = [](uint16_t m, char out[4]) {
+    out[0] = (char) (((m >> 10) & 0x1F) + 64);
+    out[1] = (char) (((m >> 5) & 0x1F) + 64);
+    out[2] = (char) ((m & 0x1F) + 64);
+    out[3] = 0;
+    auto ok = [](char c) { return c >= 'A' && c <= 'Z'; };
+    if (!ok(out[0]) || !ok(out[1]) || !ok(out[2])) {
+      out[0] = out[1] = out[2] = '?';
+    }
+  };
 
-char mfr_buf[4] = "???";
+  char mfr_buf[4] = "???";
+  int base = -1;
+  if (d.size() >= 10 && (size_t) (d[0] + 1) == d.size())
+    base = 1;  // L-field present
+  else if (d.size() >= 9)
+    base = 0;  // no L-field
 
-// base = index of C-field in d[]
-int base = -1;
-// Typical EN13757-3 long frame: [0]=L, [1]=C, [2..]=...
-if (d.size() >= 10 && (size_t)(d[0] + 1) == d.size())
-  base = 1;
-// Fallback: no L-field stored, [0]=C
-else if (d.size() >= 9)
-  base = 0;
+  if (base >= 0 && (int) d.size() >= base + 10) {
+    const uint16_t m = (uint16_t) d[base + 1] | ((uint16_t) d[base + 2] << 8);
+    decode_mfr(m, mfr_buf);
+    mfr = mfr_buf;
 
-if (base >= 0 && (int)d.size() >= base + 10) {
-  uint16_t m = (uint16_t)d[base + 1] | ((uint16_t)d[base + 2] << 8);
-  decode_mfr(m, mfr_buf);
-  mfr = mfr_buf;
+    const bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
+    if (bcd_ok) {
+      snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
+               (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
+               (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
+               (d[base + 4] >> 4) & 0x0F, d[base + 4] & 0x0F,
+               (d[base + 3] >> 4) & 0x0F, d[base + 3] & 0x0F);
+    } else {
+      snprintf(id_str, sizeof(id_str), "%02X%02X%02X%02X", d[base + 6], d[base + 5], d[base + 4], d[base + 3]);
+    }
 
-  // ID bytes: base+3..base+6 (little-endian) -> print as base+6..base+3
-  bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
-  if (bcd_ok) {
-    snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
-             (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
-             (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
-             (d[base + 4] >> 4) & 0x0F, d[base + 4] & 0x0F,
-             (d[base + 3] >> 4) & 0x0F, d[base + 3] & 0x0F);
-  } else {
-    // Fallback HEX if nibbles are not BCD
-    snprintf(id_str, sizeof(id_str), "%02X%02X%02X%02X",
-             d[base + 6], d[base + 5], d[base + 4], d[base + 3]);
+    ver = d[base + 7];
+    dev = d[base + 8];
+    ci = d[base + 9];
   }
 
-  ver = d[base + 7];
-  dev = d[base + 8];
-  ci  = d[base + 9];
-}
+  if (d.size() >= 240) {
+    ESP_LOGW(TAG, "Large telegram: %zu bytes (SX1262 packet-mode max is 255)", d.size());
+  }
 
-ESP_LOGI(TAG,
-         "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-         d.size(), frame->rssi(),
-         link_mode_name(frame->link_mode()),
-         frame->format().c_str(),
-         mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
-
-// Warning: SX1262 packet-mode payload is limited to 255 bytes.
-if (d.size() >= 240) {
-  ESP_LOGW(TAG, "Large telegram (%zu bytes) close to SX1262 limit (255) – risk of truncate/drop", d.size());
-}
+  ESP_LOGI(TAG,
+           "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+           d.size(), frame->rssi(),
+           link_mode_name(frame->link_mode()),
+           frame->format().c_str(),
+           mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
 
   for (auto &handler : this->handlers_)
     handler(&frame.value());
@@ -476,21 +468,12 @@ void Radio::wakeup_receiver_task_from_isr(TaskHandle_t *arg) {
 }
 
 void Radio::receive_frame() {
-  // Ping-pong helper: restart RX in short windows to alternate sync bytes.
-  // This dramatically improves hit rate for devices that transmit rarely.
-  const uint32_t total_wait_ms = 60000;
-  const uint32_t hop_ms = 500;
-  uint32_t waited = 0;
-  bool got_irq = false;
-  while (waited < total_wait_ms) {
-    this->radio->restart_rx();
-    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(hop_ms))) {
-      got_irq = true;
-      break;
-    }
-    waited += hop_ms;
-  }
-  if (!got_irq) {
+  // Keep the radio in continuous RX and simply wait for an IRQ.
+  // Restarting RX in short windows (sync hopping) can create a lot of false
+  // locks in noisy environments and inflate "dropped" counters.
+  // If no IRQ arrives for a long time, we restart once as a safety net.
+  this->radio->restart_rx();
+  if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000))) {
     ESP_LOGD(TAG, "Radio interrupt timeout");
     return;
   }
