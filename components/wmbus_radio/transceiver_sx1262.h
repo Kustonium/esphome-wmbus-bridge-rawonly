@@ -42,6 +42,7 @@ class SX1262 : public RadioTransceiver {
   optional<uint8_t> read() override;
   int8_t get_rssi() override;
   const char *get_name() override;
+  bool read_chip_diag(RadioChipDiag &out) override;
 
  protected:
   void wait_while_busy_();
@@ -89,6 +90,9 @@ class SX1262 : public RadioTransceiver {
   // In long-GFSK mode we stop RX (standby) after capture, so GetPacketStatus
   // may return zeros later. Cache it here.
   int8_t last_rssi_dbm_{0};
+
+  // Best-effort cached IRQ status around the last RX event.
+  uint16_t last_irq_status_{0};
 };
 
 }  // namespace wmbus_radio
