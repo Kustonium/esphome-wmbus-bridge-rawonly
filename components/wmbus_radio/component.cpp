@@ -347,36 +347,19 @@ void Radio::loop() {
       // Publish diagnostics to MQTT regardless of diag_verbose_
       // (so YAML can silence logs but still get drop/trunc events).
       if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        // Extra headroom: raw hex can be long, and we may append chip diagnostics.
-        char payload[1400];
-        char chip_diag[260];
-        chip_diag[0] = 0;
-
-        // Best-effort Semtech-style diagnostics (SX126x). Published only on drops.
-        RadioChipDiag cd;
-        if (this->radio != nullptr && this->radio->read_chip_diag(cd)) {
-          // Keep it compact and machine-friendly.
-          // irq_status/device_errors are also useful in hex.
-          snprintf(chip_diag, sizeof(chip_diag),
-                   ",\"chip\":{\"irq\":%u,\"irq_hex\":\"%04X\",\"dev_err\":%u,\"dev_err_hex\":\"%04X\",\"stats\":{\"rx\":%u,\"crc\":%u,\"len\":%u}}",
-                   (unsigned) cd.irq_status, (unsigned) cd.irq_status,
-                   (unsigned) cd.device_errors, (unsigned) cd.device_errors,
-                   (unsigned) cd.stats_pkt_received,
-                   (unsigned) cd.stats_pkt_crc_error,
-                   (unsigned) cd.stats_pkt_len_error);
-        }
+        char payload[900];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"%s}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len(), p->raw_hex().c_str(), chip_diag);
+                   (unsigned) p->raw_got_len(), p->raw_hex().c_str());
         } else {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u%s}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len(), chip_diag);
+                   (unsigned) p->raw_got_len());
         }
         mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
       }

@@ -23,9 +23,6 @@ static constexpr uint8_t CMD_GET_RX_BUFFER_STATUS = 0x13;
 static constexpr uint8_t CMD_READ_BUFFER = 0x1E;
 static constexpr uint8_t CMD_GET_PACKET_STATUS = 0x14;
 static constexpr uint8_t CMD_GET_RSSI_INST = 0x15;
-static constexpr uint8_t CMD_GET_STATS = 0x10;
-static constexpr uint8_t CMD_GET_DEVICE_ERRORS = 0x17;
-static constexpr uint8_t CMD_CLR_DEVICE_ERRORS = 0x07;
 static constexpr uint8_t CMD_SET_DIO2_AS_RF_SWITCH_CTRL = 0x9D;
 static constexpr uint8_t CMD_SET_DIO3_AS_TCXO_CTRL = 0x97;
 static constexpr uint8_t CMD_CALIBRATE_IMAGE = 0x98;
@@ -157,8 +154,7 @@ uint8_t SX1262::read_register8_(uint16_t addr) {
 uint16_t SX1262::get_irq_status_() {
   uint8_t st[2]{};
   this->cmd_read_(CMD_GET_IRQ_STATUS, {}, st, sizeof(st));
-  this->last_irq_status_ = (uint16_t(st[0]) << 8) | uint16_t(st[1]);
-  return this->last_irq_status_;
+  return (uint16_t(st[0]) << 8) | uint16_t(st[1]);
 }
 
 
@@ -193,33 +189,10 @@ void SX1262::set_sync_word_(uint8_t sync2) {
 }
 
 bool SX1262::has_rx_done_() {
-  const uint16_t flags = this->get_irq_status_();
+  uint8_t irq[2]{};
+  this->cmd_read_(CMD_GET_IRQ_STATUS, {}, irq, sizeof(irq));
+  const uint16_t flags = ((uint16_t) irq[0] << 8) | irq[1];
   return (flags & IRQ_RX_DONE) != 0;
-}
-
-bool SX1262::read_chip_diag(RadioChipDiag &out) {
-  // IRQ status is cached best-effort during RX operations.
-  out.irq_status = this->last_irq_status_;
-  out.has_irq = true;
-
-  // Device errors (Semtech SX126x: opcode 0x17). Two bytes (MSB first).
-  {
-    uint8_t b[2]{};
-    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, b, sizeof(b));
-    out.device_errors = (uint16_t(b[0]) << 8) | uint16_t(b[1]);
-    out.has_device_errors = true;
-  }
-
-  // Packet statistics (Semtech SX126x: opcode 0x10). Six bytes: rx/crc/len.
-  {
-    uint8_t s[6]{};
-    this->cmd_read_(CMD_GET_STATS, {}, s, sizeof(s));
-    out.stats_pkt_received = (uint16_t(s[0]) << 8) | uint16_t(s[1]);
-    out.stats_pkt_crc_error = (uint16_t(s[2]) << 8) | uint16_t(s[3]);
-    out.stats_pkt_len_error = (uint16_t(s[4]) << 8) | uint16_t(s[5]);
-    out.has_stats = true;
-  }
-  return true;
 }
 
 bool SX1262::load_rx_buffer_() {
