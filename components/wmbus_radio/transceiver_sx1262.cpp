@@ -35,9 +35,8 @@ static constexpr uint8_t PACKET_TYPE_GFSK = 0x00;
 
 // GFSK settings
 static constexpr uint8_t GFSK_PULSE_SHAPE_BT_0_5 = 0x09;
-static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;
-static constexpr uint8_t GFSK_RX_BW_312_0 = 0x19;  // 312.0 kHz
-static constexpr uint8_t GFSK_RX_BW_467_0 = 0x09;  // 467.0 kHz
+static constexpr uint8_t GFSK_RX_BW_312_0 = 0x19;  // wider BW helps under frequency offset/noise
+// static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;
 static constexpr uint8_t GFSK_PREAMBLE_DETECT_16 = 0x05;
 static constexpr uint8_t GFSK_ADDRESS_FILT_OFF = 0x00;
 

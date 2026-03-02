@@ -12,6 +12,9 @@
 #include "esphome/components/mqtt/mqtt_client.h"
 
 #define WMBUS_PREAMBLE_SIZE (3)
+#define WMBUS_MODE_C_PREAMBLE (0x54)
+// For T1 we need more than the 3-byte preamble to reliably decode L-field.
+#define WMBUS_T1_LEN_PROBE_BYTES (18)
 
 #define ASSERT(expr, expected, before_exit)                                    \
   {                                                                            \
@@ -497,13 +500,28 @@ void Radio::receive_frame() {
     return;
   }
 
+  // Important for T1: L-field is 3-of-6 encoded and decoding it from only 3 bytes
+  // is fragile under low RSSI / frequency offset. Read a longer prefix first so
+  // Packet::expected_size() can derive a stable L-field.
+  const bool is_c_mode = (preamble[0] == WMBUS_MODE_C_PREAMBLE);
+  size_t already_read = WMBUS_PREAMBLE_SIZE;
+  if (!is_c_mode && WMBUS_T1_LEN_PROBE_BYTES > WMBUS_PREAMBLE_SIZE) {
+    const size_t extra = WMBUS_T1_LEN_PROBE_BYTES - WMBUS_PREAMBLE_SIZE;
+    auto *hdr = packet->append_space(extra);
+    if (!this->radio->read_in_task(hdr, extra)) {
+      ESP_LOGV(TAG, "Failed to read T1 header");
+      return;
+    }
+    already_read += extra;
+  }
+
   const size_t total_len = packet->expected_size();
-  if (total_len == 0 || total_len < WMBUS_PREAMBLE_SIZE) {
+  if (total_len == 0 || total_len < already_read) {
     ESP_LOGD(TAG, "Cannot calculate payload size");
     return;
   }
 
-  const size_t remaining = total_len - WMBUS_PREAMBLE_SIZE;
+  const size_t remaining = total_len - already_read;
   if (remaining > 0) {
     auto *rest = packet->append_space(remaining);
     if (!this->radio->read_in_task(rest, remaining)) {
