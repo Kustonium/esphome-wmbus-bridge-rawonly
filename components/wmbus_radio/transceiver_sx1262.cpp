@@ -330,12 +330,17 @@ bool SX1262::capture_rx_stream_() {
     if (ri != 0) this->last_rssi_dbm_ = (int8_t)(-((int) ri) / 2);
   }
 
-  // Stop RX and clear IRQs.
+  // If we captured nothing, DO NOT stop RX.
+  // A spurious IRQ (noise / false sync) would otherwise put the radio into standby
+  // and we would end up with NO_DATA until a manual restart.
+  if (this->rx_buffer_.empty()) {
+    this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
+    return false;
+  }
+
+  // Stop RX and clear IRQs (we already have the frame in RAM).
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
-
-  if (this->rx_buffer_.empty())
-    return false;
 
   this->rx_idx_ = 0;
   this->rx_len_ = this->rx_buffer_.size();
@@ -457,6 +462,9 @@ void SX1262::restart_rx() {
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
 
+  // Reset buffer base (also resets internal write pointer on many SX1262 boards).
+  this->cmd_write_(CMD_SET_BUFFER_BASE_ADDRESS, {0x00, 0x00});
+
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
 
@@ -477,13 +485,13 @@ optional<uint8_t> SX1262::read() {
     }
     ESP_LOGD(TAG, "IRQ=%04X, capturing RX stream", irq);
     if (!this->capture_rx_stream_()) {
-      if (irq & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
-        const uint16_t dev_err = this->get_device_errors_();
-        if (dev_err != 0) {
-          ESP_LOGD(TAG, "DeviceErrors=0x%04X", dev_err);
-          this->clear_device_errors_();
-        }
+      const uint16_t dev_err = this->get_device_errors_();
+      if (dev_err != 0) {
+        ESP_LOGD(TAG, "DeviceErrors=0x%04X", dev_err);
+        this->clear_device_errors_();
       }
+      // Always re-arm RX after a failed capture (prevents NO_DATA lockups).
+      this->restart_rx();
       return {};
     }
   }
