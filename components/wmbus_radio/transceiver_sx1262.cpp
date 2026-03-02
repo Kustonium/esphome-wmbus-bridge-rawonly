@@ -421,8 +421,10 @@ void SX1262::setup() {
   const uint8_t preamble_msb = (uint8_t) ((preamble_bits >> 8) & 0xFF);
   const uint8_t preamble_lsb = (uint8_t) (preamble_bits & 0xFF);
 
-  // Always FIX_LEN for WMBus.
-  const uint8_t pkt_len_mode = GFSK_PACKET_FIX_LEN;
+  // Packet length mode:
+  // - in long-GFSK streaming: FIX_LEN with 0xFF so the packet engine does not stop early
+  // - in normal mode: VAR_LEN (legacy behavior) so RX_DONE triggers at end-of-packet
+  const uint8_t pkt_len_mode = this->long_gfsk_packets_ ? GFSK_PACKET_FIX_LEN : GFSK_PACKET_VAR_LEN;
   this->cmd_write_(CMD_SET_PACKET_PARAMS,
                    {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_16,
                     0x10,  // 16 bits sync
@@ -481,11 +483,19 @@ optional<uint8_t> SX1262::read() {
       if (!this->capture_rx_stream_())
         return {};
     } else {
-      if (!this->irq_pin_->digital_read())
+      /* Many SX1262 boards expose DIO1 as a pulse; polling GPIO can miss it.
+         Use latched IRQ flags over SPI instead. */
+      const uint16_t irq2 = this->get_irq_status_();
+      if ((irq2 & (IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
         return {};
-      ESP_LOGD(TAG, "IRQ detected, loading buffer");
-      if (!this->load_rx_buffer_())
+      }
+      ESP_LOGD(TAG, "IRQ=%04X, loading buffer", irq2);
+      if (!this->load_rx_buffer_()) {
+        if (irq2 & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
+          this->restart_rx();
+        }
         return {};
+      }
     }
   }
 
