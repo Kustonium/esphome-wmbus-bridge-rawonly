@@ -213,6 +213,13 @@ bool SX1262::load_rx_buffer_() {
   this->delegate_->end_transaction();
   this->wait_while_busy_();
 
+  // Cache RSSI while the packet context is still valid.
+  {
+    uint8_t ps[3]{};
+    this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
+    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+  }
+
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
 
   this->rx_idx_ = 0;
@@ -296,6 +303,13 @@ bool SX1262::capture_rx_stream_() {
 
       delay(1);
     }
+  }
+
+  // Cache RSSI BEFORE stopping RX (standby), otherwise GetPacketStatus may return zeros.
+  {
+    uint8_t ps[3]{};
+    this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
+    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
   }
 
   // Stop RX and clear IRQs.
@@ -455,22 +469,10 @@ optional<uint8_t> SX1262::read() {
 }
 
 int8_t SX1262::get_rssi() {
-  // SX126x "GetPacketStatus" returns 3 bytes.
-  // For GFSK typically:
-  //   st[0] = Rx status
-  //   st[1] = RSSI on sync (rssiSync)
-  //   st[2] = RSSI average (rssiAvg)
-  // Values are 0.5 dB steps, returned as unsigned where dBm = -value/2.
-  uint8_t st[3]{};
-  this->cmd_read_(CMD_GET_PACKET_STATUS, {}, st, sizeof(st));
-
-  const int rssi_sync = -((int) st[1]) / 2;
-  const int rssi_avg = -((int) st[2]) / 2;
-  ESP_LOGD(TAG, "PKT_STATUS: rx=%02X sync=%02X avg=%02X -> rssi_sync=%ddBm rssi_avg=%ddBm", st[0], st[1], st[2], rssi_sync,
-           rssi_avg);
-
-  // Keep previous behaviour: return average RSSI.
-  return (int8_t) rssi_avg;
+  // Return cached RSSI captured when the RX buffer was filled.
+  // In long-GFSK mode we stop RX after capture, so live GetPacketStatus
+  // would often read as 0.
+  return this->last_rssi_dbm_;
 }
 
 const char *SX1262::get_name() { return TAG; }

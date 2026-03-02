@@ -81,6 +81,11 @@ class SX1262 : public RadioTransceiver {
   size_t rx_idx_{0};
   size_t rx_len_{0};
   bool rx_loaded_{false};
+
+  // Packet RSSI captured at the time the RX buffer was filled.
+  // In long-GFSK mode we stop RX (standby) after capture, so GetPacketStatus
+  // may return zeros later. Cache it here.
+  int8_t last_rssi_dbm_{0};
 };
 
 }  // namespace wmbus_radio
