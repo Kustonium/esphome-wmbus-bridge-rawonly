@@ -240,12 +240,14 @@ bool SX1262::load_rx_buffer_() {
 
 bool SX1262::capture_rx_stream_() {
   // Semtech AN1200.53: stream from the 256-byte internal buffer while RX is still running.
-  // We rely on IRQ_RX_DONE / IRQ_TIMEOUT to decide when the burst is complete (not a tiny "silence" window),
-  // otherwise we may cut valid frames (WMBus T1 airtime is several ms).
-  this->rx_buffer_.clear();
-  this->rx_buffer_.reserve(512);
+  // We stop on a conservative "silence" window (no new bytes for ~15ms) to work with RX continuous mode.
+  // This avoids relying on RxDone (which won't trigger in FIX_LEN=0xFF).
+  const size_t max_len = this->long_gfsk_packets_ ? 512 : 255;
 
-  // Ensure payload length starts at 255 (0xFF) so the packet engine doesn't stop early.
+  this->rx_buffer_.clear();
+  this->rx_buffer_.reserve(max_len);
+
+  // Keep packet engine alive
   this->write_register_(REG_RXTX_PAYLOAD_LEN, {0xFF});
 
   const uint32_t start_ms = millis();
@@ -254,8 +256,6 @@ bool SX1262::capture_rx_stream_() {
   size_t copied = 0;
   uint8_t state_index = 0;  // last read index (wraps 0..255)
 
-  // Capture until RX_DONE/TIMEOUT (latched IRQ), then allow a short drain window.
-  bool seen_end_irq = false;
   bool rssi_sampled = false;
 
   while (true) {
@@ -266,9 +266,10 @@ bool SX1262::capture_rx_stream_() {
       ESP_LOGD(TAG, "Long RX capture timeout, copied=%u", (unsigned) copied);
       break;
     }
-    // Hard cap (covers max WMBus T1 raw size comfortably)
-    if (copied >= 512) {
-      ESP_LOGD(TAG, "Long RX capture capped at 512 bytes");
+
+    // Hard cap
+    if (copied >= max_len) {
+      ESP_LOGD(TAG, "RX capture capped at %u bytes", (unsigned) max_len);
       break;
     }
 
@@ -276,12 +277,11 @@ bool SX1262::capture_rx_stream_() {
     uint8_t avail = (uint8_t) (cur - state_index);  // uint8 wrap by design
 
     // Cap to remaining space
-    const size_t room = 512 - copied;
+    const size_t room = max_len - copied;
     if (avail > room) {
       avail = (uint8_t) room;
     }
 
-    // Compute a "virtual" current_index (may be < cur if capped)
     const uint8_t current_index = (uint8_t) (state_index + avail);
 
     // Keep receiver alive: keep RxTxPldLen always behind the current write pointer.
@@ -297,6 +297,7 @@ bool SX1262::capture_rx_stream_() {
           rssi_sampled = true;
         }
       }
+
       uint8_t tmp[256];
       const uint8_t off = state_index;
       const uint8_t first = (uint8_t) ((off + avail <= 256) ? avail : (256 - off));
@@ -309,28 +310,21 @@ bool SX1262::capture_rx_stream_() {
       state_index = current_index;
       last_change_ms = now;
     } else {
-      // No new bytes right now.
-      const uint16_t irq = this->get_irq_status_();
-      if (irq & (IRQ_RX_DONE | IRQ_TIMEOUT)) {
-        seen_end_irq = true;
-      }
-
-      // After we saw end IRQ, wait a short "drain" window to pull remaining bytes, then stop.
-      if (seen_end_irq && (now - last_change_ms) > 15) {
+      // End-of-frame: no new bytes for a while.
+      if ((now - last_change_ms) > 15) {
         break;
       }
-
       delay(1);
     }
   }
 
-  // Cache RSSI BEFORE stopping RX (standby), otherwise GetPacketStatus may return zeros.
-  {
+  // Cache RSSI while the RX context is still valid.
+  // If we already sampled inst RSSI during the burst, keep it.
+  if (!rssi_sampled) {
     uint8_t ps[3]{};
     this->cmd_read_(CMD_GET_PACKET_STATUS, {0x00}, ps, sizeof(ps));
     this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
 
-    // Prefer instantaneous RSSI if available (prevents 0dBm logs when PacketStatus is zero).
     uint8_t ri{};
     this->cmd_read_(CMD_GET_RSSI_INST, {0x00}, &ri, 1);
     if (ri != 0) {
@@ -349,9 +343,10 @@ bool SX1262::capture_rx_stream_() {
   this->rx_len_ = this->rx_buffer_.size();
   this->rx_loaded_ = true;
 
-  ESP_LOGD(TAG, "Long RX captured %u bytes", (unsigned) this->rx_len_);
+  ESP_LOGD(TAG, "RX captured %u bytes (max=%u)", (unsigned) this->rx_len_, (unsigned) max_len);
   return true;
 }
+
 
 
 
@@ -424,7 +419,7 @@ void SX1262::setup() {
   // Packet length mode:
   // - in long-GFSK streaming: FIX_LEN with 0xFF so the packet engine does not stop early
   // - in normal mode: VAR_LEN (legacy behavior) so RX_DONE triggers at end-of-packet
-  const uint8_t pkt_len_mode = this->long_gfsk_packets_ ? GFSK_PACKET_FIX_LEN : GFSK_PACKET_VAR_LEN;
+  const uint8_t pkt_len_mode = GFSK_PACKET_FIX_LEN;
   this->cmd_write_(CMD_SET_PACKET_PARAMS,
                    {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_16,
                     0x10,  // 16 bits sync
@@ -433,8 +428,7 @@ void SX1262::setup() {
                     GFSK_CRC_OFF, GFSK_WHITENING_OFF});
 
   // IRQ routing -> DIO1
-  const uint16_t mask = this->long_gfsk_packets_ ? (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT)
-                                      : (IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
+  const uint16_t mask = (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
   const uint8_t mask_msb = (uint8_t) ((mask >> 8) & 0xFF);
   const uint8_t mask_lsb = (uint8_t) (mask & 0xFF);
 
@@ -460,6 +454,8 @@ void SX1262::restart_rx() {
 
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
+  // Reset buffer base (also resets internal write pointer on many SX1262 boards)
+  this->cmd_write_(CMD_SET_BUFFER_BASE_ADDRESS, {0x00, 0x00});
 
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
@@ -472,37 +468,27 @@ void SX1262::restart_rx() {
 
 optional<uint8_t> SX1262::read() {
   if (!this->rx_loaded_) {
-    if (this->long_gfsk_packets_) {
-      // Don't start a long capture unless an IRQ is latched (SyncWordValid / RxDone / Timeout / CRCError).
-      // Otherwise we'd stop RX periodically and miss frames.
-      const uint16_t irq = this->get_irq_status_();
-      if ((irq & (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
-        return {};
+    // Use latched IRQ flags over SPI. DIO1 can be a short pulse.
+    const uint16_t irq = this->get_irq_status_();
+    if ((irq & (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
+      return {};
+    }
+
+    // Start capture on SyncWordValid (or any end/error IRQ that might be present).
+    if (!this->capture_rx_stream_()) {
+      if (irq & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
+        this->restart_rx();
       }
-      ESP_LOGD(TAG, "IRQ=%04X, capturing RX stream (long GFSK)", irq);
-      if (!this->capture_rx_stream_())
-        return {};
-    } else {
-      /* Many SX1262 boards expose DIO1 as a pulse; polling GPIO can miss it.
-         Use latched IRQ flags over SPI instead. */
-      const uint16_t irq2 = this->get_irq_status_();
-      if ((irq2 & (IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
-        return {};
-      }
-      ESP_LOGD(TAG, "IRQ=%04X, loading buffer", irq2);
-      if (!this->load_rx_buffer_()) {
-        if (irq2 & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
-          this->restart_rx();
-        }
-        return {};
-      }
+      return {};
     }
   }
 
-  if (this->rx_idx_ < this->rx_len_)
+  if (this->rx_idx_ < this->rx_len_) {
     return this->rx_buffer_[this->rx_idx_++];
+  }
   return {};
 }
+
 
 int8_t SX1262::get_rssi() {
   // Return cached RSSI captured when the RX buffer was filled.
