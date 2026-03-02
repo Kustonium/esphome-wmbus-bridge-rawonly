@@ -26,6 +26,12 @@ class SX1262 : public RadioTransceiver {
   void set_dio2_rf_switch(bool v) { this->dio2_rf_switch_ = v; }
   void set_has_tcxo(bool v) { this->has_tcxo_ = v; }
 
+  // Enable Semtech AN1200.53 long GFSK RX path.
+  // This bypasses the 255-byte internal data-buffer limitation by streaming
+  // from the radio buffer while RX is still running (rxAddrPtr wrap + RxTxPldLen).
+  // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
+  void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
+
   // Optional Heltec V4 front-end (FEM/LNA/PA). If configured, we force RX path.
   void set_fem_ctrl_pin(InternalGPIOPin *pin) { this->fem_ctrl_pin_ = pin; }
   void set_fem_en_pin(InternalGPIOPin *pin) { this->fem_en_pin_ = pin; }
@@ -43,11 +49,18 @@ class SX1262 : public RadioTransceiver {
   void cmd_read_(uint8_t cmd, std::initializer_list<uint8_t> args, uint8_t *out, size_t out_len);
   void write_register_(uint16_t addr, std::initializer_list<uint8_t> data);
 
+  // Register helpers
+  uint8_t read_register8_(uint16_t addr);
+  void read_buffer_(uint8_t offset, uint8_t *out, size_t out_len);
+
   void set_rf_frequency_(uint32_t freq_hz);
   void set_sync_word_(uint8_t sync2);
 
   bool has_rx_done_();
   bool load_rx_buffer_();
+
+  // Long GFSK reception (Semtech AN1200.53)
+  bool capture_rx_stream_();
 
   // Bias towards Block B (0x3D). Every 4th hop switches to Block A (0xCD).
   uint8_t sync_cycle_{0};
@@ -56,6 +69,7 @@ class SX1262 : public RadioTransceiver {
   bool dio2_rf_switch_{true};
   bool has_tcxo_{false};
   SX1262RxGain rx_gain_{BOOSTED};
+  bool long_gfsk_packets_{false};
 
   // Optional FEM pins
   InternalGPIOPin *fem_ctrl_pin_{nullptr};

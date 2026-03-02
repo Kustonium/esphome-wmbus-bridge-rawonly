@@ -37,6 +37,7 @@ CONF_HAS_TCXO = "has_tcxo"
 
 # RX gain option (datasheet: boosted / power_saving)
 CONF_RX_GAIN = "rx_gain"
+CONF_LONG_GFSK_PACKETS = "long_gfsk_packets"
 
 # Diagnostics
 CONF_DIAG_TOPIC = "diagnostic_topic"
@@ -80,6 +81,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_RX_GAIN, default="boosted"): cv.one_of(
                 "boosted", "power_saving", lower=True
             ),
+            cv.Optional(CONF_LONG_GFSK_PACKETS, default=False): cv.boolean,
 
             # Heltec V4 FEM pins (optional, only makes sense for SX1262)
             cv.Optional(CONF_FEM_CTRL_PIN): pins.internal_gpio_output_pin_schema,
@@ -129,6 +131,7 @@ async def to_code(config):
                 else SX1262RxGain.POWER_SAVING
             )
         )
+        cg.add(radio_var.set_long_gfsk_packets(config.get(CONF_LONG_GFSK_PACKETS, False)))
 
         # FEM pins (Heltec V4)
         if CONF_FEM_CTRL_PIN in config:
