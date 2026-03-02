@@ -3,6 +3,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 
+#include <algorithm>
+
 namespace esphome {
 namespace wmbus_radio {
 
@@ -231,11 +233,12 @@ bool SX1262::load_rx_buffer_() {
 
 
 bool SX1262::capture_rx_stream_() {
+  const size_t cap_bytes = this->long_gfsk_packets_ ? 512 : 255;
   // Semtech AN1200.53: stream from the 256-byte internal buffer while RX is still running.
   // We rely on IRQ_RX_DONE / IRQ_TIMEOUT to decide when the burst is complete (not a tiny "silence" window),
   // otherwise we may cut valid frames (WMBus T1 airtime is several ms).
   this->rx_buffer_.clear();
-  this->rx_buffer_.reserve(512);
+  this->rx_buffer_.reserve(std::min<size_t>(cap_bytes, 512));
 
   // Ensure payload length starts at 255 (0xFF) so the packet engine doesn't stop early.
   this->write_register_(REG_RXTX_PAYLOAD_LEN, {0xFF});
@@ -258,9 +261,9 @@ bool SX1262::capture_rx_stream_() {
       ESP_LOGD(TAG, "Long RX capture timeout, copied=%u", (unsigned) copied);
       break;
     }
-    // Hard cap (covers max WMBus T1 raw size comfortably)
-    if (copied >= 512) {
-      ESP_LOGD(TAG, "Long RX capture capped at 512 bytes");
+    // Hard cap
+    if (copied >= cap_bytes) {
+      ESP_LOGD(TAG, "RX capture capped at %u bytes", (unsigned) cap_bytes);
       break;
     }
 
@@ -268,7 +271,7 @@ bool SX1262::capture_rx_stream_() {
     uint8_t avail = (uint8_t) (cur - state_index);  // uint8 wrap by design
 
     // Cap to remaining space
-    const size_t room = 512 - copied;
+    const size_t room = cap_bytes - copied;
     if (avail > room) {
       avail = (uint8_t) room;
     }
@@ -296,8 +299,9 @@ bool SX1262::capture_rx_stream_() {
       if (avail > first) {
         this->read_buffer_(0, tmp + first, (size_t) (avail - first));
       }
-      this->rx_buffer_.insert(this->rx_buffer_.end(), tmp, tmp + avail);
-      copied += avail;
+      const size_t can_copy = std::min<size_t>(avail, cap_bytes - copied);
+      this->rx_buffer_.insert(this->rx_buffer_.end(), tmp, tmp + can_copy);
+      copied += can_copy;
       state_index = current_index;
       last_change_ms = now;
     } else {
@@ -424,8 +428,9 @@ void SX1262::setup() {
                     GFSK_CRC_OFF, GFSK_WHITENING_OFF});
 
   // IRQ routing -> DIO1
-  const uint16_t mask = this->long_gfsk_packets_ ? (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT)
-                                      : (IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
+  // Always enable SyncWordValid. WMBus does not have a dedicated GFSK in-air length byte,
+  // so relying only on RX_DONE can lead to NO_DATA on some setups.
+  const uint16_t mask = (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
   const uint8_t mask_msb = (uint8_t) ((mask >> 8) & 0xFF);
   const uint8_t mask_lsb = (uint8_t) (mask & 0xFF);
 
@@ -463,45 +468,23 @@ void SX1262::restart_rx() {
 
 optional<uint8_t> SX1262::read() {
   if (!this->rx_loaded_) {
-    if (this->long_gfsk_packets_) {
-      // Don't start a long capture unless an IRQ is latched (SyncWordValid / RxDone / Timeout / CRCError).
-      // Otherwise we'd stop RX periodically and miss frames.
-      const uint16_t irq = this->get_irq_status_();
-      if ((irq & (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
-        return {};
-      }
-      ESP_LOGD(TAG, "IRQ=%04X, capturing RX stream (long GFSK)", irq);
-      if (!this->capture_rx_stream_()) {
-        if (irq & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
-          const uint16_t dev_err = this->get_device_errors_();
-          if (dev_err != 0) {
-            ESP_LOGD(TAG, "DeviceErrors=0x%04X", dev_err);
-            this->clear_device_errors_();
-          }
+    // Use streaming capture for BOTH modes.
+    // WMBus does not provide a dedicated "length byte" for SX1262 VAR_LEN,
+    // so depending purely on RX_DONE can stall (NO_DATA). Streaming is robust.
+    const uint16_t irq = this->get_irq_status_();
+    if ((irq & (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
+      return {};
+    }
+    ESP_LOGD(TAG, "IRQ=%04X, capturing RX stream", irq);
+    if (!this->capture_rx_stream_()) {
+      if (irq & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
+        const uint16_t dev_err = this->get_device_errors_();
+        if (dev_err != 0) {
+          ESP_LOGD(TAG, "DeviceErrors=0x%04X", dev_err);
+          this->clear_device_errors_();
         }
-        return {};
       }
-    } else {
-      /* Many SX1262 boards expose DIO1 as a pulse; polling GPIO can miss it.
-         Use latched IRQ flags over SPI instead. */
-      const uint16_t irq2 = this->get_irq_status_();
-      if ((irq2 & (IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
-        return {};
-      }
-      ESP_LOGD(TAG, "IRQ=%04X, loading buffer", irq2);
-      if (!this->load_rx_buffer_()) {
-        if (irq2 & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
-          const uint16_t dev_err = this->get_device_errors_();
-          if (dev_err != 0) {
-            ESP_LOGD(TAG, "DeviceErrors=0x%04X", dev_err);
-            this->clear_device_errors_();
-          }
-        }
-        if (irq2 & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
-          this->restart_rx();
-        }
-        return {};
-      }
+      return {};
     }
   }
 
