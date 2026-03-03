@@ -11,8 +11,6 @@
 #include "link_mode.h"
 #include "esphome/core/helpers.h"
 
-#include "chip_diag.h"
-
 namespace esphome {
 namespace wmbus_radio {
 
@@ -55,10 +53,6 @@ public:
   uint16_t t1_symbols_total() const { return this->t1_symbols_total_; }
   uint16_t t1_symbols_invalid() const { return this->t1_symbols_invalid_; }
 
-  // Cached radio chip diagnostics snapshot (filled by the transceiver, no SPI at publish-time)
-  const ChipDiagSnapshot &chip_diag() const { return this->chip_diag_; }
-  void set_chip_diag(const ChipDiagSnapshot &v) { this->chip_diag_ = v; }
-
 protected:
   std::vector<uint8_t> data_;
 
@@ -83,9 +77,6 @@ protected:
   // T1 (3-of-6) symbol diagnostics
   uint16_t t1_symbols_total_{0};
   uint16_t t1_symbols_invalid_{0};
-
-  // Cached chip diagnostics (optional)
-  ChipDiagSnapshot chip_diag_{};
 };
 
 struct Frame {

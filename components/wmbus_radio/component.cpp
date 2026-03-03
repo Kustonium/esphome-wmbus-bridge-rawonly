@@ -7,6 +7,8 @@
 #include "esphome/core/helpers.h"
 
 #include <cstring>
+#include <algorithm>
+#include <cstdlib>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -30,6 +32,41 @@
 namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "wmbus";
+
+static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &out) {
+  out.clear();
+  if (csv.empty()) return;
+  size_t i = 0;
+  while (i < csv.size()) {
+    // skip separators/whitespace
+    while (i < csv.size() && (csv[i] == ',' || csv[i] == ';' || csv[i] == ' ' || csv[i] == '\t' || csv[i] == '\n' || csv[i] == '\r')) i++;
+    if (i >= csv.size()) break;
+    size_t j = i;
+    while (j < csv.size() && csv[j] != ',' && csv[j] != ';' && csv[j] != ' ' && csv[j] != '\t' && csv[j] != '\n' && csv[j] != '\r') j++;
+    std::string tok = csv.substr(i, j - i);
+    // trim
+    while (!tok.empty() && (tok.front() == ' ' || tok.front() == '\t')) tok.erase(tok.begin());
+    while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\t')) tok.pop_back();
+    if (!tok.empty()) {
+      const char *s = tok.c_str();
+      int base = 10;
+      if (tok.size() > 2 && tok[0] == '0' && (tok[1] == 'x' || tok[1] == 'X')) {
+        s += 2;
+        base = 16;
+      }
+      char *endp = nullptr;
+      unsigned long v = std::strtoul(s, &endp, base);
+      if (endp != s) {
+        out.push_back((uint32_t) v);
+      }
+    }
+    i = j;
+  }
+  if (!out.empty()) {
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+  }
+}
 
 
 Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
@@ -264,6 +301,13 @@ if (std::strcmp(hint_code, "OK") == 0) {
 }
 
 void Radio::setup() {
+  // Parse optional highlight meter list (CSV provided by python/YAML).
+  parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_);
+  if (!this->highlight_meter_ids_.empty()) {
+    ESP_LOGI(TAG, "Highlight meters enabled (%u ids) tag=%s ansi=%s", (unsigned) this->highlight_meter_ids_.size(),
+             this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(), this->highlight_ansi_ ? "true" : "false");
+  }
+
   ASSERT_SETUP(this->packet_queue_ = xQueueCreate(3, sizeof(Packet *)));
 
   ASSERT_SETUP(xTaskCreate((TaskFunction_t)this->receiver_task, "radio_recv",
@@ -273,34 +317,9 @@ void Radio::setup() {
 
   this->radio->attach_data_interrupt(Radio::wakeup_receiver_task_from_isr,
                                      &(this->receiver_task_handle_));
-
-  // If the transceiver cleared device errors on boot, optionally publish a one-shot report.
-  // We defer to loop() because MQTT may not be connected during setup().
-  if (this->publish_dev_err_after_clear_) {
-    uint16_t before = 0, after = 0;
-    if (this->radio != nullptr && this->radio->get_boot_cleared_device_errors(before, after)) {
-      this->pending_dev_err_publish_ = true;
-    }
-  }
 }
 
 void Radio::loop() {
-  // One-shot publish: device errors before/after boot clear (best-effort)
-  if (this->pending_dev_err_publish_) {
-    auto *mqtt = esphome::mqtt::global_mqtt_client;
-    if (mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
-      uint16_t before = 0, after = 0;
-      if (this->radio != nullptr && this->radio->get_boot_cleared_device_errors(before, after)) {
-        char payload[220];
-        snprintf(payload, sizeof(payload),
-                 "{\"event\":\"dev_err_cleared\",\"before\":%u,\"before_hex\":\"%04X\",\"after\":%u,\"after_hex\":\"%04X\"}",
-                 (unsigned) before, (unsigned) before, (unsigned) after, (unsigned) after);
-        mqtt->publish(this->diag_topic_, payload);
-      }
-      this->pending_dev_err_publish_ = false;
-    }
-  }
-
   this->maybe_publish_diag_summary_((uint32_t) esphome::millis());
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
@@ -372,40 +391,19 @@ void Radio::loop() {
       // Publish diagnostics to MQTT regardless of diag_verbose_
       // (so YAML can silence logs but still get drop/trunc events).
       if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        char payload[1300];
-
-        // Optional add-ons (no SPI here; snapshot is cached in Packet)
-        char rxbuf_part[96] = "";
-        char chip_part[300] = "";
-        const auto &chip = p->chip_diag();
-        if (this->diag_drop_rx_buf_status_ && chip.has_rx_buf) {
-          snprintf(rxbuf_part, sizeof(rxbuf_part),
-                   ",\"rx_buf_len\":%u,\"rx_buf_start_ptr\":%u",
-                   (unsigned) chip.rx_buf_len, (unsigned) chip.rx_buf_start_ptr);
-        }
-        if (this->diag_expert_ && chip.valid) {
-          // Keep it compact; intended for debugging driver/radio behaviour.
-          // stats fields are counters since reset (Semtech GetStats).
-          snprintf(chip_part, sizeof(chip_part),
-                   ",\"chip\":{\"irq\":%u,\"irq_hex\":\"%04X\",\"dev_err\":%u,\"dev_err_hex\":\"%04X\",\"stats\":{\"rx\":%u,\"crc\":%u,\"hdr\":%u}}",
-                   (unsigned) chip.irq, (unsigned) chip.irq,
-                   (unsigned) chip.dev_err, (unsigned) chip.dev_err,
-                   (unsigned) chip.stat_rx, (unsigned) chip.stat_crc, (unsigned) chip.stat_hdr);
-        }
-
+        char payload[900];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"%s%s}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len(), p->raw_hex().c_str(),
-                   rxbuf_part, chip_part);
+                   (unsigned) p->raw_got_len(), p->raw_hex().c_str());
         } else {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u%s%s}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len(), rxbuf_part, chip_part);
+                   (unsigned) p->raw_got_len());
         }
         mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
       }
@@ -445,6 +443,7 @@ char id_str[9] = "????????";
 uint8_t ver = 0xFF;
 uint8_t dev = 0xFF;
 uint8_t ci = 0xFF;
+uint32_t id_val = 0;  // decimal meter id (BCD) for optional log highlighting
 
 auto is_bcd = [](uint8_t b) -> bool {
   return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
@@ -480,6 +479,11 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   // ID bytes: base+3..base+6 (little endian) -> druk 6..3
   bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
   if (bcd_ok) {
+    // decimal value (leading zeros ignored) for quick matching against YAML list
+    id_val = (uint32_t)((((d[base + 6] >> 4) & 0x0F) * 10000000U) + ((d[base + 6] & 0x0F) * 1000000U) +
+                        (((d[base + 5] >> 4) & 0x0F) * 100000U) + ((d[base + 5] & 0x0F) * 10000U) +
+                        (((d[base + 4] >> 4) & 0x0F) * 1000U) + ((d[base + 4] & 0x0F) * 100U) +
+                        (((d[base + 3] >> 4) & 0x0F) * 10U) + (d[base + 3] & 0x0F));
     snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
              (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
              (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
@@ -496,11 +500,33 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   ci  = d[base + 9];
 }
 
-ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-         d.size(), frame->rssi(),
-         link_mode_name(frame->link_mode()),
-         frame->format().c_str(),
-         mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);for (auto &handler : this->handlers_)
+// Optional log highlighting for configured IDs (BCD IDs only).
+bool highlight = false;
+if (id_val != 0 && !this->highlight_meter_ids_.empty()) {
+  highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
+}
+
+const char *log_tag = TAG;
+if (highlight) {
+  if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
+  const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
+  const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
+  ESP_LOGI(log_tag, "%s%sHave data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+           ansi_pre, this->highlight_prefix_.c_str(),
+           d.size(), frame->rssi(),
+           link_mode_name(frame->link_mode()),
+           frame->format().c_str(),
+           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci,
+           ansi_suf);
+} else {
+  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+           d.size(), frame->rssi(),
+           link_mode_name(frame->link_mode()),
+           frame->format().c_str(),
+           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);
+}
+
+for (auto &handler : this->handlers_)
     handler(&frame.value());
 
   if (frame->handlers_count())
@@ -576,12 +602,6 @@ void Radio::receive_frame() {
   }
 
   packet->set_rssi(this->radio->get_rssi());
-
-  // Capture cached chip diagnostics snapshot (no SPI here; transceiver fills it during RX work)
-  ChipDiagSnapshot snap;
-  if (this->radio != nullptr && this->radio->get_cached_chip_diag(snap)) {
-    packet->set_chip_diag(snap);
-  }
   auto packet_ptr = packet.get();
 
   if (xQueueSend(this->packet_queue_, &packet_ptr, 0) == pdTRUE) {
