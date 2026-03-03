@@ -7,8 +7,6 @@
 #include "esphome/core/helpers.h"
 
 #include <cstring>
-#include <algorithm>
-#include <cstdlib>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -32,41 +30,6 @@
 namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "wmbus";
-
-static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &out) {
-  out.clear();
-  if (csv.empty()) return;
-  size_t i = 0;
-  while (i < csv.size()) {
-    // skip separators/whitespace
-    while (i < csv.size() && (csv[i] == ',' || csv[i] == ';' || csv[i] == ' ' || csv[i] == '\t' || csv[i] == '\n' || csv[i] == '\r')) i++;
-    if (i >= csv.size()) break;
-    size_t j = i;
-    while (j < csv.size() && csv[j] != ',' && csv[j] != ';' && csv[j] != ' ' && csv[j] != '\t' && csv[j] != '\n' && csv[j] != '\r') j++;
-    std::string tok = csv.substr(i, j - i);
-    // trim
-    while (!tok.empty() && (tok.front() == ' ' || tok.front() == '\t')) tok.erase(tok.begin());
-    while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\t')) tok.pop_back();
-    if (!tok.empty()) {
-      const char *s = tok.c_str();
-      int base = 10;
-      if (tok.size() > 2 && tok[0] == '0' && (tok[1] == 'x' || tok[1] == 'X')) {
-        s += 2;
-        base = 16;
-      }
-      char *endp = nullptr;
-      unsigned long v = std::strtoul(s, &endp, base);
-      if (endp != s) {
-        out.push_back((uint32_t) v);
-      }
-    }
-    i = j;
-  }
-  if (!out.empty()) {
-    std::sort(out.begin(), out.end());
-    out.erase(std::unique(out.begin(), out.end()), out.end());
-  }
-}
 
 
 Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
@@ -301,13 +264,6 @@ if (std::strcmp(hint_code, "OK") == 0) {
 }
 
 void Radio::setup() {
-  // Parse optional highlight meter list (CSV provided by python/YAML).
-  parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_);
-  if (!this->highlight_meter_ids_.empty()) {
-    ESP_LOGI(TAG, "Highlight meters enabled (%u ids) tag=%s ansi=%s", (unsigned) this->highlight_meter_ids_.size(),
-             this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(), this->highlight_ansi_ ? "true" : "false");
-  }
-
   ASSERT_SETUP(this->packet_queue_ = xQueueCreate(3, sizeof(Packet *)));
 
   ASSERT_SETUP(xTaskCreate((TaskFunction_t)this->receiver_task, "radio_recv",
@@ -391,19 +347,36 @@ void Radio::loop() {
       // Publish diagnostics to MQTT regardless of diag_verbose_
       // (so YAML can silence logs but still get drop/trunc events).
       if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        char payload[900];
+        // Extra headroom: raw hex can be long, and we may append chip diagnostics.
+        char payload[1400];
+        char chip_diag[260];
+        chip_diag[0] = 0;
+
+        // Best-effort Semtech-style diagnostics (SX126x). Published only on drops.
+        RadioChipDiag cd;
+        if (this->radio != nullptr && this->radio->read_chip_diag(cd)) {
+          // Keep it compact and machine-friendly.
+          // irq_status/device_errors are also useful in hex.
+          snprintf(chip_diag, sizeof(chip_diag),
+                   ",\"chip\":{\"irq\":%u,\"irq_hex\":\"%04X\",\"dev_err\":%u,\"dev_err_hex\":\"%04X\",\"stats\":{\"rx\":%u,\"crc\":%u,\"len\":%u}}",
+                   (unsigned) cd.irq_status, (unsigned) cd.irq_status,
+                   (unsigned) cd.device_errors, (unsigned) cd.device_errors,
+                   (unsigned) cd.stats_pkt_received,
+                   (unsigned) cd.stats_pkt_crc_error,
+                   (unsigned) cd.stats_pkt_len_error);
+        }
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"%s}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len(), p->raw_hex().c_str());
+                   (unsigned) p->raw_got_len(), p->raw_hex().c_str(), chip_diag);
         } else {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u%s}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len());
+                   (unsigned) p->raw_got_len(), chip_diag);
         }
         mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
       }
@@ -443,7 +416,6 @@ char id_str[9] = "????????";
 uint8_t ver = 0xFF;
 uint8_t dev = 0xFF;
 uint8_t ci = 0xFF;
-uint32_t id_val = 0;  // decimal meter id (BCD) for optional log highlighting
 
 auto is_bcd = [](uint8_t b) -> bool {
   return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
@@ -479,11 +451,6 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   // ID bytes: base+3..base+6 (little endian) -> druk 6..3
   bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
   if (bcd_ok) {
-    // decimal value (leading zeros ignored) for quick matching against YAML list
-    id_val = (uint32_t)((((d[base + 6] >> 4) & 0x0F) * 10000000U) + ((d[base + 6] & 0x0F) * 1000000U) +
-                        (((d[base + 5] >> 4) & 0x0F) * 100000U) + ((d[base + 5] & 0x0F) * 10000U) +
-                        (((d[base + 4] >> 4) & 0x0F) * 1000U) + ((d[base + 4] & 0x0F) * 100U) +
-                        (((d[base + 3] >> 4) & 0x0F) * 10U) + (d[base + 3] & 0x0F));
     snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
              (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
              (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
@@ -500,33 +467,11 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   ci  = d[base + 9];
 }
 
-// Optional log highlighting for configured IDs (BCD IDs only).
-bool highlight = false;
-if (id_val != 0 && !this->highlight_meter_ids_.empty()) {
-  highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
-}
-
-const char *log_tag = TAG;
-if (highlight) {
-  if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
-  const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
-  const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-  ESP_LOGI(log_tag, "%s%sHave data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
-           ansi_pre, this->highlight_prefix_.c_str(),
-           d.size(), frame->rssi(),
-           link_mode_name(frame->link_mode()),
-           frame->format().c_str(),
-           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci,
-           ansi_suf);
-} else {
-  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-           d.size(), frame->rssi(),
-           link_mode_name(frame->link_mode()),
-           frame->format().c_str(),
-           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);
-}
-
-for (auto &handler : this->handlers_)
+ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+         d.size(), frame->rssi(),
+         link_mode_name(frame->link_mode()),
+         frame->format().c_str(),
+         mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);for (auto &handler : this->handlers_)
     handler(&frame.value());
 
   if (frame->handlers_count())

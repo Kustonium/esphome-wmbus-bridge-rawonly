@@ -27,13 +27,6 @@ public:
   void set_radio(RadioTransceiver *radio) { this->radio = radio; };
   void set_diag_topic(const std::string &topic) { this->diag_topic_ = topic; }
 
-  // Optional log highlighting for selected meter IDs (configured from YAML).
-  // Meters are provided as a CSV string in YAML (list is joined in python).
-  void set_highlight_meters_csv(const std::string &csv) { this->highlight_meters_csv_ = csv; }
-  void set_highlight_ansi(bool enabled) { this->highlight_ansi_ = enabled; }
-  void set_highlight_tag(const std::string &tag) { this->highlight_tag_ = tag; }
-  void set_highlight_prefix(const std::string &prefix) { this->highlight_prefix_ = prefix; }
-
   // Diagnostics runtime controls (can be toggled from YAML via template switches)
   void set_diag_verbose(bool enabled) { this->diag_verbose_ = enabled; }
   void set_diag_publish_raw(bool enabled) { this->diag_publish_raw_ = enabled; }
@@ -57,13 +50,6 @@ protected:
   QueueHandle_t packet_queue_{nullptr};
 
   std::vector<std::function<void(Frame *)>> handlers_;
-
-  // Highlight configuration
-  std::string highlight_meters_csv_{};
-  std::vector<uint32_t> highlight_meter_ids_{};
-  bool highlight_ansi_{false};
-  std::string highlight_tag_{"wmbus_user"};
-  std::string highlight_prefix_{"★ "};
 
 
   // Diagnostics counters (published periodically if diagnostic_topic is set)

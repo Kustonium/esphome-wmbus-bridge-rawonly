@@ -39,12 +39,6 @@ CONF_HAS_TCXO = "has_tcxo"
 CONF_RX_GAIN = "rx_gain"
 CONF_LONG_GFSK_PACKETS = "long_gfsk_packets"
 
-# Log highlighting (optional)
-CONF_HIGHLIGHT_METERS = "highlight_meters"
-CONF_HIGHLIGHT_ANSI = "highlight_ansi"
-CONF_HIGHLIGHT_TAG = "highlight_tag"
-CONF_HIGHLIGHT_PREFIX = "highlight_prefix"
-
 # Diagnostics
 CONF_DIAG_TOPIC = "diagnostic_topic"
 CONF_DIAG_VERBOSE = "diagnostic_verbose"
@@ -108,12 +102,6 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_DIAG_VERBOSE, default=True): cv.boolean,
             cv.Optional(CONF_DIAG_PUBLISH_RAW, default=True): cv.boolean,
             cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
-
-            # Optional log highlighting for selected meter IDs
-            cv.Optional(CONF_HIGHLIGHT_METERS, default=[]): cv.ensure_list(cv.string),
-            cv.Optional(CONF_HIGHLIGHT_ANSI, default=False): cv.boolean,
-            cv.Optional(CONF_HIGHLIGHT_TAG, default="wmbus_user"): cv.string,
-            cv.Optional(CONF_HIGHLIGHT_PREFIX, default="★ "): cv.string,
         }
     )
     .extend(spi.spi_device_schema())
@@ -178,14 +166,6 @@ async def to_code(config):
     cg.add(var.set_diag_verbose(config.get(CONF_DIAG_VERBOSE, True)))
     cg.add(var.set_diag_publish_raw(config.get(CONF_DIAG_PUBLISH_RAW, True)))
     cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
-
-    # Log highlight config
-    meters = config.get(CONF_HIGHLIGHT_METERS, [])
-    meters_csv = ",".join([str(m).strip() for m in meters if str(m).strip()])
-    cg.add(var.set_highlight_meters_csv(meters_csv))
-    cg.add(var.set_highlight_ansi(config.get(CONF_HIGHLIGHT_ANSI, False)))
-    cg.add(var.set_highlight_tag(config.get(CONF_HIGHLIGHT_TAG, "wmbus_user")))
-    cg.add(var.set_highlight_prefix(config.get(CONF_HIGHLIGHT_PREFIX, "★ ")))
 
     await cg.register_component(var, config)
 
