@@ -45,6 +45,10 @@ public:
   // Optional: read chip-level diagnostics (Semtech-style). Default: not supported.
   virtual bool read_chip_diag(RadioChipDiag &out) { return false; }
 
+  // Optional: SX1262 can capture device error flags cleared on boot.
+  // Default: not supported.
+  virtual bool get_boot_device_errors(uint16_t &before, uint16_t &after) const { return false; }
+
   bool read_in_task(uint8_t *buffer, size_t length);
 
   void set_spi(spi::SPIDelegate *spi);

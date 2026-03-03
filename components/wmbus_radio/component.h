@@ -35,6 +35,16 @@ public:
     this->diag_summary_interval_ms_ = interval_ms < 5000 ? 5000 : interval_ms;
   }
 
+  // SX1262: publish one-time dev_err event after boot clear (if available)
+  void set_publish_dev_err_after_clear(bool v) { this->publish_dev_err_after_clear_ = v; }
+
+  // Highlight meters (optional): IDs are decimal (e.g. 00089907)
+  void set_highlight_ids(std::vector<uint32_t> ids) { this->highlight_ids_ = std::move(ids); }
+  void set_highlight_tag(const std::string &tag) { this->highlight_tag_ = tag; }
+  void set_highlight_prefix(const std::string &pfx) { this->highlight_prefix_ = pfx; }
+  void set_highlight_ansi(bool v) { this->highlight_ansi_ = v; }
+  void set_publish_only_highlighted(bool v) { this->publish_only_highlighted_ = v; }
+
   void setup() override;
   void loop() override;
   void receive_frame();
@@ -50,6 +60,19 @@ protected:
   QueueHandle_t packet_queue_{nullptr};
 
   std::vector<std::function<void(Frame *)>> handlers_;
+
+  // Highlight meters
+  std::vector<uint32_t> highlight_ids_{};
+  std::string highlight_tag_{"wmbus_user"};
+  std::string highlight_prefix_{"★ "};
+  bool highlight_ansi_{false};
+  bool publish_only_highlighted_{false};
+
+  // SX1262 boot device errors publish (one-time)
+  bool publish_dev_err_after_clear_{false};
+  bool dev_err_cleared_pending_{false};
+  uint16_t dev_err_before_{0};
+  uint16_t dev_err_after_{0};
 
 
   // Diagnostics counters (published periodically if diagnostic_topic is set)

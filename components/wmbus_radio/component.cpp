@@ -7,6 +7,7 @@
 #include "esphome/core/helpers.h"
 
 #include <cstring>
+#include <cstdlib>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -273,10 +274,33 @@ void Radio::setup() {
 
   this->radio->attach_data_interrupt(Radio::wakeup_receiver_task_from_isr,
                                      &(this->receiver_task_handle_));
+
+  // SX1262 boot device errors: capture for optional one-time publish on MQTT.
+  if (this->publish_dev_err_after_clear_ && this->radio != nullptr) {
+    uint16_t before = 0, after = 0;
+    if (this->radio->get_boot_device_errors(before, after)) {
+      this->dev_err_before_ = before;
+      this->dev_err_after_ = after;
+      this->dev_err_cleared_pending_ = true;
+    }
+  }
 }
 
 void Radio::loop() {
   this->maybe_publish_diag_summary_((uint32_t) esphome::millis());
+
+  // One-time publish of SX1262 dev_err snapshot (if enabled).
+  if (this->dev_err_cleared_pending_ && mqtt::global_mqtt_client != nullptr &&
+      mqtt::global_mqtt_client->is_connected() && !this->diag_topic_.empty()) {
+    char payload[220];
+    snprintf(payload, sizeof(payload),
+             "{\"event\":\"dev_err_cleared\",\"before\":%u,\"before_hex\":\"%04X\",\"after\":%u,\"after_hex\":\"%04X\"}",
+             (unsigned) this->dev_err_before_, (unsigned) this->dev_err_before_,
+             (unsigned) this->dev_err_after_, (unsigned) this->dev_err_after_);
+    mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+    this->dev_err_cleared_pending_ = false;
+  }
+
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
@@ -467,12 +491,53 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   ci  = d[base + 9];
 }
 
-ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-         d.size(), frame->rssi(),
-         link_mode_name(frame->link_mode()),
-         frame->format().c_str(),
-         mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);for (auto &handler : this->handlers_)
-    handler(&frame.value());
+  // Highlight / filter: match only when ID is valid BCD and configured.
+  bool highlighted = false;
+  uint32_t id_u32 = 0;
+  if (strlen(id_str) > 0) {
+    // id_str is decimal for BCD_OK, otherwise hex fallback.
+    // Only treat pure-decimal as a meter id.
+    bool all_digits = true;
+    for (size_t i = 0; i < strlen(id_str); i++) {
+      if (id_str[i] < '0' || id_str[i] > '9') {
+        all_digits = false;
+        break;
+      }
+    }
+    if (all_digits) {
+      id_u32 = (uint32_t) strtoul(id_str, nullptr, 10);
+      for (auto v : this->highlight_ids_) {
+        if (v == id_u32) {
+          highlighted = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (highlighted) {
+    const char *ansi_beg = this->highlight_ansi_ ? "\033[1;32m" : "";
+    const char *ansi_end = this->highlight_ansi_ ? "\033[0m" : "";
+    ESP_LOGI(this->highlight_tag_.c_str(), "%s%sHave data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+             ansi_beg, this->highlight_prefix_.c_str(),
+             d.size(), frame->rssi(),
+             link_mode_name(frame->link_mode()),
+             frame->format().c_str(),
+             mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci,
+             ansi_end);
+  } else {
+    ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+             d.size(), frame->rssi(),
+             link_mode_name(frame->link_mode()),
+             frame->format().c_str(),
+             mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);
+  }
+
+  // Optional filter: only run handlers for highlighted meters.
+  if (!this->publish_only_highlighted_ || highlighted) {
+    for (auto &handler : this->handlers_)
+      handler(&frame.value());
+  }
 
   if (frame->handlers_count())
     ESP_LOGI(TAG, "Telegram handled by %d handlers", frame->handlers_count());

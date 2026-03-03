@@ -464,6 +464,21 @@ void SX1262::setup() {
                     0x00, 0x00,          // DIO2 mask
                     0x00, 0x00});        // DIO3 mask
 
+  // Optional: clear latched device errors on boot (Semtech SX126x).
+  // This prevents stale flags (e.g. 0x0020 XOSC_START) from confusing diagnostics.
+  if (this->clear_device_errors_on_boot_) {
+    uint8_t b[2]{};
+    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, b, sizeof(b));
+    this->boot_dev_err_before_ = (uint16_t(b[0]) << 8) | uint16_t(b[1]);
+
+    this->cmd_write_(CMD_CLR_DEVICE_ERRORS, {});
+
+    uint8_t a[2]{};
+    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, a, sizeof(a));
+    this->boot_dev_err_after_ = (uint16_t(a[0]) << 8) | uint16_t(a[1]);
+    this->boot_dev_err_valid_ = true;
+  }
+
   this->restart_rx();
   ESP_LOGV(TAG, "SX1262 setup done");
 }

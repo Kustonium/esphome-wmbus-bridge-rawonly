@@ -32,6 +32,16 @@ class SX1262 : public RadioTransceiver {
   // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
   void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
 
+  // Clear latched device errors on boot (e.g. 0x0020 XOSC_START).
+  void set_clear_device_errors_on_boot(bool v) { this->clear_device_errors_on_boot_ = v; }
+
+  bool get_boot_device_errors(uint16_t &before, uint16_t &after) const override {
+    if (!this->boot_dev_err_valid_) return false;
+    before = this->boot_dev_err_before_;
+    after = this->boot_dev_err_after_;
+    return true;
+  }
+
   // Optional Heltec V4 front-end (FEM/LNA/PA). If configured, we force RX path.
   void set_fem_ctrl_pin(InternalGPIOPin *pin) { this->fem_ctrl_pin_ = pin; }
   void set_fem_en_pin(InternalGPIOPin *pin) { this->fem_en_pin_ = pin; }
@@ -75,6 +85,12 @@ class SX1262 : public RadioTransceiver {
   bool has_tcxo_{false};
   SX1262RxGain rx_gain_{BOOSTED};
   bool long_gfsk_packets_{false};
+
+  // Boot diagnostics
+  bool clear_device_errors_on_boot_{false};
+  bool boot_dev_err_valid_{false};
+  uint16_t boot_dev_err_before_{0};
+  uint16_t boot_dev_err_after_{0};
 
   // Optional FEM pins
   InternalGPIOPin *fem_ctrl_pin_{nullptr};
