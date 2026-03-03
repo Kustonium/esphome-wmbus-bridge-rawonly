@@ -284,7 +284,7 @@ wmbus_radio:
   # highlight_prefix: prefiks przed treścią logu / prefix before log message
   # ---------------------------------------------------------------------------
   highlight_meters:
-    - "00089907"
+    - "12345678"
     # - "12345678"           # możesz dodać więcej / add more as needed
   highlight_ansi: true        # domyślnie: false / default: false
   highlight_tag: "wmbus_user" # domyślnie: "wmbus_user" / default: "wmbus_user"
