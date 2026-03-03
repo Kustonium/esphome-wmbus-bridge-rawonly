@@ -94,8 +94,8 @@ wmbus_radio:
   long_gfsk_packets: true
 
   # Semtech diag: czyść błędy oscylatora na starcie (u Ciebie zostaje 0)
-  clear_device_errors_on_boot: true
-  publish_dev_err_after_clear: false
+  # clear_device_errors_on_boot: true
+  # publish_dev_err_after_clear: false
 
   # Highlight (opcjonalnie)
   highlight_meters:
