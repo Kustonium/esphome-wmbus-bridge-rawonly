@@ -8,7 +8,10 @@ namespace wmbus_radio {
 
 static const char *TAG = "SX1262";
 
-// SX126x commands (subset)
+// ---------------------------------------------------------------------------
+// SX126x SPI command opcodes (subset used for WMBus RX)
+// Reference: SX1261/2 datasheet Rev 2.2, Table 11-1
+// ---------------------------------------------------------------------------
 static constexpr uint8_t CMD_SET_STANDBY = 0x80;
 static constexpr uint8_t CMD_SET_PACKET_TYPE = 0x8A;
 static constexpr uint8_t CMD_SET_RF_FREQUENCY = 0x86;
@@ -31,16 +34,22 @@ static constexpr uint8_t CMD_CALIBRATE_IMAGE = 0x98;
 static constexpr uint8_t CMD_WRITE_REGISTER = 0x0D;
 static constexpr uint8_t CMD_READ_REGISTER = 0x1D;
 
-// SX126x constants (subset)
+// ---------------------------------------------------------------------------
+// SX126x standby / packet type constants
+// STANDBY_RC   - internal RC oscillator, used after reset and before XOSC is ready
+// STANDBY_XOSC - crystal oscillator, required before entering RX/TX
+// ---------------------------------------------------------------------------
 static constexpr uint8_t STANDBY_RC = 0x00;
 static constexpr uint8_t STANDBY_XOSC = 0x01;
 
 static constexpr uint8_t PACKET_TYPE_GFSK = 0x00;
 
-// GFSK settings
+// ---------------------------------------------------------------------------
+// GFSK modulation / packet parameter constants
+// ---------------------------------------------------------------------------
 static constexpr uint8_t GFSK_PULSE_SHAPE_BT_0_5 = 0x09;
 static constexpr uint8_t GFSK_RX_BW_312_0 = 0x19;
-static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;// legacy
+static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;  // 234.3 kHz RX bandwidth (legacy, unused)
 static constexpr uint8_t GFSK_PREAMBLE_DETECT_16 = 0x05;
 static constexpr uint8_t GFSK_ADDRESS_FILT_OFF = 0x00;
 
@@ -57,14 +66,20 @@ static constexpr uint8_t GFSK_WHITENING_OFF = 0x00;
 // DIO3 TCXO voltage
 static constexpr uint8_t DIO3_OUTPUT_3_0 = 0x06;
 
-// IRQ mask bits
+// ---------------------------------------------------------------------------
+// IRQ flag bits (GetIrqStatus register)
+// ---------------------------------------------------------------------------
 static constexpr uint16_t IRQ_RX_DONE = 0x0002;
-static constexpr uint16_t IRQ_SYNC_WORD_VALID = 0x0008;  // SyncWordValid
+// IRQ_SYNC_WORD_VALID: sync word matched - used as long-packet start trigger
+static constexpr uint16_t IRQ_SYNC_WORD_VALID = 0x0008;
 
 static uint16_t u16be_(const uint8_t *p) { return (uint16_t(p[0]) << 8) | uint16_t(p[1]); }
 static constexpr uint16_t IRQ_TIMEOUT = 0x0200;   // RxTxTimeout
 static constexpr uint16_t IRQ_CRC_ERROR = 0x0040; // CRC error
 
+// ---------------------------------------------------------------------------
+// Register addresses (SX1261/2 datasheet Rev 2.2)
+// ---------------------------------------------------------------------------
 // Sync word base register
 static constexpr uint16_t REG_SYNC_WORD_0 = 0x06C0;
 
@@ -73,7 +88,9 @@ static constexpr uint16_t REG_RX_GAIN = 0x08AC;
 static constexpr uint8_t RX_GAIN_POWER_SAVING = 0x94;
 static constexpr uint8_t RX_GAIN_BOOSTED = 0x96;
 
-// Semtech AN1200.53 long packet reception registers
+// Semtech AN1200.53 long-packet reception registers:
+//   REG_RX_ADDR_PTR      - current HW write pointer into the 256-byte circular buffer
+//   REG_RXTX_PAYLOAD_LEN - intended end index; radio asserts RX_DONE when pointer reaches this value
 static constexpr uint16_t REG_RX_ADDR_PTR = 0x0803;
 static constexpr uint16_t REG_RXTX_PAYLOAD_LEN = 0x06BB;
 
@@ -85,6 +102,10 @@ static inline void u16_to_be(uint16_t v, uint8_t &msb, uint8_t &lsb) {
   lsb = (uint8_t)(v & 0xFF);
 }
 
+// ---------------------------------------------------------------------------
+// wait_while_busy_: poll BUSY pin until low (command accepted).
+// Bail out after 200 ms to avoid hanging on a broken SPI bus.
+// ---------------------------------------------------------------------------
 void SX1262::wait_while_busy_() {
   if (this->busy_pin_ == nullptr)
     return;
@@ -98,6 +119,9 @@ void SX1262::wait_while_busy_() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// cmd_write_: send command opcode + argument bytes. BUSY checked before and after.
+// ---------------------------------------------------------------------------
 void SX1262::cmd_write_(uint8_t cmd, std::initializer_list<uint8_t> args) {
   this->wait_while_busy_();
   this->delegate_->begin_transaction();
@@ -108,6 +132,9 @@ void SX1262::cmd_write_(uint8_t cmd, std::initializer_list<uint8_t> args) {
   this->wait_while_busy_();
 }
 
+// ---------------------------------------------------------------------------
+// cmd_read_: send command + args, discard mandatory status byte, read out_len bytes.
+// ---------------------------------------------------------------------------
 void SX1262::cmd_read_(uint8_t cmd, std::initializer_list<uint8_t> args, uint8_t *out, size_t out_len) {
   this->wait_while_busy_();
   this->delegate_->begin_transaction();
@@ -121,6 +148,9 @@ void SX1262::cmd_read_(uint8_t cmd, std::initializer_list<uint8_t> args, uint8_t
   this->wait_while_busy_();
 }
 
+// ---------------------------------------------------------------------------
+// write_register_: write bytes to a 16-bit register address via WriteRegister command.
+// ---------------------------------------------------------------------------
 void SX1262::write_register_(uint16_t addr, std::initializer_list<uint8_t> data) {
   uint8_t msb, lsb;
   u16_to_be(addr, msb, lsb);
@@ -137,6 +167,10 @@ void SX1262::write_register_(uint16_t addr, std::initializer_list<uint8_t> data)
 }
 
 
+// ---------------------------------------------------------------------------
+// read_register8_: read one byte from a 16-bit register.
+// Protocol requires one dummy byte after the address before data clocks out.
+// ---------------------------------------------------------------------------
 uint8_t SX1262::read_register8_(uint16_t addr) {
   uint8_t msb, lsb;
   u16_to_be(addr, msb, lsb);
@@ -155,6 +189,9 @@ uint8_t SX1262::read_register8_(uint16_t addr) {
 
 
 
+// ---------------------------------------------------------------------------
+// get_irq_status_: read 16-bit IRQ status register, return raw flag word.
+// ---------------------------------------------------------------------------
 uint16_t SX1262::get_irq_status_() {
   uint8_t st[2]{};
   this->cmd_read_(CMD_GET_IRQ_STATUS, {}, st, sizeof(st));
@@ -162,6 +199,10 @@ uint16_t SX1262::get_irq_status_() {
 }
 
 
+// ---------------------------------------------------------------------------
+// read_buffer_: read out_len bytes from the 256-byte circular HW buffer.
+// ReadBuffer handles wrap-around automatically, so a single call is always safe.
+// ---------------------------------------------------------------------------
 void SX1262::read_buffer_(uint8_t offset, uint8_t *out, size_t out_len) {
   this->wait_while_busy_();
   this->delegate_->begin_transaction();
@@ -182,6 +223,10 @@ int8_t SX1262::read_rssi_inst_dbm_() {
 }
 
 
+// ---------------------------------------------------------------------------
+// set_rf_frequency_: convert Hz to 25-bit PLL word and program it.
+// Formula: rfFreq = (freq_hz * 2^25) / XTAL_FREQ
+// ---------------------------------------------------------------------------
 void SX1262::set_rf_frequency_(uint32_t freq_hz) {
   uint64_t rf = ((uint64_t) freq_hz << 25) / XTAL_FREQ;
   cmd_write_(CMD_SET_RF_FREQUENCY,
@@ -189,6 +234,11 @@ void SX1262::set_rf_frequency_(uint32_t freq_hz) {
               (uint8_t) (rf & 0xFF)});
 }
 
+// ---------------------------------------------------------------------------
+// set_sync_word_: program the 16-bit WMBus sync word into the register bank.
+//   Byte 0 = 0x54 (WMBus constant), sync2 selects format:
+//     0x3D = C-mode Format B (most common), 0xCD = C-mode Format A.
+// ---------------------------------------------------------------------------
 void SX1262::set_sync_word_(uint8_t sync2) {
   this->write_register_(REG_SYNC_WORD_0, {0x54, sync2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
 }
@@ -200,6 +250,10 @@ bool SX1262::has_rx_done_() {
   return (flags & IRQ_RX_DONE) != 0;
 }
 
+// ---------------------------------------------------------------------------
+// load_rx_buffer_: normal (non-long-packet) receive path.
+// After RX_DONE, reads payload length + start pointer, loads rx_buffer_, caches RSSI.
+// ---------------------------------------------------------------------------
 bool SX1262::load_rx_buffer_() {
   if (!this->has_rx_done_())
     return false;
@@ -249,6 +303,26 @@ bool SX1262::load_rx_buffer_() {
 }
 
 
+// ---------------------------------------------------------------------------
+// capture_rx_stream_: long-packet receive path, implements Semtech AN1200.53.
+//
+// The SX126x has a 256-byte circular HW buffer. In normal mode the radio stops
+// at REG_RXTX_PAYLOAD_LEN, limiting a burst to 255 bytes. WMBus T1 with 3-of-6
+// encoding can exceed this limit.
+//
+// AN1200.53 trick:
+//   1. Set REG_RXTX_PAYLOAD_LEN = 0xFF so the radio never auto-stops.
+//   2. Poll REG_RX_ADDR_PTR to see how many new bytes arrived.
+//   3. Drain those bytes into rx_buffer_.
+//   4. Write (current_ptr - 1) back to REG_RXTX_PAYLOAD_LEN to keep the radio alive.
+//   5. Repeat until IRQ_RX_DONE / IRQ_TIMEOUT fires and data flow stops.
+//
+// avail = (uint8_t)(cur - state_index): intentional uint8_t wrap handles
+// the 0xFF->0x00 circular pointer rollover (e.g. cur=0x0A, state=0xFA -> avail=16).
+//
+// The manual first/second read split below is a conservative defensive measure;
+// ReadBuffer wraps automatically in HW so both produce identical results.
+// ---------------------------------------------------------------------------
 bool SX1262::capture_rx_stream_() {
   // Semtech AN1200.53: stream from the 256-byte internal buffer while RX is still running.
   // We rely on IRQ_RX_DONE / IRQ_TIMEOUT to decide when the burst is complete (not a tiny "silence" window),
@@ -341,8 +415,20 @@ bool SX1262::capture_rx_stream_() {
   // Stop RX and clear IRQs.
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
 
-  // Optional: clear and snapshot SX1262 latched device errors on boot.
-  // We do this in STANDBY_RC to avoid weird states where ClearDeviceErrors is ignored.
+  // ---------------------------------------------------------------------------
+  // One-shot device-error snapshot (boot diagnostics).
+  //
+  // This block must execute ONLY ONCE - on the first captured frame after power-on.
+  // It snapshots the latched SX126x device error register before and after clearing,
+  // storing both values for diagnostic reporting via MQTT.
+  //
+  // Runs in STANDBY_RC because ClearDeviceErrors can be silently ignored in other states.
+  //
+  // *** BUG FIX: clear_device_errors_on_boot_ is reset to false inside this block.
+  // Without it the block would run on every frame, causing:
+  //   - 7 ms blocking delay per frame
+  //   - boot snapshot overwritten each frame (losing the real power-on state)
+  // ---------------------------------------------------------------------------
   if (this->clear_device_errors_on_boot_) {
     uint8_t de[2]{};
     this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, de, sizeof(de));
@@ -356,6 +442,7 @@ bool SX1262::capture_rx_stream_() {
     this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, de, sizeof(de));
     this->boot_dev_err_after_ = u16be_(de);
     this->boot_dev_err_valid_ = true;
+    this->clear_device_errors_on_boot_ = false;  // <<< FIX: run only once
   }
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
 
@@ -372,6 +459,11 @@ bool SX1262::capture_rx_stream_() {
 
 
 
+// ---------------------------------------------------------------------------
+// setup: called once by ESPHome at boot.
+// Configures FEM pins (if defined), resets the SX1262, and programs all
+// static RF / modulation / packet parameters.
+// ---------------------------------------------------------------------------
 void SX1262::setup() {
   this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE;
   this->common_setup();
@@ -463,6 +555,13 @@ void SX1262::setup() {
   ESP_LOGV(TAG, "SX1262 setup done");
 }
 
+// ---------------------------------------------------------------------------
+// restart_rx: re-arm the receiver for the next WMBus frame.
+//
+// WMBus C-mode has two formats differing only in the second sync byte.
+// We cycle 3:1 towards Format B (0x3D) as it is more common in practice,
+// so both formats are caught without any user configuration.
+// ---------------------------------------------------------------------------
 void SX1262::restart_rx() {
   // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
   // by changing the 2nd sync byte. This lets us catch both variants
@@ -485,6 +584,11 @@ void SX1262::restart_rx() {
 }
 
 
+// ---------------------------------------------------------------------------
+// read: called byte-by-byte by the receiver task.
+// On first call after an IRQ: loads buffer (normal) or streams (long-packet).
+// Subsequent calls return successive bytes from rx_buffer_ until exhausted.
+// ---------------------------------------------------------------------------
 optional<uint8_t> SX1262::read() {
   if (!this->rx_loaded_) {
     if (this->long_gfsk_packets_) {
@@ -511,6 +615,11 @@ optional<uint8_t> SX1262::read() {
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// get_rssi: return RSSI (dBm) cached at packet capture time.
+// In long-GFSK mode the radio enters standby after capture, so
+// GetPacketStatus would return zeros if queried here.
+// ---------------------------------------------------------------------------
 int8_t SX1262::get_rssi() {
   // Return cached RSSI captured when the RX buffer was filled.
   // In long-GFSK mode we stop RX after capture, so live GetPacketStatus
