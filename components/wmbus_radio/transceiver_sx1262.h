@@ -32,14 +32,12 @@ class SX1262 : public RadioTransceiver {
   // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
   void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
 
-  // SX1262: clear GetDeviceErrors latch on boot and store before/after snapshot.
+  // Diagnostics toggles (avoid extra SPI reads unless explicitly enabled)
+  void set_diag_expert(bool v) { this->diag_expert_ = v; }
+  void set_diag_rx_buf_status(bool v) { this->diag_rx_buf_status_ = v; }
+
+  // Boot-time maintenance
   void set_clear_device_errors_on_boot(bool v) { this->clear_device_errors_on_boot_ = v; }
-  bool get_boot_device_errors(uint16_t &before, uint16_t &after) const override {
-    if (!this->boot_dev_err_valid_) return false;
-    before = this->boot_dev_err_before_;
-    after = this->boot_dev_err_after_;
-    return true;
-  }
 
   // Optional Heltec V4 front-end (FEM/LNA/PA). If configured, we force RX path.
   void set_fem_ctrl_pin(InternalGPIOPin *pin) { this->fem_ctrl_pin_ = pin; }
@@ -52,6 +50,9 @@ class SX1262 : public RadioTransceiver {
   int8_t get_rssi() override;
   const char *get_name() override;
 
+  bool get_cached_chip_diag(ChipDiagSnapshot &out) override;
+  bool get_boot_cleared_device_errors(uint16_t &before, uint16_t &after) override;
+
  protected:
   void wait_while_busy_();
   void cmd_write_(uint8_t cmd, std::initializer_list<uint8_t> args);
@@ -62,6 +63,14 @@ class SX1262 : public RadioTransceiver {
   uint8_t read_register8_(uint16_t addr);
   uint16_t get_irq_status_();
   void read_buffer_(uint8_t offset, uint8_t *out, size_t out_len);
+
+  // Instantaneous RSSI (works even when packet status context is lost)
+  int8_t read_rssi_inst_dbm_();
+
+  // Semtech diagnostics (SX126x)
+  uint16_t get_device_errors_();
+  void clear_device_errors_();
+  void get_stats_(uint16_t &rx, uint16_t &crc, uint16_t &hdr);
 
   void set_rf_frequency_(uint32_t freq_hz);
   void set_sync_word_(uint8_t sync2);
@@ -81,6 +90,11 @@ class SX1262 : public RadioTransceiver {
   SX1262RxGain rx_gain_{BOOSTED};
   bool long_gfsk_packets_{false};
 
+  // Diagnostics
+  bool diag_expert_{false};
+  bool diag_rx_buf_status_{false};
+  bool clear_device_errors_on_boot_{true};
+
   // Optional FEM pins
   InternalGPIOPin *fem_ctrl_pin_{nullptr};
   InternalGPIOPin *fem_en_pin_{nullptr};
@@ -90,6 +104,23 @@ class SX1262 : public RadioTransceiver {
   size_t rx_idx_{0};
   size_t rx_len_{0};
   bool rx_loaded_{false};
+
+  // Cached per-RX diagnostics (no SPI at publish-time)
+  uint16_t last_irq_{0};
+  uint16_t last_dev_err_{0};
+  uint16_t last_stat_rx_{0};
+  uint16_t last_stat_crc_{0};
+  uint16_t last_stat_hdr_{0};
+  uint8_t last_rx_buf_len_{0};
+  uint8_t last_rx_buf_start_ptr_{0};
+  bool last_dev_err_valid_{false};
+  bool last_stats_valid_{false};
+  bool last_rx_buf_valid_{false};
+
+  // Boot clear snapshot
+  bool boot_dev_err_valid_{false};
+  uint16_t boot_dev_err_before_{0};
+  uint16_t boot_dev_err_after_{0};
 
   // Packet RSSI captured at the time the RX buffer was filled.
   // In long-GFSK mode we stop RX (standby) after capture, so GetPacketStatus

@@ -273,28 +273,35 @@ void Radio::setup() {
 
   this->radio->attach_data_interrupt(Radio::wakeup_receiver_task_from_isr,
                                      &(this->receiver_task_handle_));
+
+  // If the transceiver cleared device errors on boot, optionally publish a one-shot report.
+  // We defer to loop() because MQTT may not be connected during setup().
+  if (this->publish_dev_err_after_clear_) {
+    uint16_t before = 0, after = 0;
+    if (this->radio != nullptr && this->radio->get_boot_cleared_device_errors(before, after)) {
+      this->pending_dev_err_publish_ = true;
+    }
+  }
 }
 
 void Radio::loop() {
-  this->maybe_publish_diag_summary_((uint32_t) esphome::millis());
-
-  // One-shot publish of SX1262 boot device errors after clear (optional, YAML controlled).
-  if (this->publish_dev_err_after_clear_ && !this->boot_dev_err_published_) {
+  // One-shot publish: device errors before/after boot clear (best-effort)
+  if (this->pending_dev_err_publish_) {
     auto *mqtt = esphome::mqtt::global_mqtt_client;
     if (mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
-      uint16_t before=0, after=0;
-      if (this->radio != nullptr && this->radio->get_boot_device_errors(before, after)) {
-        char payload[160];
+      uint16_t before = 0, after = 0;
+      if (this->radio != nullptr && this->radio->get_boot_cleared_device_errors(before, after)) {
+        char payload[220];
         snprintf(payload, sizeof(payload),
                  "{\"event\":\"dev_err_cleared\",\"before\":%u,\"before_hex\":\"%04X\",\"after\":%u,\"after_hex\":\"%04X\"}",
                  (unsigned) before, (unsigned) before, (unsigned) after, (unsigned) after);
         mqtt->publish(this->diag_topic_, payload);
       }
-      // Mark published regardless (avoid spamming on non-SX1262 too)
-      this->boot_dev_err_published_ = true;
+      this->pending_dev_err_publish_ = false;
     }
   }
 
+  this->maybe_publish_diag_summary_((uint32_t) esphome::millis());
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
@@ -365,19 +372,40 @@ void Radio::loop() {
       // Publish diagnostics to MQTT regardless of diag_verbose_
       // (so YAML can silence logs but still get drop/trunc events).
       if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        char payload[900];
+        char payload[1300];
+
+        // Optional add-ons (no SPI here; snapshot is cached in Packet)
+        char rxbuf_part[96] = "";
+        char chip_part[300] = "";
+        const auto &chip = p->chip_diag();
+        if (this->diag_drop_rx_buf_status_ && chip.has_rx_buf) {
+          snprintf(rxbuf_part, sizeof(rxbuf_part),
+                   ",\"rx_buf_len\":%u,\"rx_buf_start_ptr\":%u",
+                   (unsigned) chip.rx_buf_len, (unsigned) chip.rx_buf_start_ptr);
+        }
+        if (this->diag_expert_ && chip.valid) {
+          // Keep it compact; intended for debugging driver/radio behaviour.
+          // stats fields are counters since reset (Semtech GetStats).
+          snprintf(chip_part, sizeof(chip_part),
+                   ",\"chip\":{\"irq\":%u,\"irq_hex\":\"%04X\",\"dev_err\":%u,\"dev_err_hex\":\"%04X\",\"stats\":{\"rx\":%u,\"crc\":%u,\"hdr\":%u}}",
+                   (unsigned) chip.irq, (unsigned) chip.irq,
+                   (unsigned) chip.dev_err, (unsigned) chip.dev_err,
+                   (unsigned) chip.stat_rx, (unsigned) chip.stat_crc, (unsigned) chip.stat_hdr);
+        }
+
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"%s%s}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len(), p->raw_hex().c_str());
+                   (unsigned) p->raw_got_len(), p->raw_hex().c_str(),
+                   rxbuf_part, chip_part);
         } else {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u%s%s}",
                    p->drop_reason().c_str(), mode, (int) p->get_rssi(),
                    (unsigned) p->want_len(), (unsigned) p->got_len(),
-                   (unsigned) p->raw_got_len());
+                   (unsigned) p->raw_got_len(), rxbuf_part, chip_part);
         }
         mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
       }
@@ -548,6 +576,12 @@ void Radio::receive_frame() {
   }
 
   packet->set_rssi(this->radio->get_rssi());
+
+  // Capture cached chip diagnostics snapshot (no SPI here; transceiver fills it during RX work)
+  ChipDiagSnapshot snap;
+  if (this->radio != nullptr && this->radio->get_cached_chip_diag(snap)) {
+    packet->set_chip_diag(snap);
+  }
   auto packet_ptr = packet.get();
 
   if (xQueueSend(this->packet_queue_, &packet_ptr, 0) == pdTRUE) {

@@ -5,6 +5,8 @@
 #include "freertos/task.h"
 #include <cstdint>
 
+#include "chip_diag.h"
+
 #define BYTE(x, n) ((uint8_t)(x >> (n * 8)))
 
 namespace esphome {
@@ -25,9 +27,12 @@ public:
   virtual int8_t get_rssi() = 0;
   virtual const char *get_name() = 0;
 
-  // Optional: SX1262 boot device error snapshot (after ClearDeviceErrors on boot).
-  // Default implementation returns false (not supported).
-  virtual bool get_boot_device_errors(uint16_t &before, uint16_t &after) const { return false; }
+  // Cached, no-SPI diagnostics snapshot (best-effort).
+  // Filled by the transceiver when it already talks to the radio for RX.
+  virtual bool get_cached_chip_diag(ChipDiagSnapshot &out) { return false; }
+
+  // Boot-time device errors clearing (best-effort, SX126x only).
+  virtual bool get_boot_cleared_device_errors(uint16_t &before, uint16_t &after) { return false; }
 
   bool read_in_task(uint8_t *buffer, size_t length);
 
