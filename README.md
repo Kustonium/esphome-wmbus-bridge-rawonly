@@ -196,8 +196,8 @@ This is already handled in `examples/SX1262.yaml` (GPIO2/GPIO7/GPIO46).
 | Klucz / Key | Domyślnie / Default | Opis / Description |
 |---|---|---|
 | `diagnostic_topic` | `"wmbus/diag"` | Topic MQTT dla diagnostyki / MQTT topic for diagnostics |
-| `diagnostic_verbose` | `true` | Wyświetlaj dropy w logach serial/API (eventy MQTT są wysyłane zawsze) / Show drops in serial/API logs (MQTT events are always published) |
-| `diagnostic_publish_raw` | `true` | Dołączaj pole `"raw"` (hex) do JSON-ów dropów na MQTT / Include `"raw"` (hex) field in drop/truncated MQTT JSON events |
+| `diagnostic_verbose` | `true` | Publikuj każdy drop osobno na MQTT / Publish each drop individually to MQTT |
+| `diagnostic_publish_raw` | `true` | Dołączaj `raw(hex)` do dropów / Include `raw(hex)` in drop events |
 | `diagnostic_summary_interval` | `60s` | Jak często wysyłać podsumowanie / How often to send summary |
 
 ### Podświetlanie logów (opcjonalne) / Log highlighting (optional)
@@ -300,24 +300,16 @@ You can change the topic to your own.
 
 ### Diagnostics (optional)
 
-W `wmbus_radio` możesz wyłączyć gadatliwe logi i raw hex w dropach (domyślnie: wszystko włączone):
-In `wmbus_radio` you can disable verbose logs and raw hex in drops (defaults: everything enabled):
+W `wmbus_radio` możesz włączyć/wyłączyć publikowanie diagnostyki (domyślnie: wszystko włączone):
+In `wmbus_radio` you can tune diagnostic publishing (defaults: everything enabled):
 
 ```yaml
 wmbus_radio:
   diagnostic_topic: "wmbus/diag"          # domyślnie / default
   diagnostic_summary_interval: 60s        # domyślnie / default
-  diagnostic_verbose: false               # ucisz logi serial/API dla dropów (eventy MQTT dalej lecą) / silence serial/API drop logs (MQTT events still fire)
-  diagnostic_publish_raw: false           # nie dołączaj raw hex do JSON-ów MQTT / omit raw hex from MQTT JSON events
+  diagnostic_verbose: false               # wyłącz osobne eventy dla każdego dropu / disable per-drop events
+  diagnostic_publish_raw: false           # wyłącz raw hex w dropach / disable raw hex in drops
 ```
-
-> **Uwaga:** `diagnostic_verbose` kontroluje tylko **logi** (serial/API).
-> Eventy MQTT (`dropped`, `truncated`) są **zawsze** wysyłane niezależnie od tej flagi, gdy `diagnostic_topic` jest ustawiony.
-> `diagnostic_publish_raw` steruje polem `"raw"` w tych eventach MQTT.
->
-> **Note:** `diagnostic_verbose` controls only **logs** (serial/API).
-> MQTT events (`dropped`, `truncated`) are **always** published regardless of this flag when `diagnostic_topic` is set.
-> `diagnostic_publish_raw` controls the `"raw"` field in those MQTT events.
 
 Wtedy na `diagnostic_topic` pojawiają się JSON-y:
 Then JSON messages appear on `diagnostic_topic`:
@@ -516,8 +508,8 @@ That's normal on air, especially in cities/apartment buildings.
 Jeśli chcesz diagnozować:
 If you want to diagnose:
 
-* włącz `diagnostic_publish_raw: true` (domyślnie jest włączone) — doda pole `"raw"` z hex do każdego eventu `dropped` na MQTT,
-  enable `diagnostic_publish_raw: true` (it's on by default) — adds `"raw"` hex field to each `dropped` MQTT event,
+* włącz `diagnostic_publish_raw: true` (domyślnie jest włączone),
+  enable `diagnostic_publish_raw: true` (it's on by default),
 
 * podeślij **sam** `raw(hex)` (bez całego JSON-a) do **online analyzera** `wmbusmeters.org/analyze/…`.
   submit **only** `raw(hex)` (not the whole JSON) to the **online analyzer** at `wmbusmeters.org/analyze/…`.
