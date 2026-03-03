@@ -27,6 +27,13 @@ public:
   void set_radio(RadioTransceiver *radio) { this->radio = radio; };
   void set_diag_topic(const std::string &topic) { this->diag_topic_ = topic; }
 
+  // Expert diagnostics (Semtech-style snapshots) - publish only on drops.
+  void set_diag_expert(bool enabled) { this->diag_expert_ = enabled; }
+  // Add RX buffer status (payload len + start ptr) to drop events.
+  void set_diag_drop_rx_buf_status(bool enabled) { this->diag_drop_rx_buf_status_ = enabled; }
+  // If transceiver cleared device errors on boot, optionally publish before/after once.
+  void set_publish_dev_err_after_clear(bool enabled) { this->publish_dev_err_after_clear_ = enabled; }
+
   // Diagnostics runtime controls (can be toggled from YAML via template switches)
   void set_diag_verbose(bool enabled) { this->diag_verbose_ = enabled; }
   void set_diag_publish_raw(bool enabled) { this->diag_publish_raw_ = enabled; }
@@ -59,6 +66,12 @@ protected:
   bool diag_verbose_{true};
   // When false, per-packet payloads/logs omit the raw hex (much less spam)
   bool diag_publish_raw_{true};
+
+  // Expert diagnostics options
+  bool diag_expert_{false};
+  bool diag_drop_rx_buf_status_{false};
+  bool publish_dev_err_after_clear_{false};
+  bool pending_dev_err_publish_{false};
 
   enum DropBucket : uint8_t {
     DB_TOO_SHORT = 0,

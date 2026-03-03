@@ -45,6 +45,12 @@ CONF_DIAG_VERBOSE = "diagnostic_verbose"
 CONF_DIAG_PUBLISH_RAW = "diagnostic_publish_raw"
 CONF_DIAG_SUMMARY_INTERVAL = "diagnostic_summary_interval"
 
+# Expert diagnostics (Semtech-style snapshots)
+CONF_DIAG_EXPERT = "diagnostic_expert"
+CONF_DIAG_DROP_RX_BUF_STATUS = "diagnostic_drop_rx_buf_status"
+CONF_CLEAR_DEVICE_ERRORS_ON_BOOT = "clear_device_errors_on_boot"
+CONF_PUBLISH_DEV_ERR_AFTER_CLEAR = "publish_dev_err_after_clear"
+
 # Heltec V4 FEM pins (SX1262 external front-end)
 CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
 CONF_FEM_EN_PIN = "fem_en_pin"
@@ -102,6 +108,15 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_DIAG_VERBOSE, default=True): cv.boolean,
             cv.Optional(CONF_DIAG_PUBLISH_RAW, default=True): cv.boolean,
             cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
+
+            # Optional expert diagnostics (disabled by default)
+            cv.Optional(CONF_DIAG_EXPERT, default=False): cv.boolean,
+            cv.Optional(CONF_DIAG_DROP_RX_BUF_STATUS, default=False): cv.boolean,
+
+            # SX1262 only: clear device errors on boot (best-effort)
+            cv.Optional(CONF_CLEAR_DEVICE_ERRORS_ON_BOOT, default=True): cv.boolean,
+            # Publish before/after dev_err once to diagnostic_topic (if available)
+            cv.Optional(CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, default=False): cv.boolean,
         }
     )
     .extend(spi.spi_device_schema())
@@ -132,6 +147,13 @@ async def to_code(config):
             )
         )
         cg.add(radio_var.set_long_gfsk_packets(config.get(CONF_LONG_GFSK_PACKETS, False)))
+
+        # Diagnostics toggles (used to decide what to cache in a no-SPI snapshot)
+        cg.add(radio_var.set_diag_expert(config.get(CONF_DIAG_EXPERT, False)))
+        cg.add(radio_var.set_diag_rx_buf_status(config.get(CONF_DIAG_DROP_RX_BUF_STATUS, False)))
+
+        # Boot-time error handling
+        cg.add(radio_var.set_clear_device_errors_on_boot(config.get(CONF_CLEAR_DEVICE_ERRORS_ON_BOOT, True)))
 
         # FEM pins (Heltec V4)
         if CONF_FEM_CTRL_PIN in config:
@@ -166,6 +188,10 @@ async def to_code(config):
     cg.add(var.set_diag_verbose(config.get(CONF_DIAG_VERBOSE, True)))
     cg.add(var.set_diag_publish_raw(config.get(CONF_DIAG_PUBLISH_RAW, True)))
     cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
+
+    cg.add(var.set_diag_expert(config.get(CONF_DIAG_EXPERT, False)))
+    cg.add(var.set_diag_drop_rx_buf_status(config.get(CONF_DIAG_DROP_RX_BUF_STATUS, False)))
+    cg.add(var.set_publish_dev_err_after_clear(config.get(CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, False)))
 
     await cg.register_component(var, config)
 

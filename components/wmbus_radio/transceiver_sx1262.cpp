@@ -22,7 +22,9 @@ static constexpr uint8_t CMD_CLEAR_IRQ_STATUS = 0x02;
 static constexpr uint8_t CMD_GET_RX_BUFFER_STATUS = 0x13;
 static constexpr uint8_t CMD_READ_BUFFER = 0x1E;
 static constexpr uint8_t CMD_GET_PACKET_STATUS = 0x14;
-static constexpr uint8_t CMD_GET_RSSI_INST = 0x15;
+static constexpr uint8_t CMD_GET_DEVICE_ERRORS = 0x17;
+static constexpr uint8_t CMD_CLEAR_DEVICE_ERRORS = 0x07;
+static constexpr uint8_t CMD_GET_STATS = 0x10;
 static constexpr uint8_t CMD_SET_DIO2_AS_RF_SWITCH_CTRL = 0x9D;
 static constexpr uint8_t CMD_SET_DIO3_AS_TCXO_CTRL = 0x97;
 static constexpr uint8_t CMD_CALIBRATE_IMAGE = 0x98;
@@ -154,7 +156,35 @@ uint8_t SX1262::read_register8_(uint16_t addr) {
 uint16_t SX1262::get_irq_status_() {
   uint8_t st[2]{};
   this->cmd_read_(CMD_GET_IRQ_STATUS, {}, st, sizeof(st));
-  return (uint16_t(st[0]) << 8) | uint16_t(st[1]);
+  const uint16_t v = (uint16_t(st[0]) << 8) | uint16_t(st[1]);
+  this->last_irq_ = v;
+  return v;
+}
+
+uint16_t SX1262::get_device_errors_() {
+  uint8_t st[2]{};
+  this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, st, sizeof(st));
+  const uint16_t v = (uint16_t(st[0]) << 8) | uint16_t(st[1]);
+  this->last_dev_err_ = v;
+  this->last_dev_err_valid_ = true;
+  return v;
+}
+
+void SX1262::clear_device_errors_() {
+  // Semtech driver sends two NOP bytes after opcode
+  this->cmd_write_(CMD_CLEAR_DEVICE_ERRORS, {0x00, 0x00});
+}
+
+void SX1262::get_stats_(uint16_t &rx, uint16_t &crc, uint16_t &hdr) {
+  uint8_t st[6]{};
+  this->cmd_read_(CMD_GET_STATS, {}, st, sizeof(st));
+  rx = (uint16_t(st[0]) << 8) | uint16_t(st[1]);
+  crc = (uint16_t(st[2]) << 8) | uint16_t(st[3]);
+  hdr = (uint16_t(st[4]) << 8) | uint16_t(st[5]);
+  this->last_stat_rx_ = rx;
+  this->last_stat_crc_ = crc;
+  this->last_stat_hdr_ = hdr;
+  this->last_stats_valid_ = true;
 }
 
 
@@ -168,13 +198,6 @@ void SX1262::read_buffer_(uint8_t offset, uint8_t *out, size_t out_len) {
     out[i] = this->delegate_->transfer(0x00);
   this->delegate_->end_transaction();
   this->wait_while_busy_();
-}
-
-int8_t SX1262::read_rssi_inst_dbm_() {
-  // Semtech: rssi_dbm = -(rssi_raw >> 1)
-  uint8_t rssi_raw = 0;
-  this->cmd_read_(CMD_GET_RSSI_INST, {}, &rssi_raw, 1);
-  return (int8_t)(-((int) rssi_raw) >> 1);
 }
 
 void SX1262::set_rf_frequency_(uint32_t freq_hz) {
@@ -192,6 +215,7 @@ bool SX1262::has_rx_done_() {
   uint8_t irq[2]{};
   this->cmd_read_(CMD_GET_IRQ_STATUS, {}, irq, sizeof(irq));
   const uint16_t flags = ((uint16_t) irq[0] << 8) | irq[1];
+  this->last_irq_ = flags;
   return (flags & IRQ_RX_DONE) != 0;
 }
 
@@ -203,6 +227,10 @@ bool SX1262::load_rx_buffer_() {
   this->cmd_read_(CMD_GET_RX_BUFFER_STATUS, {}, st, sizeof(st));
   const uint8_t payload_len = st[0];
   const uint8_t start_ptr = st[1];
+
+  this->last_rx_buf_len_ = payload_len;
+  this->last_rx_buf_start_ptr_ = start_ptr;
+  this->last_rx_buf_valid_ = true;
 
   if (payload_len == 0) {
     this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
@@ -225,14 +253,14 @@ bool SX1262::load_rx_buffer_() {
   {
     uint8_t ps[3]{};
     this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    // For GFSK: ps[2] is RSSI_avg (raw). In some corner cases (packet context lost)
-    // GET_PACKET_STATUS may return zeros. Fall back to GET_RSSI_INST then.
-    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) >> 1);
-    if (rssi_avg == 0) {
-      this->last_rssi_dbm_ = this->read_rssi_inst_dbm_();
-    } else {
-      this->last_rssi_dbm_ = rssi_avg;
-    }
+    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+  }
+
+  // Optional expert diagnostics (best-effort)
+  if (this->diag_expert_) {
+    (void) this->get_device_errors_();
+    uint16_t rx = 0, crc = 0, hdr = 0;
+    this->get_stats_(rx, crc, hdr);
   }
 
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
@@ -321,16 +349,26 @@ bool SX1262::capture_rx_stream_() {
   }
 
   // Cache RSSI BEFORE stopping RX (standby), otherwise GetPacketStatus may return zeros.
-  // Prefer packet RSSI_avg when available; fall back to instantaneous RSSI.
   {
     uint8_t ps[3]{};
     this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) >> 1);
-    if (rssi_avg == 0) {
-      this->last_rssi_dbm_ = this->read_rssi_inst_dbm_();
-    } else {
-      this->last_rssi_dbm_ = rssi_avg;
-    }
+    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+  }
+
+  // Optional: capture RX buffer status (payload len + start ptr) for diagnostics.
+  if (this->diag_rx_buf_status_ || this->diag_expert_) {
+    uint8_t st[2]{};
+    this->cmd_read_(CMD_GET_RX_BUFFER_STATUS, {}, st, sizeof(st));
+    this->last_rx_buf_len_ = st[0];
+    this->last_rx_buf_start_ptr_ = st[1];
+    this->last_rx_buf_valid_ = true;
+  }
+
+  // Optional expert diagnostics
+  if (this->diag_expert_) {
+    (void) this->get_device_errors_();
+    uint16_t rx = 0, crc = 0, hdr = 0;
+    this->get_stats_(rx, crc, hdr);
   }
 
   // Stop RX and clear IRQs.
@@ -374,6 +412,15 @@ void SX1262::setup() {
 
   this->reset();
   delay(10);
+
+  // Best-effort: clear device errors on boot (useful to detect recurring errors later)
+  if (this->clear_device_errors_on_boot_) {
+    this->boot_dev_err_before_ = this->get_device_errors_();
+    this->clear_device_errors_();
+    // Read again after clear
+    this->boot_dev_err_after_ = this->get_device_errors_();
+    this->boot_dev_err_valid_ = true;
+  }
 
   // Apply RX gain (datasheet values)
   const uint8_t gain =
@@ -439,6 +486,42 @@ void SX1262::setup() {
 
   this->restart_rx();
   ESP_LOGV(TAG, "SX1262 setup done");
+}
+
+bool SX1262::get_cached_chip_diag(ChipDiagSnapshot &out) {
+  ChipDiagSnapshot s;
+  s.valid = true;
+  s.has_irq = true;
+  s.irq = this->last_irq_;
+
+  if (this->last_rx_buf_valid_) {
+    s.has_rx_buf = true;
+    s.rx_buf_len = this->last_rx_buf_len_;
+    s.rx_buf_start_ptr = this->last_rx_buf_start_ptr_;
+  }
+
+  if (this->last_dev_err_valid_) {
+    s.has_dev_err = true;
+    s.dev_err = this->last_dev_err_;
+  }
+
+  if (this->last_stats_valid_) {
+    s.has_stats = true;
+    s.stat_rx = this->last_stat_rx_;
+    s.stat_crc = this->last_stat_crc_;
+    s.stat_hdr = this->last_stat_hdr_;
+  }
+
+  // If we have nothing beyond irq, still allow it (irq alone is useful)
+  out = s;
+  return true;
+}
+
+bool SX1262::get_boot_cleared_device_errors(uint16_t &before, uint16_t &after) {
+  if (!this->boot_dev_err_valid_) return false;
+  before = this->boot_dev_err_before_;
+  after = this->boot_dev_err_after_;
+  return true;
 }
 
 void SX1262::restart_rx() {
