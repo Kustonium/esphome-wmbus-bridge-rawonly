@@ -1,0 +1,11 @@
+Attribution / Notice
+
+This repository repackages selected components from:
+- SzczepanLeon/esphome-components (author: Szczepan Leon)
+- wmbusmeters/wmbusmeters (GPL-3.0)
+
+Purpose: provide a lightweight RF->MQTT bridge using only:
+- components/wmbus_radio
+- components/wmbus_common
+
+License: GPL-3.0-or-later
