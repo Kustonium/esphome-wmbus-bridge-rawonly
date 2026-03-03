@@ -64,6 +64,9 @@ class SX1262 : public RadioTransceiver {
   uint16_t get_irq_status_();
   void read_buffer_(uint8_t offset, uint8_t *out, size_t out_len);
 
+  // Instantaneous RSSI (works even when packet status context is lost)
+  int8_t read_rssi_inst_dbm_();
+
   // Semtech diagnostics (SX126x)
   uint16_t get_device_errors_();
   void clear_device_errors_();

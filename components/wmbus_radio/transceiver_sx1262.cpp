@@ -22,6 +22,7 @@ static constexpr uint8_t CMD_CLEAR_IRQ_STATUS = 0x02;
 static constexpr uint8_t CMD_GET_RX_BUFFER_STATUS = 0x13;
 static constexpr uint8_t CMD_READ_BUFFER = 0x1E;
 static constexpr uint8_t CMD_GET_PACKET_STATUS = 0x14;
+static constexpr uint8_t CMD_GET_RSSI_INST = 0x15;
 static constexpr uint8_t CMD_GET_DEVICE_ERRORS = 0x17;
 static constexpr uint8_t CMD_CLEAR_DEVICE_ERRORS = 0x07;
 static constexpr uint8_t CMD_GET_STATS = 0x10;
@@ -95,6 +96,15 @@ void SX1262::wait_while_busy_() {
     delay(1);
   }
 }
+
+
+int8_t SX1262::read_rssi_inst_dbm_() {
+  // Semtech: rssi_dbm = -(rssi_raw >> 1)
+  uint8_t rssi_raw = 0;
+  this->cmd_read_(CMD_GET_RSSI_INST, {}, &rssi_raw, 1);
+  return (int8_t)(-((int) rssi_raw) / 2);
+}
+
 
 void SX1262::cmd_write_(uint8_t cmd, std::initializer_list<uint8_t> args) {
   this->wait_while_busy_();
@@ -253,7 +263,8 @@ bool SX1262::load_rx_buffer_() {
   {
     uint8_t ps[3]{};
     this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) / 2);
+    this->last_rssi_dbm_ = (rssi_avg == 0) ? this->read_rssi_inst_dbm_() : rssi_avg;
   }
 
   // Optional expert diagnostics (best-effort)
@@ -352,7 +363,8 @@ bool SX1262::capture_rx_stream_() {
   {
     uint8_t ps[3]{};
     this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) / 2);
+    this->last_rssi_dbm_ = (rssi_avg == 0) ? this->read_rssi_inst_dbm_() : rssi_avg;
   }
 
   // Optional: capture RX buffer status (payload len + start ptr) for diagnostics.
