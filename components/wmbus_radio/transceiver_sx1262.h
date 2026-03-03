@@ -32,11 +32,9 @@ class SX1262 : public RadioTransceiver {
   // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
   void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
 
-  // SX1262: clear latched device errors on boot (Semtech)
+  // SX1262: clear GetDeviceErrors latch on boot and store before/after snapshot.
   void set_clear_device_errors_on_boot(bool v) { this->clear_device_errors_on_boot_ = v; }
-
-  // If boot device errors were read/cleared, expose the values for diagnostics.
-  bool get_boot_device_errors(uint16_t &before, uint16_t &after) const {
+  bool get_boot_device_errors(uint16_t &before, uint16_t &after) const override {
     if (!this->boot_dev_err_valid_) return false;
     before = this->boot_dev_err_before_;
     after = this->boot_dev_err_after_;
@@ -64,9 +62,6 @@ class SX1262 : public RadioTransceiver {
   uint8_t read_register8_(uint16_t addr);
   uint16_t get_irq_status_();
   void read_buffer_(uint8_t offset, uint8_t *out, size_t out_len);
-
-  // Instantaneous RSSI (works even when packet status context is lost)
-  int8_t read_rssi_inst_dbm_();
 
   void set_rf_frequency_(uint32_t freq_hz);
   void set_sync_word_(uint8_t sync2);

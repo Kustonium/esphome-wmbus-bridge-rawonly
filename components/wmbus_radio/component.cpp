@@ -1,5 +1,4 @@
 #include "component.h"
-#include "transceiver_sx1262.h"
 
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -8,8 +7,6 @@
 #include "esphome/core/helpers.h"
 
 #include <cstring>
-#include <algorithm>
-#include <cstdlib>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -33,41 +30,6 @@
 namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "wmbus";
-
-static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &out) {
-  out.clear();
-  if (csv.empty()) return;
-  size_t i = 0;
-  while (i < csv.size()) {
-    // skip separators/whitespace
-    while (i < csv.size() && (csv[i] == ',' || csv[i] == ';' || csv[i] == ' ' || csv[i] == '\t' || csv[i] == '\n' || csv[i] == '\r')) i++;
-    if (i >= csv.size()) break;
-    size_t j = i;
-    while (j < csv.size() && csv[j] != ',' && csv[j] != ';' && csv[j] != ' ' && csv[j] != '\t' && csv[j] != '\n' && csv[j] != '\r') j++;
-    std::string tok = csv.substr(i, j - i);
-    // trim
-    while (!tok.empty() && (tok.front() == ' ' || tok.front() == '\t')) tok.erase(tok.begin());
-    while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\t')) tok.pop_back();
-    if (!tok.empty()) {
-      const char *s = tok.c_str();
-      int base = 10;
-      if (tok.size() > 2 && tok[0] == '0' && (tok[1] == 'x' || tok[1] == 'X')) {
-        s += 2;
-        base = 16;
-      }
-      char *endp = nullptr;
-      unsigned long v = std::strtoul(s, &endp, base);
-      if (endp != s) {
-        out.push_back((uint32_t) v);
-      }
-    }
-    i = j;
-  }
-  if (!out.empty()) {
-    std::sort(out.begin(), out.end());
-    out.erase(std::unique(out.begin(), out.end()), out.end());
-  }
-}
 
 
 Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
@@ -302,13 +264,6 @@ if (std::strcmp(hint_code, "OK") == 0) {
 }
 
 void Radio::setup() {
-  // Parse optional highlight meter list (CSV provided by python/YAML).
-  parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_);
-  if (!this->highlight_meter_ids_.empty()) {
-    ESP_LOGI(TAG, "Highlight meters enabled (%u ids) tag=%s ansi=%s", (unsigned) this->highlight_meter_ids_.size(),
-             this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(), this->highlight_ansi_ ? "true" : "false");
-  }
-
   ASSERT_SETUP(this->packet_queue_ = xQueueCreate(3, sizeof(Packet *)));
 
   ASSERT_SETUP(xTaskCreate((TaskFunction_t)this->receiver_task, "radio_recv",
@@ -318,37 +273,28 @@ void Radio::setup() {
 
   this->radio->attach_data_interrupt(Radio::wakeup_receiver_task_from_isr,
                                      &(this->receiver_task_handle_));
-
-  // SX1262: optionally publish dev_err cleared status once after boot
-  if (this->publish_dev_err_after_clear_) {
-    auto *sx = dynamic_cast<SX1262 *>(this->radio);
-    if (sx != nullptr) {
-      uint16_t before = 0, after = 0;
-      if (sx->get_boot_device_errors(before, after)) {
-        this->dev_err_before_ = before;
-        this->dev_err_after_ = after;
-        this->dev_err_cleared_pending_ = true;
-      }
-    }
-  }
 }
 
 void Radio::loop() {
   this->maybe_publish_diag_summary_((uint32_t) esphome::millis());
 
-  // Publish one-time SX1262 dev_err clear event once MQTT is up
-  if (this->dev_err_cleared_pending_) {
+  // One-shot publish of SX1262 boot device errors after clear (optional, YAML controlled).
+  if (this->publish_dev_err_after_clear_ && !this->boot_dev_err_published_) {
     auto *mqtt = esphome::mqtt::global_mqtt_client;
     if (mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
-      char payload[180];
-      snprintf(payload, sizeof(payload),
-               "{\"event\":\"dev_err_cleared\",\"before\":%u,\"before_hex\":\"%04X\",\"after\":%u,\"after_hex\":\"%04X\"}",
-               (unsigned) this->dev_err_before_, (unsigned) this->dev_err_before_,
-               (unsigned) this->dev_err_after_, (unsigned) this->dev_err_after_);
-      mqtt->publish(this->diag_topic_, payload);
-      this->dev_err_cleared_pending_ = false;
+      uint16_t before=0, after=0;
+      if (this->radio != nullptr && this->radio->get_boot_device_errors(before, after)) {
+        char payload[160];
+        snprintf(payload, sizeof(payload),
+                 "{\"event\":\"dev_err_cleared\",\"before\":%u,\"before_hex\":\"%04X\",\"after\":%u,\"after_hex\":\"%04X\"}",
+                 (unsigned) before, (unsigned) before, (unsigned) after, (unsigned) after);
+        mqtt->publish(this->diag_topic_, payload);
+      }
+      // Mark published regardless (avoid spamming on non-SX1262 too)
+      this->boot_dev_err_published_ = true;
     }
   }
+
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
@@ -471,7 +417,6 @@ char id_str[9] = "????????";
 uint8_t ver = 0xFF;
 uint8_t dev = 0xFF;
 uint8_t ci = 0xFF;
-uint32_t id_val = 0;  // decimal meter id (BCD) for optional log highlighting
 
 auto is_bcd = [](uint8_t b) -> bool {
   return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
@@ -507,11 +452,6 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   // ID bytes: base+3..base+6 (little endian) -> druk 6..3
   bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
   if (bcd_ok) {
-    // decimal value (leading zeros ignored) for quick matching against YAML list
-    id_val = (uint32_t)((((d[base + 6] >> 4) & 0x0F) * 10000000U) + ((d[base + 6] & 0x0F) * 1000000U) +
-                        (((d[base + 5] >> 4) & 0x0F) * 100000U) + ((d[base + 5] & 0x0F) * 10000U) +
-                        (((d[base + 4] >> 4) & 0x0F) * 1000U) + ((d[base + 4] & 0x0F) * 100U) +
-                        (((d[base + 3] >> 4) & 0x0F) * 10U) + (d[base + 3] & 0x0F));
     snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
              (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
              (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
@@ -528,33 +468,11 @@ if (base >= 0 && (int)d.size() >= base + 10) {
   ci  = d[base + 9];
 }
 
-// Optional log highlighting for configured IDs (BCD IDs only).
-bool highlight = false;
-if (id_val != 0 && !this->highlight_meter_ids_.empty()) {
-  highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
-}
-
-const char *log_tag = TAG;
-if (highlight) {
-  if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
-  const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
-  const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-  ESP_LOGI(log_tag, "%s%sHave data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
-           ansi_pre, this->highlight_prefix_.c_str(),
-           d.size(), frame->rssi(),
-           link_mode_name(frame->link_mode()),
-           frame->format().c_str(),
-           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci,
-           ansi_suf);
-} else {
-  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-           d.size(), frame->rssi(),
-           link_mode_name(frame->link_mode()),
-           frame->format().c_str(),
-           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);
-}
-
-for (auto &handler : this->handlers_)
+ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+         d.size(), frame->rssi(),
+         link_mode_name(frame->link_mode()),
+         frame->format().c_str(),
+         mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);for (auto &handler : this->handlers_)
     handler(&frame.value());
 
   if (frame->handlers_count())

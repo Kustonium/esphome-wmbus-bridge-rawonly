@@ -23,8 +23,9 @@ static constexpr uint8_t CMD_GET_RX_BUFFER_STATUS = 0x13;
 static constexpr uint8_t CMD_READ_BUFFER = 0x1E;
 static constexpr uint8_t CMD_GET_PACKET_STATUS = 0x14;
 static constexpr uint8_t CMD_GET_RSSI_INST = 0x15;
+static constexpr uint8_t CMD_GET_STATS = 0x10;
 static constexpr uint8_t CMD_GET_DEVICE_ERRORS = 0x17;
-static constexpr uint8_t CMD_CLR_DEVICE_ERRORS = 0x07;
+static constexpr uint8_t CMD_CLEAR_DEVICE_ERRORS = 0x07;
 static constexpr uint8_t CMD_SET_DIO2_AS_RF_SWITCH_CTRL = 0x9D;
 static constexpr uint8_t CMD_SET_DIO3_AS_TCXO_CTRL = 0x97;
 static constexpr uint8_t CMD_CALIBRATE_IMAGE = 0x98;
@@ -155,7 +156,7 @@ uint8_t SX1262::read_register8_(uint16_t addr) {
 
 uint16_t SX1262::get_irq_status_() {
   uint8_t st[2]{};
-  this->cmd_read_(CMD_GET_IRQ_STATUS, {}, st, sizeof(st));
+  this->cmd_read_(CMD_GET_IRQ_STATUS, {0x00}, st, sizeof(st));
   return (uint16_t(st[0]) << 8) | uint16_t(st[1]);
 }
 
@@ -172,13 +173,6 @@ void SX1262::read_buffer_(uint8_t offset, uint8_t *out, size_t out_len) {
   this->wait_while_busy_();
 }
 
-int8_t SX1262::read_rssi_inst_dbm_() {
-  // Semtech: rssi_dbm = -(rssi_raw >> 1)
-  uint8_t rssi_raw = 0;
-  this->cmd_read_(CMD_GET_RSSI_INST, {}, &rssi_raw, 1);
-  return (int8_t)(-((int) rssi_raw) >> 1);
-}
-
 void SX1262::set_rf_frequency_(uint32_t freq_hz) {
   uint64_t rf = ((uint64_t) freq_hz << 25) / XTAL_FREQ;
   cmd_write_(CMD_SET_RF_FREQUENCY,
@@ -192,7 +186,7 @@ void SX1262::set_sync_word_(uint8_t sync2) {
 
 bool SX1262::has_rx_done_() {
   uint8_t irq[2]{};
-  this->cmd_read_(CMD_GET_IRQ_STATUS, {}, irq, sizeof(irq));
+  this->cmd_read_(CMD_GET_IRQ_STATUS, {0x00}, irq, sizeof(irq));
   const uint16_t flags = ((uint16_t) irq[0] << 8) | irq[1];
   return (flags & IRQ_RX_DONE) != 0;
 }
@@ -202,7 +196,7 @@ bool SX1262::load_rx_buffer_() {
     return false;
 
   uint8_t st[2]{};
-  this->cmd_read_(CMD_GET_RX_BUFFER_STATUS, {}, st, sizeof(st));
+  this->cmd_read_(CMD_GET_RX_BUFFER_STATUS, {0x00}, st, sizeof(st));
   const uint8_t payload_len = st[0];
   const uint8_t start_ptr = st[1];
 
@@ -226,14 +220,15 @@ bool SX1262::load_rx_buffer_() {
   // Cache RSSI while the packet context is still valid.
   {
     uint8_t ps[3]{};
-    this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    // For GFSK: ps[2] is RSSI_avg (raw). In some corner cases (packet context lost)
-    // GET_PACKET_STATUS may return zeros. Fall back to GET_RSSI_INST then.
-    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) >> 1);
-    if (rssi_avg == 0) {
-      this->last_rssi_dbm_ = this->read_rssi_inst_dbm_();
-    } else {
-      this->last_rssi_dbm_ = rssi_avg;
+    this->cmd_read_(CMD_GET_PACKET_STATUS, {0x00}, ps, sizeof(ps));
+    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+
+    // Some boards/flows return zeros from GetPacketStatus (especially after RX context changes).
+    // Fall back to instantaneous RSSI, which is available during RX / right after RX done.
+    uint8_t ri{};
+    this->cmd_read_(CMD_GET_RSSI_INST, {0x00}, &ri, 1);
+    if (ri != 0) {
+      this->last_rssi_dbm_ = (int8_t)(-((int) ri) / 2);
     }
   }
 
@@ -264,6 +259,7 @@ bool SX1262::capture_rx_stream_() {
 
   // Capture until RX_DONE/TIMEOUT (latched IRQ), then allow a short drain window.
   bool seen_end_irq = false;
+  bool rssi_sampled = false;
 
   while (true) {
     const uint32_t now = millis();
@@ -295,6 +291,15 @@ bool SX1262::capture_rx_stream_() {
     this->write_register_(REG_RXTX_PAYLOAD_LEN, {(uint8_t) (current_index - 1)});
 
     if (avail != 0) {
+      // Sample instantaneous RSSI during an active burst (more reliable than after RX ends).
+      if (!rssi_sampled) {
+        uint8_t ri{};
+        this->cmd_read_(CMD_GET_RSSI_INST, {0x00}, &ri, 1);
+        if (ri != 0) {
+          this->last_rssi_dbm_ = (int8_t)(-((int) ri) / 2);
+          rssi_sampled = true;
+        }
+      }
       uint8_t tmp[256];
       const uint8_t off = state_index;
       const uint8_t first = (uint8_t) ((off + avail <= 256) ? avail : (256 - off));
@@ -323,20 +328,37 @@ bool SX1262::capture_rx_stream_() {
   }
 
   // Cache RSSI BEFORE stopping RX (standby), otherwise GetPacketStatus may return zeros.
-  // Prefer packet RSSI_avg when available; fall back to instantaneous RSSI.
   {
     uint8_t ps[3]{};
-    this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) >> 1);
-    if (rssi_avg == 0) {
-      this->last_rssi_dbm_ = this->read_rssi_inst_dbm_();
-    } else {
-      this->last_rssi_dbm_ = rssi_avg;
+    this->cmd_read_(CMD_GET_PACKET_STATUS, {0x00}, ps, sizeof(ps));
+    this->last_rssi_dbm_ = (int8_t)(-((int) ps[2]) / 2);
+
+    // Prefer instantaneous RSSI if available (prevents 0dBm logs when PacketStatus is zero).
+    uint8_t ri{};
+    this->cmd_read_(CMD_GET_RSSI_INST, {0x00}, &ri, 1);
+    if (ri != 0) {
+      this->last_rssi_dbm_ = (int8_t)(-((int) ri) / 2);
     }
   }
 
   // Stop RX and clear IRQs.
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
+
+  // Optional: clear latched SX1262 device errors on boot and store before/after snapshot.
+  if (this->clear_device_errors_on_boot_) {
+    uint8_t e[2]{};
+    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {0x00}, e, sizeof(e));
+    this->boot_dev_err_before_ = (uint16_t(e[0]) << 8) | uint16_t(e[1]);
+
+    // Semtech: ClearDeviceErrors requires two NOP bytes after opcode.
+    this->cmd_write_(CMD_CLEAR_DEVICE_ERRORS, {0x00, 0x00});
+
+    uint8_t e2[2]{};
+    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {0x00}, e2, sizeof(e2));
+    this->boot_dev_err_after_ = (uint16_t(e2[0]) << 8) | uint16_t(e2[1]);
+    this->boot_dev_err_valid_ = true;
+    ESP_LOGV(TAG, "DevErr cleared on boot: before=0x%04X after=0x%04X", (unsigned) this->boot_dev_err_before_, (unsigned) this->boot_dev_err_after_);
+  }
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
 
   if (this->rx_buffer_.empty())
@@ -385,6 +407,22 @@ void SX1262::setup() {
 
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
 
+  // Optional: clear latched SX1262 device errors on boot and store before/after snapshot.
+  if (this->clear_device_errors_on_boot_) {
+    uint8_t e[2]{};
+    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {0x00}, e, sizeof(e));
+    this->boot_dev_err_before_ = (uint16_t(e[0]) << 8) | uint16_t(e[1]);
+
+    // Semtech: ClearDeviceErrors requires two NOP bytes after opcode.
+    this->cmd_write_(CMD_CLEAR_DEVICE_ERRORS, {0x00, 0x00});
+
+    uint8_t e2[2]{};
+    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {0x00}, e2, sizeof(e2));
+    this->boot_dev_err_after_ = (uint16_t(e2[0]) << 8) | uint16_t(e2[1]);
+    this->boot_dev_err_valid_ = true;
+    ESP_LOGV(TAG, "DevErr cleared on boot: before=0x%04X after=0x%04X", (unsigned) this->boot_dev_err_before_, (unsigned) this->boot_dev_err_after_);
+  }
+
   // DIO2 RF switch
   this->cmd_write_(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, {uint8_t(this->dio2_rf_switch_ ? 0x01 : 0x00)});
 
@@ -418,8 +456,10 @@ void SX1262::setup() {
   const uint8_t preamble_msb = (uint8_t) ((preamble_bits >> 8) & 0xFF);
   const uint8_t preamble_lsb = (uint8_t) (preamble_bits & 0xFF);
 
-  // Always FIX_LEN for WMBus.
-  const uint8_t pkt_len_mode = GFSK_PACKET_FIX_LEN;
+  // Packet length mode:
+  // - in long-GFSK streaming: FIX_LEN with 0xFF so the packet engine does not stop early
+  // - in normal mode: VAR_LEN (legacy behavior) so RX_DONE triggers at end-of-packet
+  const uint8_t pkt_len_mode = this->long_gfsk_packets_ ? GFSK_PACKET_FIX_LEN : GFSK_PACKET_VAR_LEN;
   this->cmd_write_(CMD_SET_PACKET_PARAMS,
                    {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_16,
                     0x10,  // 16 bits sync
@@ -438,17 +478,6 @@ void SX1262::setup() {
                     mask_msb, mask_lsb,  // DIO1 mask
                     0x00, 0x00,          // DIO2 mask
                     0x00, 0x00});        // DIO3 mask
-
-  // Optionally clear latched device errors once on boot (Semtech).
-  if (this->clear_device_errors_on_boot_) {
-    uint8_t err[2]{};
-    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {0x00}, err, sizeof(err));
-    this->boot_dev_err_before_ = (uint16_t(err[0]) << 8) | uint16_t(err[1]);
-    this->cmd_write_(CMD_CLR_DEVICE_ERRORS, {0x00, 0x00});
-    this->cmd_read_(CMD_GET_DEVICE_ERRORS, {0x00}, err, sizeof(err));
-    this->boot_dev_err_after_ = (uint16_t(err[0]) << 8) | uint16_t(err[1]);
-    this->boot_dev_err_valid_ = true;
-  }
 
   this->restart_rx();
   ESP_LOGV(TAG, "SX1262 setup done");
@@ -489,11 +518,19 @@ optional<uint8_t> SX1262::read() {
       if (!this->capture_rx_stream_())
         return {};
     } else {
-      if (!this->irq_pin_->digital_read())
+      /* Many SX1262 boards expose DIO1 as a pulse; polling GPIO can miss it.
+         Use latched IRQ flags over SPI instead. */
+      const uint16_t irq2 = this->get_irq_status_();
+      if ((irq2 & (IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
         return {};
-      ESP_LOGD(TAG, "IRQ detected, loading buffer");
-      if (!this->load_rx_buffer_())
+      }
+      ESP_LOGD(TAG, "IRQ=%04X, loading buffer", irq2);
+      if (!this->load_rx_buffer_()) {
+        if (irq2 & (IRQ_TIMEOUT | IRQ_CRC_ERROR)) {
+          this->restart_rx();
+        }
         return {};
+      }
     }
   }
 

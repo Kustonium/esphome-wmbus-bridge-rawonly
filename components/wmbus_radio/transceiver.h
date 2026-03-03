@@ -25,6 +25,10 @@ public:
   virtual int8_t get_rssi() = 0;
   virtual const char *get_name() = 0;
 
+  // Optional: SX1262 boot device error snapshot (after ClearDeviceErrors on boot).
+  // Default implementation returns false (not supported).
+  virtual bool get_boot_device_errors(uint16_t &before, uint16_t &after) const { return false; }
+
   bool read_in_task(uint8_t *buffer, size_t length);
 
   void set_spi(spi::SPIDelegate *spi);
