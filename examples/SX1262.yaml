@@ -90,23 +90,38 @@ switch:
 wmbus_radio:
   radio_type: SX1262
 
+  # SX1262: obejście limitu ~255B + stabilniejszy RX u Ciebie
+  long_gfsk_packets: true
+
+  # Semtech diag: czyść błędy oscylatora na starcie (u Ciebie zostaje 0)
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: false
+
+  # Highlight (opcjonalnie)
+  highlight_meters:
+    - "00000000"
+  highlight_tag: "wmbus_user"
+  highlight_prefix: "★ "
+  highlight_ansi: true
+
+  # Piny SX1262
   cs_pin: GPIO8
   reset_pin: GPIO12
   busy_pin: GPIO13
-
   irq_pin:
     number: GPIO14
     mode: input
 
-  diagnostic_topic: "wmbus/diag/error"
-  diagnostic_verbose: false          # startowo cisza
-  diagnostic_publish_raw: false      # startowo bez raw
-  diagnostic_summary_interval: 60s   # summary co 60s
- 
+  # Diagnostyka (MQTT)
+  diagnostic_topic: "wmbus/diag"
+  diagnostic_summary_interval: 60s
+  diagnostic_publish_raw: true
+  diagnostic_verbose: false
+
   # SX1262 tuning
   dio2_rf_switch: true
   rx_gain: boosted
-  has_tcxo: true   # jakby było gorzej/„cisza”, zmień na false i tyle
+  has_tcxo: true   # jak nagle będzie "cisza", testowo daj false
 
   on_frame:
     then:
