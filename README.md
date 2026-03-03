@@ -12,6 +12,10 @@ A minimal **RF → MQTT** bridge that turns ESP into a pure wM-Bus “radio” o
 * Składa ramkę i publikuje ją jako **HEX** na MQTT.
   It assembles the frame and publishes it as **HEX** over MQTT.
 
+* (SX1262) Opcjonalny tryb `long_gfsk_packets`, który omija limit ~255B bufora RX i bywa stabilniejszy w „trudnym eterze”.
+  (SX1262) Optional `long_gfsk_packets` mode that bypasses the ~255B RX buffer limit and is often more stable in noisy RF environments.
+
+
 * Dekodowanie licznika (driver, wartości, jednostki) robisz **po stronie Home Assistant / Linux** w **wmbusmeters**.
   Meter decoding (driver, values, units) is done **on Home Assistant / Linux** using **wmbusmeters**.
 
@@ -121,6 +125,8 @@ Minimal publish pattern:
 ```yaml
 wmbus_radio:
   radio_type: SX1262   # albo SX1276
+  # SX1262: zalecane w trudnym eterze / dłuższych ramkach:
+  # long_gfsk_packets: true
   # ... piny SPI/radia ...
 
   on_frame:
@@ -183,6 +189,16 @@ wmbus_radio:
 
 Wtedy na `diagnostic_topic` pojawiają się JSON-y:
 Then JSON messages appear on `diagnostic_topic`:
+
+Dodatkowo (SX1262) możesz włączyć czyszczenie błędów radia na starcie:
+Additionally (SX1262) you can clear radio error flags on boot:
+
+```yaml
+wmbus_radio:
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: true  # jednorazowy event `dev_err_cleared`
+```
+
 
 #### 1) Summary (co interval)
 
@@ -402,6 +418,24 @@ Check:
 
 * `has_tcxo` (czasem `false` działa lepiej, zależnie od płytki).
   `has_tcxo` (sometimes `false` works better depending on the board).
+
+
+### 5) Losowe restarty / rozłączenia API (SX1262)
+
+### 5) Random resets / API disconnects (SX1262)
+
+Najczęstsza przyczyna to zasilanie z portu USB komputera, słaby kabel albo zbyt “miękki” zasilacz.
+The most common cause is powering from a PC USB port, a poor cable, or a weak power supply.
+
+Co zwykle pomaga:
+What usually helps:
+
+* zasilacz 5V 2A+ i krótki, porządny kabel,
+  a 5V 2A+ adapter and a short, decent cable,
+
+* na czas testów wyłącz automatyczne restarty Wi-Fi/API (`reboot_timeout: 0s`) i dodaj `uptime`, żeby odróżnić reboot od chwilowej utraty połączenia,
+  for testing, disable Wi‑Fi/API auto-reboots (`reboot_timeout: 0s`) and add `uptime` to tell reboots from temporary link drops.
+
 
 ---
 
