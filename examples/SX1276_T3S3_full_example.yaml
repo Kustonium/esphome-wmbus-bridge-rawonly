@@ -77,13 +77,48 @@ logger:
     # wmbus: info              # logi warstwy wMBus (decode, CRC, link mode)
 
 # =============================================================================
-#  SENSORY DIAGNOSTYCZNE ESP / ESP DIAGNOSTIC SENSORS
-#
-#  Komponent debug udostepnia gotowe sensory w ESPHome:
-#  wolna pamiec heap, min. heap, czas dzialania, itp.
-#  The debug component provides built-in sensors: free heap, uptime, etc.
+#  DIAGNOSTYKA ESP / ESP DIAGNOSTICS
+#  Sensory dostępne w Home Assistant – wolna pamięć, temperatura, WiFi, itp.
+#  Sensors available in Home Assistant – free memory, temperature, WiFi, etc.
 # =============================================================================
 debug:
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: debug
+    free:
+      name: "Heap Free"
+    block:
+      name: "Heap Max Block"
+    min_free:
+      name: "Heap Min Free"
+    loop_time:
+      name: "Loop Time"
+    cpu_frequency:
+      name: "CPU Frequency"
+  - platform: internal_temperature
+    name: "MCU Temperature"
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    update_interval: 60s
+
+text_sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: debug
+    device:
+      name: "Device Info"
+    reset_reason:
+      name: "Reset Reason"
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "WiFi SSID"
+    bssid:
+      name: "WiFi BSSID"
 
 # =============================================================================
 #  mDNS

@@ -126,15 +126,51 @@ mqtt:
     topic: "${devicename}/debug"
     level: DEBUG              # wszystkie logi / all logs
 
-# Sensor uptime – przydatny do odróżnienia rebootów od chwilowych dropnięć
-# Uptime sensor – useful to distinguish reboots from temporary disconnects
+# =============================================================================
+#  DIAGNOSTYKA ESP / ESP DIAGNOSTICS
+#  Sensory dostępne w Home Assistant – wolna pamięć, temperatura, WiFi, itp.
+#  Sensors available in Home Assistant – free memory, temperature, WiFi, etc.
+# =============================================================================
+debug:
+
 sensor:
   - platform: uptime
     name: "Uptime"
+  - platform: debug
+    free:
+      name: "Heap Free"
+    block:
+      name: "Heap Max Block"
+    min_free:
+      name: "Heap Min Free"
+    loop_time:
+      name: "Loop Time"
+    psram:
+      name: "Free PSRAM"
+    cpu_frequency:
+      name: "CPU Frequency"
+  - platform: internal_temperature
+    name: "MCU Temperature"
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    update_interval: 60s
 
-# Opcjonalnie: sensory diagnostyczne ESP (wolna pamięć, heap, itp.)
-# Optional: ESP diagnostic sensors (free memory, heap, etc.)
-debug:
+text_sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: debug
+    device:
+      name: "Device Info"
+    reset_reason:
+      name: "Reset Reason"
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "WiFi SSID"
+    bssid:
+      name: "WiFi BSSID"
 
 # -----------------------------------------------------------------------------
 # SPI BUS
