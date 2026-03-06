@@ -33,7 +33,7 @@ esphome:
 esp32:
   variant: esp32s3
   flash_size: 16MB
-  cpu_frequency: 240MHz
+  cpu_frequency: 160MHz
   framework:
     type: esp-idf             # wymagane / required (Arduino nie jest wspierane)
 
@@ -181,6 +181,71 @@ spi:
   clk_pin: GPIO9
   mosi_pin: GPIO10
   miso_pin: GPIO11
+
+# =============================================================================
+#  LED STATUSU / STATUS LED – Heltec WiFi LoRa 32 V4
+#
+#  Biała dioda (GPIO35) miga przy każdym odebranym telgramie wMBus.
+#  White LED (GPIO35) blinks on every received wMBus telegram.
+#
+#  LED jest aktywne-niskie (inverted: true) – bez tego świeci cały czas.
+#  LED is active-low (inverted: true) – without this it stays on permanently.
+#
+#  WAŻNE / IMPORTANT:
+#  Miganie realizowane jest przez script: blink_led z mode: single.
+#  Dzięki temu gdy ramki przychodzą szybko jedna po drugiej, animacja
+#  nie nakłada się na siebie – nowe wywołanie jest ignorowane jeśli
+#  poprzednie mignięcie jeszcze trwa. Bez tego przy bezpośrednim
+#  output.turn_on/delay/turn_off LED świeciłaby ciągle lub migotała chaotycznie.
+#
+#  Blinking is handled by script: blink_led with mode: single.
+#  This prevents animation overlap when frames arrive in rapid succession –
+#  a new call is ignored if the previous blink is still in progress.
+#  Without this, direct output.turn_on/delay/turn_off would cause the LED
+#  to stay on permanently or flicker randomly under high frame load.
+#
+#  Żeby wyłączyć miganie / To disable blinking:
+#    1) Usuń bloki output:, light: i script: / Remove output:, light: and script: blocks
+#    2) Usuń linię "script.execute: blink_led" z on_frame
+#       Remove "script.execute: blink_led" from on_frame
+# =============================================================================
+output:
+  - platform: gpio
+    id: led_output
+    pin:
+      number: GPIO35            # biała dioda na Heltec V4 / white LED on Heltec V4
+      inverted: true            # aktywne-niskie / active-low
+
+# -----------------------------------------------------------------------------
+# LIGHT – binarny wrapper nad output / binary wrapper over output
+#
+# Wymagany przez script: który używa light.turn_on / light.turn_off.
+# restore_mode: ALWAYS_OFF – nie świeć po restarcie / do not light up after restart.
+# -----------------------------------------------------------------------------
+light:
+  - platform: binary
+    name: "LED"
+    output: led_output
+    id: status_led
+    restore_mode: ALWAYS_OFF
+
+# -----------------------------------------------------------------------------
+# SCRIPT – miganie LED / LED blink script
+#
+# mode: restart – każda nowa ramka resetuje timer mignięcia. LED świeci ciągle
+# dopóki ramki przychodzą, gaśnie 50ms po ostatniej. Brak warningów w logu.
+# mode: restart – each new frame resets the blink timer. LED stays on as long
+# as frames keep arriving, turns off 50ms after the last one. No log warnings.
+# -----------------------------------------------------------------------------
+script:
+  - id: blink_led
+    mode: single
+    then:
+      - light.turn_on:
+          id: status_led
+      - delay: 50ms
+      - light.turn_off:
+          id: status_led
 
 # =============================================================================
 #  WMBUS RADIO – główna konfiguracja
@@ -392,6 +457,26 @@ wmbus_radio:
           topic: "wmbus_bridge/telegram"
           payload: !lambda |-
             return frame->as_hex();
+
+      # -----------------------------------------------------------------------
+      # MIGANIE LED / LED BLINK – przy każdym telgramie wMBus
+      #
+      # Wizualne potwierdzenie że radio odebrało ramkę.
+      # Visual confirmation that the radio received a frame.
+      #
+      # script.execute zamiast bezpośredniego output.turn_on/delay/turn_off.
+      # mode: single w skrypcie zapewnia że mignięcia się nie nakładają –
+      # szczegóły w komentarzu przy bloku script: powyżej.
+      #
+      # script.execute instead of direct output.turn_on/delay/turn_off.
+      # mode: single in the script ensures blinks do not overlap –
+      # see comment at script: block above for details.
+      #
+      # Żeby wyłączyć / To disable:
+      #   1) Usuń tę linię / Remove this line
+      #   2) Usuń bloki output:, light: i script: / Remove output:, light: and script: blocks
+      # -----------------------------------------------------------------------
+      - script.execute: blink_led
 
       # -----------------------------------------------------------------------
       # OPCJONALNIE: RSSI na osobnym topicu
