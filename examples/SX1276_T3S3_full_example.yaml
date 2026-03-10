@@ -354,7 +354,7 @@ wmbus_radio:
   #           Paste raw into wmbusmeters.org/analyze to inspect damaged frames.
   #   false = no "raw" field (smaller payload, less MQTT traffic)
   # ---------------------------------------------------------------------------
-  diagnostic_topic: "wmbus/diag"
+  diagnostic_topic: "wmbus/lilygo/diag"
   diagnostic_summary_interval: 60s     # domyslnie: 60s / default: 60s
   diagnostic_verbose: false            # domyslnie: true / default: true
   diagnostic_publish_raw: true         # domyslnie: true / default: true
@@ -411,7 +411,7 @@ wmbus_radio:
             # Main payload - wmbusmeters or HA add-on reads this topic.
             # -------------------------------------------------------------------
             - mqtt.publish:
-                topic: "wmbus_bridge/telegram"
+                topic: "wmbus_bridge/lilygo/telegram"
                 payload: !lambda |-
                   return frame->as_hex();
 

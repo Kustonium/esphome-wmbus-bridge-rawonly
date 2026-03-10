@@ -420,7 +420,7 @@ wmbus_radio:
   #           (for analysis at wmbusmeters.org/analyze)
   #   false = no "raw" field (smaller MQTT payload, less traffic)
   # ---------------------------------------------------------------------------
-  diagnostic_topic: "wmbus/diag"        # domyślnie: "wmbus/diag" / default: "wmbus/diag"
+  diagnostic_topic: "wmbus/heltec/diag" # domyślnie: "wmbus/lilygo/diag" / default: "wmbus/heltec/diag"
   diagnostic_summary_interval: 120s     # domyślnie: 60s / default: 60s
   diagnostic_verbose: false             # domyślnie: true / default: true
   diagnostic_publish_raw: true          # domyślnie: true / default: true
@@ -454,7 +454,7 @@ wmbus_radio:
       # This is the main payload – wmbusmeters/HA add-on reads this topic.
       # -----------------------------------------------------------------------
       - mqtt.publish:
-          topic: "wmbus_bridge/telegram"
+          topic: "wmbus_bridge/heltec/telegram"
           payload: !lambda |-
             return frame->as_hex();
 
