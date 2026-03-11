@@ -1,6 +1,7 @@
 #include "transceiver_sx1276.h"
 
 #include "esphome/core/log.h"
+#include <esp_timer.h>
 
 #define F_OSC (32000000)
 
@@ -8,118 +9,183 @@ namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "SX1276";
 
-void SX1276::setup() {
-  this->common_setup();
+static constexpr uint8_t REG_FIFO         = 0x00;
+static constexpr uint8_t REG_OP_MODE      = 0x01;
+static constexpr uint8_t REG_IRQ_FLAGS2   = 0x3F;
+static constexpr uint8_t REG_RSSI_VALUE   = 0x11;
+static constexpr uint8_t REG_FIFO_THRESH  = 0x35;
+static constexpr uint8_t REG_DIO_MAPPING1 = 0x40;
 
+static constexpr uint8_t FLAG2_FIFO_EMPTY   = (1 << 6);
+static constexpr uint8_t FLAG2_FIFO_LEVEL   = (1 << 5);
+static constexpr uint8_t FLAG2_FIFO_OVERRUN = (1 << 4);
+
+void SX1276::spi_read_burst_(uint8_t address, uint8_t *dst, size_t len) {
+  this->delegate_->begin_transaction();
+  this->delegate_->transfer(address & 0x7F);
+  for (size_t i = 0; i < len; i++) {
+    dst[i] = this->delegate_->transfer(0x00);
+  }
+  this->delegate_->end_transaction();
+}
+
+optional<uint8_t> SX1276::drain_fifo_once_() {
+  const uint8_t irq2 = this->spi_read(REG_IRQ_FLAGS2);
+
+  if (irq2 & FLAG2_FIFO_OVERRUN) {
+    this->spi_write(REG_IRQ_FLAGS2, (uint8_t) FLAG2_FIFO_OVERRUN);
+    this->chunk_len_ = 0;
+    this->chunk_idx_ = 0;
+    this->frame_active_ = false;
+    this->rssi_captured_ = false;
+    this->last_rssi_dbm_ = -127;
+    ESP_LOGW(TAG, "FIFO overrun");
+    return {};
+  }
+
+  // Safe burst path: FifoLevel guarantees >= SX1276_CHUNK_SIZE bytes in FIFO.
+  if (irq2 & FLAG2_FIFO_LEVEL) {
+    if (!this->rssi_captured_) {
+      this->last_rssi_dbm_ = (int8_t)(-(int) this->spi_read(REG_RSSI_VALUE) / 2);
+      this->rssi_captured_ = true;
+    }
+
+    this->spi_read_burst_(REG_FIFO, this->chunk_buffer_.data(), SX1276_CHUNK_SIZE);
+    this->chunk_len_ = SX1276_CHUNK_SIZE;
+    this->chunk_idx_ = 0;
+    this->frame_active_ = true;
+    return this->chunk_buffer_[this->chunk_idx_++];
+  }
+
+  // Tail path: less than threshold left, so only a single-byte read is safe.
+  if (!(irq2 & FLAG2_FIFO_EMPTY)) {
+    if (!this->rssi_captured_) {
+      this->last_rssi_dbm_ = (int8_t)(-(int) this->spi_read(REG_RSSI_VALUE) / 2);
+      this->rssi_captured_ = true;
+    }
+
+    this->frame_active_ = true;
+    return this->spi_read(REG_FIFO);
+  }
+
+  return {};
+}
+
+void SX1276::setup() {
+  // Original driver used DIO1=FifoEmpty with falling edge.
+  // Here DIO1 is remapped to FifoLevel, which is active-high, so wake on rising edge.
+  this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE;
+
+  this->common_setup();
   ESP_LOGV(TAG, "Setup");
-  ESP_LOGVV(TAG, "reset");
   this->reset();
 
-  ESP_LOGVV(TAG, "checking silicon revision");
-  uint8_t revision = this->spi_read(0x42);
-  ESP_LOGVV(TAG, "revision: %02X", revision);
+  const uint8_t revision = this->spi_read(0x42);
   if (revision < 0x11 || revision > 0x13) {
     ESP_LOGE(TAG, "Invalid silicon revision: %02X", revision);
     return;
   }
 
-  ESP_LOGVV(TAG, "setting radio frequency");
   const uint32_t frequency = 868950000;
-
-  uint32_t frf = ((uint64_t)frequency * (1 << 19)) / F_OSC;
+  const uint32_t frf = ((uint64_t) frequency * (1 << 19)) / F_OSC;
   this->spi_write(0x06, {BYTE(frf, 2), BYTE(frf, 1), BYTE(frf, 0)});
 
-  // TODO: Calculate in some rational way
-  ESP_LOGVV(TAG, "setting radio bandwidth");
   this->spi_write(0x12, {2, 2});
 
-  ESP_LOGVV(TAG, "set frequency deviation");
   const uint16_t freq_dev = 50000;
-  uint16_t frd = ((uint64_t)freq_dev * (1 << 19)) / F_OSC;
+  const uint16_t frd = ((uint64_t) freq_dev * (1 << 19)) / F_OSC;
   this->spi_write(0x04, {BYTE(frd, 1), BYTE(frd, 0)});
 
-  ESP_LOGVV(TAG, "set bitrate");
   const uint32_t bitrate = 100000;
   uint32_t br = (F_OSC << 4) / bitrate;
-  // Fractional part of the bitrate
-  this->spi_write(0x5D, (uint8_t)(br & 0x0F));
+  this->spi_write(0x5D, (uint8_t) (br & 0x0F));
   br >>= 4;
-  // Integer part of the bitrate
   this->spi_write(0x02, {BYTE(br, 1), BYTE(br, 0)});
 
-  ESP_LOGVV(TAG, "set preamble length");
-  uint16_t preamble_length = 32 / 8;
+  const uint16_t preamble_length = 32 / 8;
   this->spi_write(0x25, {BYTE(preamble_length, 1), BYTE(preamble_length, 0)});
 
-  ESP_LOGVV(TAG, "enable preamble detection");
-  uint8_t preamble_detection = (1 << 7) | (1 << 5) | 0x0A;
-  this->spi_write(0x1F, preamble_detection);
+  this->spi_write(0x1F, (uint8_t) ((1 << 7) | (1 << 5) | 0x0A));
+  this->spi_write(0x0D, (uint8_t) ((1 << 4) | (1 << 3) | 0b110));
+  this->spi_write(0x24, (uint8_t) 0b111);
 
-  ESP_LOGVV(TAG, "enable auto agc/afc");
-  uint8_t agc_afc = (1 << 4) | (1 << 3) | 0b110;
-  this->spi_write(0x0D, agc_afc);
+  const uint8_t sync_cfg = (1 << 5) | (1 << 4) | (2 - 1);
+  this->spi_write(0x27, {sync_cfg, 0x54, 0x3D});
 
-  ESP_LOGVV(TAG, "disable clock output");
-  uint8_t clock_output = 0b111;
-  this->spi_write(0x24, clock_output);
+  this->spi_write(0x30, (uint8_t) 0);  // no hardware CRC
+  this->spi_write(0x32, (uint8_t) 0);  // unlimited packet mode
 
-  ESP_LOGVV(TAG, "set sync word and reverse preamble polarity");
-  uint8_t reverse_preamble_sync_bytes = (1 << 5) | (1 << 4) | (2 - 1);
-  this->spi_write(0x27, {reverse_preamble_sync_bytes, 0x54, 0x3D});
+  // Threshold = CHUNK_SIZE - 1, so FifoLevel means FIFO has at least CHUNK_SIZE bytes.
+  this->spi_write(REG_FIFO_THRESH, (uint8_t) (SX1276_CHUNK_SIZE - 1));
 
-  ESP_LOGVV(TAG, "disable crc check/fixed packet length");
-  uint8_t crc_check = 0;
-  this->spi_write(0x30, crc_check);
+  // DIO1 = FifoLevel in FSK mode.
+  // bits[5:4] = 00 -> FifoLevel
+  this->spi_write(REG_DIO_MAPPING1, (uint8_t) (0b00 << 4));
 
-  ESP_LOGVV(TAG, "set unlimited packet mode/zero length");
-  uint8_t packet_mode = 0;
-  this->spi_write(0x32, packet_mode);
+  this->spi_write(0x0E, (uint8_t) 0b111);  // RSSI smoothing
 
-  ESP_LOGVV(TAG, "set fifo empty flag on DIO1");
-  uint8_t fifo_empty_flag = 0b01 << 4;
-  this->spi_write(0x40, fifo_empty_flag);
+  this->chunk_len_ = 0;
+  this->chunk_idx_ = 0;
+  this->frame_active_ = false;
 
-  ESP_LOGVV(TAG, "set RRSI smoothing");
-  uint8_t rssi_smoothing = 0b111;
-  this->spi_write(0x0E, rssi_smoothing);
-
-  ESP_LOGV(TAG, "SX1276 setup done");
+  ESP_LOGV(TAG, "SX1276 setup done (burst + tail-gap bridge)");
 }
 
 optional<uint8_t> SX1276::read() {
-  if (this->irq_pin_->digital_read() == false)
-    return this->spi_read(0x00);
+  // First serve already buffered burst bytes from RAM.
+  if (this->chunk_idx_ < this->chunk_len_) {
+    return this->chunk_buffer_[this->chunk_idx_++];
+  }
+
+  // Normal fast path.
+  if (auto byte = this->drain_fifo_once_(); byte.has_value()) {
+    return byte;
+  }
+
+  // Critical fix versus naive FifoLevel-only design:
+  // when draining the tail of a frame, FIFO can become temporarily empty before
+  // the next tail byte arrives. That does NOT necessarily mean EOF, and because
+  // DIO1 now signals FifoLevel, there may be no new IRQ for the remaining <16 B.
+  // So after a frame has started, briefly poll for more bytes before returning {}.
+  if (this->frame_active_) {
+    const int64_t deadline = esp_timer_get_time() + SX1276_TAIL_GAP_US;
+    while (esp_timer_get_time() < deadline) {
+      if (auto byte = this->drain_fifo_once_(); byte.has_value()) {
+        return byte;
+      }
+    }
+
+    // No more bytes within the short intra-frame grace period -> frame ended.
+    this->frame_active_ = false;
+  }
 
   return {};
 }
 
 void SX1276::restart_rx() {
-  // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
-  // by changing the 2nd sync byte. This lets us catch both variants
-  // without user-side configuration.
   const uint8_t sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-  this->sync_cycle_ = (uint8_t)((this->sync_cycle_ + 1) & 0x03);
+  this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
 
-  // Standby mode
-  this->spi_write(0x01, (uint8_t)0b001);
-  delay(5);
-
-  // Update sync word (RegSyncValue1/2)
+  this->spi_write(REG_OP_MODE, (uint8_t) 0b001);  // standby
   this->spi_write(0x28, {0x54, sync2});
 
-  // Clear FIFO
-  this->spi_write(0x3F, (uint8_t)(1 << 4));
+  // Clear FIFO overrun flag.
+  this->spi_write(REG_IRQ_FLAGS2, (uint8_t) FLAG2_FIFO_OVERRUN);
 
-  // Enable RX
-  this->spi_write(0x01, (uint8_t)0b101);
-  delay(5);
+  this->chunk_len_ = 0;
+  this->chunk_idx_ = 0;
+  this->frame_active_ = false;
+  this->rssi_captured_ = false;
+  this->last_rssi_dbm_ = -127;
+
+  this->spi_write(REG_OP_MODE, (uint8_t) 0b101);  // RX
 }
 
 int8_t SX1276::get_rssi() {
-  uint8_t rssi = this->spi_read(0x11);
-  return (int8_t)(-rssi / 2);
+  return this->last_rssi_dbm_;
 }
 
 const char *SX1276::get_name() { return TAG; }
-} // namespace wmbus_radio
-} // namespace esphome
+
+}  // namespace wmbus_radio
+}  // namespace esphome
