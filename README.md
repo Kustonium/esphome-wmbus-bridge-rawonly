@@ -134,7 +134,7 @@ wmbus_radio:
   on_frame:
     then:
       - mqtt.publish:
-          topic: "wmbus_bridge/telegram"
+          topic: "wmbus_bridge/nazwa/telegram"
           payload: !lambda |-
             return frame->as_hex();
 ```
@@ -249,7 +249,7 @@ on_frame:
   then:
     # Telegram HEX dla wmbusmeters
     - mqtt.publish:
-        topic: "wmbus_bridge/telegram"
+        topic: "wmbus_bridge/nazwa/telegram"
         payload: !lambda return frame->as_hex();
 
     # RSSI na osobnym topicu
@@ -273,7 +273,7 @@ on_frame:
   mark_as_handled: true
   then:
     - mqtt.publish:
-        topic: "wmbus_bridge/telegram"
+        topic: "wmbus_bridge/name/telegram"
         payload: !lambda return frame->as_hex();
 ```
 
@@ -290,8 +290,8 @@ on_frame:
 Domyślnie w przykładach:
 Default in examples:
 
-* `wmbus_bridge/telegram` → **HEX telegramu** (to jest to, co ma czytać wmbusmeters)
-  `wmbus_bridge/telegram` → **telegram HEX** (this is what wmbusmeters should read)
+* `wmbus_bridge//nazwa/telegram` → **HEX telegramu** (to jest to, co ma czytać wmbusmeters)
+  `wmbus_bridge/name/telegram` → **telegram HEX** (this is what wmbusmeters should read)
 
 Możesz zmienić topic na własny.
 You can change the topic to your own.
