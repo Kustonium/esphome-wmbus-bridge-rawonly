@@ -9,7 +9,6 @@
 #include <cstring>
 #include <algorithm>
 #include <cstdlib>
-#include <memory>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
 #include "esphome/components/mqtt/mqtt_client.h"
@@ -71,7 +70,7 @@ static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &o
 
 
 Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
-  // Keep this stable: these strings come from Packet::set_drop_()
+  // Keep this stable: these strings come from Packet::set_drop_reason()
   if (reason == "too_short") return DB_TOO_SHORT;
   if (reason == "decode_failed") return DB_DECODE_FAILED;
   // Backwards compatible: older builds used dll_crc_strip_failed
@@ -82,59 +81,7 @@ Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
   return DB_OTHER;
 }
 
-Radio::StageBucket Radio::bucket_for_stage_(const std::string &stage) {
-  if (stage == "precheck") return SB_PRECHECK;
-  if (stage == "t1_decode3of6") return SB_T1_DECODE3OF6;
-  if (stage == "t1_l_field") return SB_T1_L_FIELD;
-  if (stage == "t1_length_check") return SB_T1_LENGTH_CHECK;
-  if (stage == "c1_precheck") return SB_C1_PRECHECK;
-  if (stage == "c1_preamble") return SB_C1_PREAMBLE;
-  if (stage == "c1_suffix") return SB_C1_SUFFIX;
-  if (stage == "c1_l_field") return SB_C1_L_FIELD;
-  if (stage == "c1_length_check") return SB_C1_LENGTH_CHECK;
-  if (stage == "dll_crc_first") return SB_DLL_CRC_FIRST;
-  if (stage == "dll_crc_mid") return SB_DLL_CRC_MID;
-  if (stage == "dll_crc_final") return SB_DLL_CRC_FINAL;
-  if (stage == "dll_crc_b1") return SB_DLL_CRC_B1;
-  if (stage == "dll_crc_b2") return SB_DLL_CRC_B2;
-  if (stage == "link_mode") return SB_LINK_MODE;
-  return SB_OTHER;
-}
-
-bool Radio::meter_is_highlighted_(uint32_t meter_id) const {
-  return meter_id != 0 && !this->highlight_meter_ids_.empty() &&
-         std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), meter_id);
-}
-
-bool Radio::should_publish_packet_event_(const Packet *packet) const {
-  if (packet == nullptr || !this->diag_publish_drop_events_) return false;
-  if (!this->diag_publish_highlight_only_ || this->highlight_meter_ids_.empty()) return true;
-
-  uint32_t meter_id = 0;
-  if (!packet->try_get_meter_id(meter_id)) return false;
-  return this->meter_is_highlighted_(meter_id);
-}
-
-void Radio::publish_rx_path_event_(const char *event, const char *stage, const char *detail, int rssi) {
-  if (!this->diag_publish_rx_path_events_) return;
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
-  if (mqtt == nullptr || !mqtt->is_connected() || this->diag_topic_.empty()) return;
-
-  char payload[320];
-  if (detail != nullptr && detail[0] != '\0') {
-    snprintf(payload, sizeof(payload),
-             "{\"event\":\"%s\",\"stage\":\"%s\",\"rssi\":%d,\"detail\":\"%s\"}",
-             event, stage, rssi, detail);
-  } else {
-    snprintf(payload, sizeof(payload),
-             "{\"event\":\"%s\",\"stage\":\"%s\",\"rssi\":%d}",
-             event, stage, rssi);
-  }
-  mqtt->publish(this->diag_topic_, payload);
-}
-
 void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
-  if (!this->diag_publish_summary_) return;
   if (this->diag_topic_.empty()) return;
   if (this->last_diag_summary_ms_ == 0) {
     this->last_diag_summary_ms_ = now_ms;
@@ -144,19 +91,21 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   if (elapsed < this->diag_summary_interval_ms_) return;
   this->last_diag_summary_ms_ = now_ms;
 
+  // Publish summary only if MQTT is available and connected
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
-  char payload[1800];
+  char payload[1100];
   const uint32_t crc_failed = this->diag_dropped_by_bucket_[DB_DLL_CRC_FAILED];
   const uint32_t total = this->diag_total_;
   const uint32_t ok = this->diag_ok_;
+  // Percent as integer (0..100). Avoid floats to keep it light.
   const uint32_t crc_fail_pct = (total == 0) ? 0 : (crc_failed * 100U) / total;
   const uint32_t drop_pct = (total == 0) ? 0 : (this->diag_dropped_ * 100U) / total;
   const uint32_t trunc_pct = (total == 0) ? 0 : (this->diag_truncated_ * 100U) / total;
   const int32_t avg_ok_rssi = (this->diag_rssi_ok_n_ == 0) ? 0 : (this->diag_rssi_ok_sum_ / (int32_t) this->diag_rssi_ok_n_);
   const int32_t avg_drop_rssi = (this->diag_rssi_drop_n_ == 0) ? 0 : (this->diag_rssi_drop_sum_ / (int32_t) this->diag_rssi_drop_n_);
-
+  // Per-mode indices: 1=T1, 2=C1 (0 is unknown)
   const uint8_t T1 = (uint8_t) LinkMode::T1;
   const uint8_t C1 = (uint8_t) LinkMode::C1;
   const uint32_t t1_total = this->diag_mode_total_[T1];
@@ -190,6 +139,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       this->diag_dropped_by_bucket_[DB_OTHER];
   const uint32_t reasons_sum_mismatch = (reasons_sum != this->diag_dropped_) ? 1U : 0U;
 
+  // Human-friendly hint based on diagnostics (kept short; intended for quick triage).
   const char *hint_code = "OK";
   const char *hint_en = "looks good";
   const char *hint_pl = "wygląda dobrze";
@@ -198,6 +148,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
     hint_en = "no packets received yet";
     hint_pl = "brak odebranych ramek";
   } else {
+    // C1 triage: most common confusion is 'wrong key' vs RF corruption.
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
         hint_code = "C1_WEAK_SIGNAL";
@@ -208,6 +159,8 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
         hint_en = "C1 frames fail DLL CRC despite decent RSSI; check interference/RX settings";
         hint_pl = "C1: CRC DLL nie przechodzi mimo niezłego RSSI; sprawdź zakłócenia/ustawienia RX";
       }
+    // Overload / near-field multipath suspicion: drops/CRC failures despite strong RSSI.
+    // Common when a meter is very close to the antenna (front-end overload) or in reflective environments (pipes/metal).
     } else if (c1_total > 0 && c1_crc > 0 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
       hint_code = "C1_OVERLOAD_OR_MULTIPATH";
       hint_en = "C1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move antenna 0.5-2m, change polarization, or attenuate.";
@@ -234,7 +187,6 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       hint_pl = "łącze radiowe wygląda stabilnie";
     }
   }
-
   snprintf(payload, sizeof(payload),
            "{"
            "\"event\":\"summary\","
@@ -265,32 +217,6 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
              "\"l_field_invalid\":%u,"
              "\"unknown_link_mode\":%u,"
              "\"other\":%u"
-           "},"
-           "\"dropped_by_stage\":{"
-             "\"precheck\":%u,"
-             "\"t1_decode3of6\":%u,"
-             "\"t1_l_field\":%u,"
-             "\"t1_length_check\":%u,"
-             "\"c1_precheck\":%u,"
-             "\"c1_preamble\":%u,"
-             "\"c1_suffix\":%u,"
-             "\"c1_l_field\":%u,"
-             "\"c1_length_check\":%u,"
-             "\"dll_crc_first\":%u,"
-             "\"dll_crc_mid\":%u,"
-             "\"dll_crc_final\":%u,"
-             "\"dll_crc_b1\":%u,"
-             "\"dll_crc_b2\":%u,"
-             "\"link_mode\":%u,"
-             "\"other\":%u"
-           "},"
-           "\"rx_path\":{"
-             "\"irq_timeout\":%u,"
-             "\"preamble_read_failed\":%u,"
-             "\"t1_header_read_failed\":%u,"
-             "\"payload_size_unknown\":%u,"
-             "\"payload_read_failed\":%u,"
-             "\"queue_send_failed\":%u"
            "},"
            "\"reasons_sum\":%u,"
            "\"reasons_sum_mismatch\":%u,"
@@ -333,28 +259,6 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_dropped_by_bucket_[DB_L_FIELD_INVALID],
            (unsigned) this->diag_dropped_by_bucket_[DB_UNKNOWN_LINK_MODE],
            (unsigned) this->diag_dropped_by_bucket_[DB_OTHER],
-           (unsigned) this->diag_dropped_by_stage_[SB_PRECHECK],
-           (unsigned) this->diag_dropped_by_stage_[SB_T1_DECODE3OF6],
-           (unsigned) this->diag_dropped_by_stage_[SB_T1_L_FIELD],
-           (unsigned) this->diag_dropped_by_stage_[SB_T1_LENGTH_CHECK],
-           (unsigned) this->diag_dropped_by_stage_[SB_C1_PRECHECK],
-           (unsigned) this->diag_dropped_by_stage_[SB_C1_PREAMBLE],
-           (unsigned) this->diag_dropped_by_stage_[SB_C1_SUFFIX],
-           (unsigned) this->diag_dropped_by_stage_[SB_C1_L_FIELD],
-           (unsigned) this->diag_dropped_by_stage_[SB_C1_LENGTH_CHECK],
-           (unsigned) this->diag_dropped_by_stage_[SB_DLL_CRC_FIRST],
-           (unsigned) this->diag_dropped_by_stage_[SB_DLL_CRC_MID],
-           (unsigned) this->diag_dropped_by_stage_[SB_DLL_CRC_FINAL],
-           (unsigned) this->diag_dropped_by_stage_[SB_DLL_CRC_B1],
-           (unsigned) this->diag_dropped_by_stage_[SB_DLL_CRC_B2],
-           (unsigned) this->diag_dropped_by_stage_[SB_LINK_MODE],
-           (unsigned) this->diag_dropped_by_stage_[SB_OTHER],
-           (unsigned) this->diag_rx_path_.irq_timeout,
-           (unsigned) this->diag_rx_path_.preamble_read_failed,
-           (unsigned) this->diag_rx_path_.t1_header_read_failed,
-           (unsigned) this->diag_rx_path_.payload_size_unknown,
-           (unsigned) this->diag_rx_path_.payload_read_failed,
-           (unsigned) this->diag_rx_path_.queue_send_failed,
            (unsigned) reasons_sum,
            (unsigned) reasons_sum_mismatch,
            hint_code,
@@ -366,18 +270,20 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            this->diag_topic_.c_str(), (unsigned) total, (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
 
-  if (std::strcmp(hint_code, "OK") == 0) {
-    ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, hint_pl);
-  } else {
-    ESP_LOGW(TAG, "DIAG hint: %s | %s", hint_code, hint_pl);
-  }
+  
 
+// Print hint to logs for quick triage (same content as in MQTT diag summary).
+if (std::strcmp(hint_code, "OK") == 0) {
+  ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, hint_pl);
+} else {
+  ESP_LOGW(TAG, "DIAG hint: %s | %s", hint_code, hint_pl);
+}
+// Report per-window stats (so it is easy to spot spikes)
   this->diag_total_ = 0;
   this->diag_ok_ = 0;
   this->diag_truncated_ = 0;
   this->diag_dropped_ = 0;
   this->diag_dropped_by_bucket_.fill(0);
-  this->diag_dropped_by_stage_.fill(0);
   this->diag_rssi_ok_sum_ = 0;
   this->diag_rssi_ok_n_ = 0;
   this->diag_rssi_drop_sum_ = 0;
@@ -392,7 +298,6 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   this->diag_mode_rssi_drop_n_.fill(0);
   this->diag_t1_symbols_total_ = 0;
   this->diag_t1_symbols_invalid_ = 0;
-  this->diag_rx_path_ = {};
 }
 
 void Radio::setup() {
@@ -426,6 +331,7 @@ void Radio::setup() {
 }
 
 void Radio::loop() {
+  // Publish boot device errors once (if enabled) when MQTT is ready.
   if (this->dev_err_cleared_pending_ && mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
     char payload[180];
     snprintf(payload, sizeof(payload),
@@ -441,53 +347,50 @@ void Radio::loop() {
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
 
+  // Every item dequeued is a "received attempt" for diagnostics.
   this->diag_total_++;
   const uint8_t mode_idx = (uint8_t) p->get_link_mode();
   if (mode_idx < this->diag_mode_total_.size()) this->diag_mode_total_[mode_idx]++;
 
   auto frame = p->convert_to_frame();
 
+  // T1 symbol-level diagnostics (available after convert_to_frame() ran)
   if (mode_idx == (uint8_t) LinkMode::T1) {
     this->diag_t1_symbols_total_ += (uint32_t) p->t1_symbols_total();
     this->diag_t1_symbols_invalid_ += (uint32_t) p->t1_symbols_invalid();
   }
 
   if (!frame) {
+    // ---- Diagnostics accounting (always count, even if verbose is disabled)
     const char *mode = link_mode_name(p->get_link_mode());
-    this->diag_dropped_by_stage_[bucket_for_stage_(p->drop_stage())]++;
-
     if (p->is_truncated()) {
       this->diag_truncated_++;
-      if (this->should_publish_packet_event_(p) && mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        char payload[1100];
+
+      // Publish diagnostics to MQTT regardless of diag_verbose_
+      // (so YAML can silence logs but still get drop/trunc events).
+      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+        char payload[900];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"truncated\",\"reason\":\"%s\",\"stage\":\"%s\",\"detail\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"decoded_len\":%u,\"final_len\":%u,\"dll_crc_removed\":%u,\"suffix_ignored\":%u,\"raw\":\"%s\"}",
-                   p->drop_reason().c_str(), p->drop_stage().c_str(), p->drop_detail().c_str(),
+                   "{\"event\":\"truncated\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
                    mode, (int) p->get_rssi(), (unsigned) p->want_len(),
                    (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
-                   (unsigned) p->decoded_len(), (unsigned) p->final_len(),
-                   (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored(),
                    p->raw_hex().c_str());
         } else {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"truncated\",\"reason\":\"%s\",\"stage\":\"%s\",\"detail\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"decoded_len\":%u,\"final_len\":%u,\"dll_crc_removed\":%u,\"suffix_ignored\":%u}",
-                   p->drop_reason().c_str(), p->drop_stage().c_str(), p->drop_detail().c_str(),
+                   "{\"event\":\"truncated\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
                    mode, (int) p->get_rssi(), (unsigned) p->want_len(),
-                   (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
-                   (unsigned) p->decoded_len(), (unsigned) p->final_len(),
-                   (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
+                   (unsigned) p->got_len(), (unsigned) p->raw_got_len());
         }
         mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
       }
 
       if (this->diag_verbose_) {
         ESP_LOGW(TAG,
-                 "TRUNCATED frame: stage=%s reason=%s mode=%s want=%u got=%u raw_got=%u decoded_len=%u final_len=%u RSSI=%ddBm detail=%s",
-                 p->drop_stage().c_str(), p->drop_reason().c_str(), mode,
-                 (unsigned) p->want_len(), (unsigned) p->got_len(),
-                 (unsigned) p->raw_got_len(), (unsigned) p->decoded_len(),
-                 (unsigned) p->final_len(), (int) p->get_rssi(), p->drop_detail().c_str());
+                 "TRUNCATED frame: mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
+                 mode, (unsigned) p->want_len(), (unsigned) p->got_len(),
+                 (unsigned) p->raw_got_len(), (int) p->get_rssi());
+
         if (this->diag_publish_raw_) {
           ESP_LOGW(TAG, "TRUNCATED raw(hex)=%s", p->raw_hex().c_str());
         }
@@ -507,36 +410,33 @@ void Radio::loop() {
         this->diag_mode_crc_failed_[mode_idx]++;
       }
 
-      if (this->should_publish_packet_event_(p) && mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
-        char payload[1100];
+      // Publish diagnostics to MQTT regardless of diag_verbose_
+      // (so YAML can silence logs but still get drop/trunc events).
+      if (mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+        char payload[900];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"stage\":\"%s\",\"detail\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"decoded_len\":%u,\"final_len\":%u,\"dll_crc_removed\":%u,\"suffix_ignored\":%u,\"raw\":\"%s\"}",
-                   p->drop_reason().c_str(), p->drop_stage().c_str(), p->drop_detail().c_str(),
-                   mode, (int) p->get_rssi(), (unsigned) p->want_len(),
-                   (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
-                   (unsigned) p->decoded_len(), (unsigned) p->final_len(),
-                   (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored(),
-                   p->raw_hex().c_str());
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"raw\":\"%s\"}",
+                   p->drop_reason().c_str(), mode, (int) p->get_rssi(),
+                   (unsigned) p->want_len(), (unsigned) p->got_len(),
+                   (unsigned) p->raw_got_len(), p->raw_hex().c_str());
         } else {
           snprintf(payload, sizeof(payload),
-                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"stage\":\"%s\",\"detail\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u,\"decoded_len\":%u,\"final_len\":%u,\"dll_crc_removed\":%u,\"suffix_ignored\":%u}",
-                   p->drop_reason().c_str(), p->drop_stage().c_str(), p->drop_detail().c_str(),
-                   mode, (int) p->get_rssi(), (unsigned) p->want_len(),
-                   (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
-                   (unsigned) p->decoded_len(), (unsigned) p->final_len(),
-                   (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
+                   "{\"event\":\"dropped\",\"reason\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"want\":%u,\"got\":%u,\"raw_got\":%u}",
+                   p->drop_reason().c_str(), mode, (int) p->get_rssi(),
+                   (unsigned) p->want_len(), (unsigned) p->got_len(),
+                   (unsigned) p->raw_got_len());
         }
         mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
       }
 
       if (this->diag_verbose_) {
         ESP_LOGW(TAG,
-                 "DROPPED packet: stage=%s reason=%s mode=%s want=%u got=%u raw_got=%u decoded_len=%u final_len=%u RSSI=%ddBm detail=%s",
-                 p->drop_stage().c_str(), p->drop_reason().c_str(), mode,
-                 (unsigned) p->want_len(), (unsigned) p->got_len(),
-                 (unsigned) p->raw_got_len(), (unsigned) p->decoded_len(),
-                 (unsigned) p->final_len(), (int) p->get_rssi(), p->drop_detail().c_str());
+                 "DROPPED packet: reason=%s mode=%s want=%u got=%u raw_got=%u RSSI=%ddBm",
+                 p->drop_reason().c_str(), mode, (unsigned) p->want_len(),
+                 (unsigned) p->got_len(), (unsigned) p->raw_got_len(),
+                 (int) p->get_rssi());
+
         if (this->diag_publish_raw_) {
           ESP_LOGW(TAG, "DROPPED raw(hex)=%s", p->raw_hex().c_str());
         }
@@ -547,6 +447,7 @@ void Radio::loop() {
     return;
   }
 
+  // Successful decode/validation
   this->diag_ok_++;
   this->diag_rssi_ok_sum_ += (int32_t) frame->rssi();
   this->diag_rssi_ok_n_++;
@@ -558,88 +459,96 @@ void Radio::loop() {
 
   auto &d = frame->data();
 
-  const char *mfr = "???";
-  char id_str[9] = "????????";
-  uint8_t ver = 0xFF;
-  uint8_t dev = 0xFF;
-  uint8_t ci = 0xFF;
-  uint32_t id_val = 0;
+// Bazowo: nie wywalaj niczego, jak nie da się sparsować
+const char *mfr = "???";
+char id_str[9] = "????????";
+uint8_t ver = 0xFF;
+uint8_t dev = 0xFF;
+uint8_t ci = 0xFF;
+uint32_t id_val = 0;  // decimal meter id (BCD) for optional log highlighting
 
-  auto is_bcd = [](uint8_t b) -> bool {
-    return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
-  };
+auto is_bcd = [](uint8_t b) -> bool {
+  return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
+};
 
-  auto decode_mfr = [](uint16_t m, char out[4]) {
-    out[0] = (char)(((m >> 10) & 0x1F) + 64);
-    out[1] = (char)(((m >> 5) & 0x1F) + 64);
-    out[2] = (char)((m & 0x1F) + 64);
-    out[3] = 0;
-    auto ok = [](char c) { return c >= 'A' && c <= 'Z'; };
-    if (!ok(out[0]) || !ok(out[1]) || !ok(out[2])) {
-      out[0] = out[1] = out[2] = '?';
-    }
-  };
-
-  char mfr_buf[4] = "???";
-
-  int base = -1;
-  if (d.size() >= 10 && (size_t) (d[0] + 1) == d.size())
-    base = 1;
-  else if (d.size() >= 9)
-    base = 0;
-
-  if (base >= 0 && (int) d.size() >= base + 10) {
-    uint16_t m = (uint16_t) d[base + 1] | ((uint16_t) d[base + 2] << 8);
-    decode_mfr(m, mfr_buf);
-    mfr = mfr_buf;
-
-    bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
-    if (bcd_ok) {
-      id_val = (uint32_t) ((((d[base + 6] >> 4) & 0x0F) * 10000000U) + ((d[base + 6] & 0x0F) * 1000000U) +
-                           (((d[base + 5] >> 4) & 0x0F) * 100000U) + ((d[base + 5] & 0x0F) * 10000U) +
-                           (((d[base + 4] >> 4) & 0x0F) * 1000U) + ((d[base + 4] & 0x0F) * 100U) +
-                           (((d[base + 3] >> 4) & 0x0F) * 10U) + (d[base + 3] & 0x0F));
-      snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
-               (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
-               (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
-               (d[base + 4] >> 4) & 0x0F, d[base + 4] & 0x0F,
-               (d[base + 3] >> 4) & 0x0F, d[base + 3] & 0x0F);
-    } else {
-      snprintf(id_str, sizeof(id_str), "%02X%02X%02X%02X",
-               d[base + 6], d[base + 5], d[base + 4], d[base + 3]);
-    }
-
-    ver = d[base + 7];
-    dev = d[base + 8];
-    ci = d[base + 9];
+auto decode_mfr = [](uint16_t m, char out[4]) {
+  out[0] = (char)(((m >> 10) & 0x1F) + 64);
+  out[1] = (char)(((m >> 5) & 0x1F) + 64);
+  out[2] = (char)((m & 0x1F) + 64);
+  out[3] = 0;
+  auto ok = [](char c) { return c >= 'A' && c <= 'Z'; };
+  if (!ok(out[0]) || !ok(out[1]) || !ok(out[2])) {
+    out[0] = out[1] = out[2] = '?';
   }
+};
 
-  bool highlight = false;
-  if (id_val != 0 && !this->highlight_meter_ids_.empty()) {
-    highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
-  }
+char mfr_buf[4] = "???";
 
-  const char *log_tag = TAG;
-  if (highlight) {
-    if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
-    const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
-    const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-    ESP_LOGI(log_tag, "%s%sHave data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
-             ansi_pre, this->highlight_prefix_.c_str(),
-             d.size(), frame->rssi(),
-             link_mode_name(frame->link_mode()),
-             frame->format().c_str(),
-             mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
-             ansi_suf);
+// base = indeks C-field
+int base = -1;
+// wariant z L-field (typowo: d[0]=L, d[1]=C)
+if (d.size() >= 10 && (size_t)(d[0] + 1) == d.size())
+  base = 1;
+// wariant bez L-field (gdyby storage kiedyś był inny)
+else if (d.size() >= 9)
+  base = 0;
+
+if (base >= 0 && (int)d.size() >= base + 10) {
+  uint16_t m = (uint16_t)d[base + 1] | ((uint16_t)d[base + 2] << 8);
+  decode_mfr(m, mfr_buf);
+  mfr = mfr_buf;
+
+  // ID bytes: base+3..base+6 (little endian) -> druk 6..3
+  bool bcd_ok = is_bcd(d[base + 3]) && is_bcd(d[base + 4]) && is_bcd(d[base + 5]) && is_bcd(d[base + 6]);
+  if (bcd_ok) {
+    // decimal value (leading zeros ignored) for quick matching against YAML list
+    id_val = (uint32_t)((((d[base + 6] >> 4) & 0x0F) * 10000000U) + ((d[base + 6] & 0x0F) * 1000000U) +
+                        (((d[base + 5] >> 4) & 0x0F) * 100000U) + ((d[base + 5] & 0x0F) * 10000U) +
+                        (((d[base + 4] >> 4) & 0x0F) * 1000U) + ((d[base + 4] & 0x0F) * 100U) +
+                        (((d[base + 3] >> 4) & 0x0F) * 10U) + (d[base + 3] & 0x0F));
+    snprintf(id_str, sizeof(id_str), "%01u%01u%01u%01u%01u%01u%01u%01u",
+             (d[base + 6] >> 4) & 0x0F, d[base + 6] & 0x0F,
+             (d[base + 5] >> 4) & 0x0F, d[base + 5] & 0x0F,
+             (d[base + 4] >> 4) & 0x0F, d[base + 4] & 0x0F,
+             (d[base + 3] >> 4) & 0x0F, d[base + 3] & 0x0F);
   } else {
-    ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-             d.size(), frame->rssi(),
-             link_mode_name(frame->link_mode()),
-             frame->format().c_str(),
-             mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
+    // fallback HEX (żeby nie walić głupot)
+    snprintf(id_str, sizeof(id_str), "%02X%02X%02X%02X",
+             d[base + 6], d[base + 5], d[base + 4], d[base + 3]);
   }
 
-  for (auto &handler : this->handlers_)
+  ver = d[base + 7];
+  dev = d[base + 8];
+  ci  = d[base + 9];
+}
+
+// Optional log highlighting for configured IDs (BCD IDs only).
+bool highlight = false;
+if (id_val != 0 && !this->highlight_meter_ids_.empty()) {
+  highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
+}
+
+const char *log_tag = TAG;
+if (highlight) {
+  if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
+  const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
+  const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
+  ESP_LOGI(log_tag, "%s%sHave data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+           ansi_pre, this->highlight_prefix_.c_str(),
+           d.size(), frame->rssi(),
+           link_mode_name(frame->link_mode()),
+           frame->format().c_str(),
+           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci,
+           ansi_suf);
+} else {
+  ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+           d.size(), frame->rssi(),
+           link_mode_name(frame->link_mode()),
+           frame->format().c_str(),
+           mfr, id_str, (unsigned)ver, (unsigned)dev, (unsigned)ci);
+}
+
+for (auto &handler : this->handlers_)
     handler(&frame.value());
 
   if (frame->handlers_count())
@@ -657,6 +566,8 @@ void Radio::wakeup_receiver_task_from_isr(TaskHandle_t *arg) {
 }
 
 void Radio::receive_frame() {
+  // Ping-pong helper: restart RX in short windows to alternate sync bytes.
+  // This dramatically improves hit rate for devices that transmit rarely.
   const uint32_t total_wait_ms = 60000;
   const uint32_t hop_ms = 500;
   uint32_t waited = 0;
@@ -670,29 +581,27 @@ void Radio::receive_frame() {
     waited += hop_ms;
   }
   if (!got_irq) {
-    this->diag_rx_path_.irq_timeout++;
-    this->publish_rx_path_event_("rx_path", "receive_wait", "interrupt_timeout");
     ESP_LOGD(TAG, "Radio interrupt timeout");
     return;
   }
   auto packet = std::make_unique<Packet>();
 
+  // Read the minimal header needed to determine expected length.
   auto *preamble = packet->append_space(WMBUS_PREAMBLE_SIZE);
   if (!this->radio->read_in_task(preamble, WMBUS_PREAMBLE_SIZE)) {
-    this->diag_rx_path_.preamble_read_failed++;
-    this->publish_rx_path_event_("rx_path", "receive_preamble", "read_failed");
     ESP_LOGV(TAG, "Failed to read preamble");
     return;
   }
 
+  // Important for T1: L-field is 3-of-6 encoded and decoding it from only 3 bytes
+  // is fragile under low RSSI / frequency offset. Read a longer prefix first so
+  // Packet::expected_size() can derive a stable L-field.
   const bool is_c_mode = (preamble[0] == WMBUS_MODE_C_PREAMBLE);
   size_t already_read = WMBUS_PREAMBLE_SIZE;
   if (!is_c_mode && WMBUS_T1_LEN_PROBE_BYTES > WMBUS_PREAMBLE_SIZE) {
     const size_t extra = WMBUS_T1_LEN_PROBE_BYTES - WMBUS_PREAMBLE_SIZE;
     auto *hdr = packet->append_space(extra);
     if (!this->radio->read_in_task(hdr, extra)) {
-      this->diag_rx_path_.t1_header_read_failed++;
-      this->publish_rx_path_event_("rx_path", "receive_t1_header", "read_failed");
       ESP_LOGV(TAG, "Failed to read T1 header");
       return;
     }
@@ -701,22 +610,14 @@ void Radio::receive_frame() {
 
   const size_t total_len = packet->expected_size();
   if (total_len == 0 || total_len < already_read) {
-    this->diag_rx_path_.payload_size_unknown++;
-    char detail[96];
-    snprintf(detail, sizeof(detail), "total_len=%u already_read=%u", (unsigned) total_len, (unsigned) already_read);
-    this->publish_rx_path_event_("rx_path", "receive_expected_size", detail);
     ESP_LOGD(TAG, "Cannot calculate payload size");
     return;
   }
 
-  const size_t remaining = total_len - already_read;
+  const size_t remaining = total_len - already_read; 
   if (remaining > 0) {
     auto *rest = packet->append_space(remaining);
     if (!this->radio->read_in_task(rest, remaining)) {
-      this->diag_rx_path_.payload_read_failed++;
-      char detail[96];
-      snprintf(detail, sizeof(detail), "remaining=%u total_len=%u already_read=%u", (unsigned) remaining, (unsigned) total_len, (unsigned) already_read);
-      this->publish_rx_path_event_("rx_path", "receive_payload", detail);
       ESP_LOGW(TAG, "Failed to read data");
       return;
     }
@@ -726,14 +627,12 @@ void Radio::receive_frame() {
   auto packet_ptr = packet.get();
 
   if (xQueueSend(this->packet_queue_, &packet_ptr, 0) == pdTRUE) {
-    ESP_LOGV(TAG, "Queue items: %zu", uxQueueMessagesWaiting(this->packet_queue_));
+    ESP_LOGV(TAG, "Queue items: %zu",
+             uxQueueMessagesWaiting(this->packet_queue_));
     ESP_LOGV(TAG, "Queue send success");
     packet.release();
-  } else {
-    this->diag_rx_path_.queue_send_failed++;
-    this->publish_rx_path_event_("rx_path", "queue_send", "queue_full_or_busy", this->radio->get_rssi());
+  } else
     ESP_LOGW(TAG, "Queue send failed");
-  }
 }
 
 void Radio::receiver_task(Radio *arg) {

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <cstdio>
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
@@ -35,7 +36,63 @@ static std::string hex_prefix_(const std::vector<uint8_t> &in, size_t max_bytes)
   return out;
 }
 
+static std::string dll_crc_detail_(const wmbus_common::DLLCRCResult &crc) {
+  char buf[160];
+  snprintf(buf, sizeof(buf),
+           "format=%s stage=%s calc=%04x expected=%04x data_pos=%u data_len=%u crc_pos=%u input_len=%u",
+           crc.format,
+           crc.stage,
+           (unsigned) crc.calculated,
+           (unsigned) crc.expected,
+           (unsigned) crc.data_pos,
+           (unsigned) crc.data_len,
+           (unsigned) crc.crc_pos,
+           (unsigned) crc.input_len);
+  return std::string(buf);
+}
+
+
+static bool is_bcd_(uint8_t b) {
+  return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
+}
+
+static bool try_extract_meter_id_(const std::vector<uint8_t> &d, uint32_t &out_id) {
+  out_id = 0;
+  if (d.size() < 9) return false;
+
+  int base = -1;
+  // Raw C1 still carrying the two leading suffix bytes.
+  if (d.size() >= 12 && (size_t) (d[2] + 1) == (d.size() - 2)) {
+    base = 2;
+  } else if (d.size() >= 10 && (size_t) (d[0] + 1) == d.size()) {
+    // Final frame with explicit C-field after L-field.
+    base = 1;
+  } else {
+    // Best effort for late-stage / already-trimmed packets.
+    base = 0;
+  }
+
+  if ((size_t) (base + 6) >= d.size()) return false;
+  if (!is_bcd_(d[base + 3]) || !is_bcd_(d[base + 4]) || !is_bcd_(d[base + 5]) || !is_bcd_(d[base + 6])) {
+    return false;
+  }
+
+  out_id = (uint32_t) ((((d[base + 6] >> 4) & 0x0F) * 10000000U) + ((d[base + 6] & 0x0F) * 1000000U) +
+                       (((d[base + 5] >> 4) & 0x0F) * 100000U) + ((d[base + 5] & 0x0F) * 10000U) +
+                       (((d[base + 4] >> 4) & 0x0F) * 1000U) + ((d[base + 4] & 0x0F) * 100U) +
+                       (((d[base + 3] >> 4) & 0x0F) * 10U) + (d[base + 3] & 0x0F));
+  return out_id != 0;
+}
+
 Packet::Packet() { this->data_.reserve(WMBUS_PREAMBLE_SIZE); }
+
+bool Packet::try_get_meter_id(uint32_t &out_id) const { return try_extract_meter_id_(this->data_, out_id); }
+
+void Packet::set_drop_(const char *stage, const char *reason, const std::string &detail) {
+  this->drop_stage_ = stage != nullptr ? stage : "";
+  this->drop_reason_ = reason != nullptr ? reason : "";
+  this->drop_detail_ = detail;
+}
 
 // Determine the link mode based on the first byte of the data
 LinkMode Packet::link_mode() {
@@ -121,131 +178,297 @@ static inline size_t total_len_format_b_with_crc_(uint8_t l_field) {
   return (size_t) l_field + 1;
 }
 
+
+namespace {
+
+// Internal parse result used by the fallback parser.
+// It lets us try more than one interpretation of the same raw packet without
+// losing the diagnostic context of the best candidate.
+struct ParseAttemptResult {
+  bool ok{false};
+  bool truncated{false};
+  LinkMode mode{LinkMode::UNKNOWN};
+  std::string frame_format{};
+  std::vector<uint8_t> data{};
+
+  size_t want_len{0};
+  size_t got_len{0};
+  size_t raw_got_len{0};
+  size_t decoded_len{0};
+  size_t final_len{0};
+  uint16_t dll_crc_removed{0};
+  uint8_t suffix_ignored{0};
+
+  std::string drop_reason{};
+  std::string drop_stage{};
+  std::string drop_detail{};
+  uint16_t t1_symbols_total{0};
+  uint16_t t1_symbols_invalid{0};
+};
+
+static inline void set_attempt_drop_(ParseAttemptResult &out, const char *stage, const char *reason,
+                                     const std::string &detail = {}) {
+  out.ok = false;
+  out.drop_stage = stage != nullptr ? stage : "";
+  out.drop_reason = reason != nullptr ? reason : "";
+  out.drop_detail = detail;
+}
+
+// Rough stage ordering used when both parsing attempts fail.
+// Higher rank means the parser got further and usually has a more useful reason.
+static int stage_rank_(const std::string &stage) {
+  if (stage == "precheck" || stage == "c1_precheck") return 1;
+  if (stage == "c1_preamble" || stage == "c1_suffix" || stage == "t1_decode3of6") return 2;
+  if (stage == "t1_l_field" || stage == "c1_l_field") return 3;
+  if (stage == "t1_length_check" || stage == "c1_length_check") return 4;
+  if (stage == "dll_crc_first" || stage == "dll_crc_mid" || stage == "dll_crc_final" ||
+      stage == "dll_crc_b1" || stage == "dll_crc_b2") return 5;
+  if (stage == "link_mode") return 0;
+  return 0;
+}
+
+static const ParseAttemptResult &pick_better_failure_(const ParseAttemptResult &a, const ParseAttemptResult &b) {
+  const int ra = stage_rank_(a.drop_stage);
+  const int rb = stage_rank_(b.drop_stage);
+  if (ra != rb) return (ra > rb) ? a : b;
+  // Prefer the attempt that collected more decoded data.
+  if (a.decoded_len != b.decoded_len) return (a.decoded_len > b.decoded_len) ? a : b;
+  // Prefer truncated over generic decode failures: it usually means framing was at least partially correct.
+  if (a.truncated != b.truncated) return a.truncated ? a : b;
+  return a;
+}
+
+// T1 parser with a soft precheck.
+// We intentionally avoid a hard early reject like "raw < 60 => drop" because
+// some borderline packets can still reach a valid L-field after 3-of-6 decode.
+static ParseAttemptResult try_parse_t1_(const std::vector<uint8_t> &raw) {
+  ParseAttemptResult out;
+  out.mode = LinkMode::T1;
+  out.frame_format = "A";  // Current bridge handles T1 as format A.
+  out.raw_got_len = raw.size();
+
+  if (raw.size() < 12) {
+    set_attempt_drop_(out, "precheck", "too_short",
+                      "mode=T1 raw_len=" + std::to_string((unsigned) raw.size()) + " min=12");
+    return out;
+  }
+
+  std::vector<uint8_t> decoded_input = raw;
+  Decode3of6Stats st;
+  auto decoded_data = decode3of6(decoded_input, &st);
+  out.t1_symbols_total = st.symbols_total;
+  out.t1_symbols_invalid = st.symbols_invalid;
+  if (!decoded_data || decoded_data->size() < 2) {
+    char detail[160];
+    snprintf(detail, sizeof(detail), "symbols_total=%u symbols_invalid=%u raw_len=%u",
+             (unsigned) out.t1_symbols_total, (unsigned) out.t1_symbols_invalid, (unsigned) out.raw_got_len);
+    set_attempt_drop_(out, "t1_decode3of6", "decode_failed", detail);
+    return out;
+  }
+
+  out.data = std::move(decoded_data.value());
+  out.decoded_len = out.data.size();
+
+  const uint8_t l = out.data[0];
+  const size_t want = (size_t) l + 1;
+  const size_t need_total = total_len_format_a_with_crc_(l);
+  out.want_len = need_total;
+  out.got_len = out.data.size();
+
+  if (want < 12 || want > 260) {
+    char detail[128];
+    snprintf(detail, sizeof(detail), "l_field=%u decoded_len=%u want=%u need_total=%u",
+             (unsigned) l, (unsigned) out.decoded_len, (unsigned) want, (unsigned) need_total);
+    set_attempt_drop_(out, "t1_l_field", "l_field_invalid", detail);
+    return out;
+  }
+
+  if (out.data.size() < need_total) {
+    out.truncated = true;
+    char detail[128];
+    snprintf(detail, sizeof(detail), "decoded_len=%u need_total=%u l_field=%u",
+             (unsigned) out.data.size(), (unsigned) need_total, (unsigned) l);
+    set_attempt_drop_(out, "t1_length_check", "truncated", detail);
+    return out;
+  }
+
+  if (out.data.size() > need_total) out.data.resize(need_total);
+
+  wmbus_common::DLLCRCResult crc_diag;
+  if (!wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
+    set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", dll_crc_detail_(crc_diag));
+    return out;
+  }
+
+  out.dll_crc_removed = crc_diag.removed_bytes;
+  out.final_len = out.data.size();
+  out.ok = true;
+  return out;
+}
+
+// C1 parser. Format A/B is selected from the block preamble after the two
+// leading C-mode bytes are removed.
+static ParseAttemptResult try_parse_c1_(const std::vector<uint8_t> &raw) {
+  ParseAttemptResult out;
+  out.mode = LinkMode::C1;
+  out.raw_got_len = raw.size();
+
+  if (raw.size() < 3) {
+    set_attempt_drop_(out, "c1_precheck", "too_short",
+                      "mode=C1 raw_len=" + std::to_string((unsigned) raw.size()) + " min=3");
+    return out;
+  }
+
+  out.data = raw;
+  if (out.data[0] != WMBUS_MODE_C_PREAMBLE) {
+    char detail[64];
+    snprintf(detail, sizeof(detail), "first_byte=%02X raw_len=%u",
+             (unsigned) out.data[0], (unsigned) out.data.size());
+    set_attempt_drop_(out, "c1_precheck", "unknown_preamble", detail);
+    return out;
+  }
+
+  if (out.data[1] == WMBUS_BLOCK_A_PREAMBLE) {
+    out.frame_format = "A";
+  } else if (out.data[1] == WMBUS_BLOCK_B_PREAMBLE) {
+    out.frame_format = "B";
+  } else {
+    char detail[64];
+    snprintf(detail, sizeof(detail), "preamble=%02X raw_len=%u", (unsigned) out.data[1], (unsigned) out.data.size());
+    set_attempt_drop_(out, "c1_preamble", "unknown_preamble", detail);
+    return out;
+  }
+
+  if (out.data.size() < WMBUS_MODE_C_SUFIX_LEN) {
+    set_attempt_drop_(out, "c1_suffix", "too_short",
+                      "raw_len=" + std::to_string((unsigned) out.data.size()) + " min_suffix=2");
+    return out;
+  }
+
+  out.data.erase(out.data.begin(), out.data.begin() + WMBUS_MODE_C_SUFIX_LEN);
+  out.suffix_ignored = WMBUS_MODE_C_SUFIX_LEN;
+  out.decoded_len = out.data.size();
+
+  const uint8_t l = out.data[0];
+  const size_t want = (size_t) l + 1;
+  const size_t need_total = (out.frame_format == "A") ? total_len_format_a_with_crc_(l)
+                                                        : total_len_format_b_with_crc_(l);
+  out.want_len = need_total;
+  out.got_len = out.data.size();
+
+  if (want < 12 || want > 260) {
+    char detail[144];
+    snprintf(detail, sizeof(detail), "format=%s l_field=%u decoded_len=%u want=%u need_total=%u",
+             out.frame_format.c_str(), (unsigned) l, (unsigned) out.decoded_len,
+             (unsigned) want, (unsigned) need_total);
+    set_attempt_drop_(out, "c1_l_field", "l_field_invalid", detail);
+    return out;
+  }
+
+  if (out.data.size() < need_total) {
+    out.truncated = true;
+    char detail[144];
+    snprintf(detail, sizeof(detail), "format=%s decoded_len=%u need_total=%u l_field=%u",
+             out.frame_format.c_str(), (unsigned) out.data.size(), (unsigned) need_total, (unsigned) l);
+    set_attempt_drop_(out, "c1_length_check", "truncated", detail);
+    return out;
+  }
+
+  if (out.data.size() > need_total) out.data.resize(need_total);
+
+  wmbus_common::DLLCRCResult crc_diag;
+  if (out.frame_format == "A") {
+    if (!wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
+      set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", dll_crc_detail_(crc_diag));
+      return out;
+    }
+  } else {
+    if (!wmbus_common::trim_dll_crc_format_b(out.data, &crc_diag)) {
+      set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", dll_crc_detail_(crc_diag));
+      return out;
+    }
+  }
+
+  out.dll_crc_removed = crc_diag.removed_bytes;
+  out.final_len = out.data.size();
+  out.ok = true;
+  return out;
+}
+
+}  // namespace
+
 std::optional<Frame> Packet::convert_to_frame() {
   std::optional<Frame> frame = {};
 
-  // reset diagnostics
+  // Reset diagnostics collected for the current packet.
   this->truncated_ = false;
   this->want_len_ = 0;
   this->got_len_ = 0;
   this->raw_got_len_ = this->data_.size();
+  this->decoded_len_ = 0;
+  this->final_len_ = 0;
+  this->dll_crc_removed_ = 0;
+  this->suffix_ignored_ = 0;
   this->drop_reason_.clear();
+  this->drop_stage_.clear();
+  this->drop_detail_.clear();
   this->t1_symbols_total_ = 0;
   this->t1_symbols_invalid_ = 0;
 
-  // Capture raw bytes (hex) early for diagnostics. Keep it bounded.
-  // 256 bytes -> 512 hex chars, enough for typical dropped packets.
+  // Capture raw bytes early so dropped packets can be inspected later from MQTT/logs.
   this->raw_hex_ = hex_prefix_(this->data_, 256);
 
-  // drop junk / partial frames (noise)
-  const auto mode = this->link_mode();
-  if (mode == LinkMode::T1 && this->data_.size() < 60) {
-    this->drop_reason_ = "too_short";
-    return {};
-  }
-  if (mode == LinkMode::C1 && this->data_.size() < 16) {
-    this->drop_reason_ = "too_short";
-    return {};
-  }
+  const std::vector<uint8_t> raw = this->data_;
+  const bool looks_c1 = !raw.empty() && raw[0] == WMBUS_MODE_C_PREAMBLE;
 
-  // RAW-only: do not rely on expected_size gating (it can be wrong on partial prefixes).
-  // We instead require successful decode/sanity and then trim based on decoded L-field.
-  if (mode == LinkMode::T1) {
-    this->frame_format_ = "A";  // assumption (good enough for water meters you're seeing)
-    Decode3of6Stats st;
-    auto decoded_data = decode3of6(this->data_, &st);
-    this->t1_symbols_total_ = st.symbols_total;
-    this->t1_symbols_invalid_ = st.symbols_invalid;
-    if (!decoded_data || decoded_data->size() < 2) {
-      this->drop_reason_ = "decode_failed";
-      return {};
-    }
-    this->data_ = decoded_data.value();
+  // Preferred path is based on the first byte, but we always keep a fallback.
+  // This avoids a hard one-shot decision where a borderline packet gets pushed
+  // through the wrong parser and we lose a valid candidate.
+  const ParseAttemptResult first = looks_c1 ? try_parse_c1_(raw) : try_parse_t1_(raw);
+  const ParseAttemptResult second = looks_c1 ? try_parse_t1_(raw) : try_parse_c1_(raw);
 
-    // Sanity based on L-field
-    const uint8_t l = this->data_[0];
-    const size_t want = (size_t) l + 1;
-    const size_t need_total = total_len_format_a_with_crc_(l);
-    this->want_len_ = need_total;
-    this->got_len_ = this->data_.size();
-    if (want < 12 || want > 260) {
-      this->drop_reason_ = "l_field_invalid";
-      return {};
-    }
-    if (this->data_.size() < need_total) {
-      this->truncated_ = true;
-      this->drop_reason_ = "truncated";
-      return {};
-    }
-
-    // Keep only what we need (drop any trailing garbage)
-    if (this->data_.size() > need_total) this->data_.resize(need_total);
-
-    // Validate and strip DLL CRC bytes (Format A)
-    if (!wmbus_common::trim_dll_crc_format_a(this->data_)) {
-      this->drop_reason_ = "dll_crc_failed";
-      return {};
-    }
-
-  } else if (mode == LinkMode::C1) {
-    if (this->data_.size() < 3) {
-      this->drop_reason_ = "too_short";
-      return {};
-    }
-    if (this->data_[1] == WMBUS_BLOCK_A_PREAMBLE) {
-      this->frame_format_ = "A";
-    } else if (this->data_[1] == WMBUS_BLOCK_B_PREAMBLE) {
-      this->frame_format_ = "B";
-    } else {
-      this->drop_reason_ = "unknown_preamble";
-      return {};
-    }
-
-    // remove C-mode suffix bytes
-    if (this->data_.size() < WMBUS_MODE_C_SUFIX_LEN) {
-      this->drop_reason_ = "too_short";
-      return {};
-    }
-    this->data_.erase(this->data_.begin(), this->data_.begin() + WMBUS_MODE_C_SUFIX_LEN);
-
-    // Sanity based on L-field now at [0]
-    const uint8_t l = this->data_[0];
-    const size_t want = (size_t) l + 1;
-    const size_t need_total = (this->frame_format_ == "A")
-                                 ? total_len_format_a_with_crc_(l)
-                                 : total_len_format_b_with_crc_(l);
-    this->want_len_ = need_total;
-    this->got_len_ = this->data_.size();
-    if (want < 12 || want > 260) {
-      this->drop_reason_ = "l_field_invalid";
-      return {};
-    }
-    if (this->data_.size() < need_total) {
-      this->truncated_ = true;
-      this->drop_reason_ = "truncated";
-      return {};
-    }
-    if (this->data_.size() > need_total) this->data_.resize(need_total);
-
-    // Validate and strip DLL CRC bytes for both formats
-    if (this->frame_format_ == "A") {
-      if (!wmbus_common::trim_dll_crc_format_a(this->data_)) {
-        this->drop_reason_ = "dll_crc_failed";
-        return {};
-      }
-    } else {  // "B"
-      if (!wmbus_common::trim_dll_crc_format_b(this->data_)) {
-        this->drop_reason_ = "dll_crc_failed";
-        return {};
-      }
-    }
-
+  const ParseAttemptResult *chosen = nullptr;
+  bool fallback_used = false;
+  if (first.ok) {
+    chosen = &first;
+  } else if (second.ok) {
+    chosen = &second;
+    fallback_used = true;
   } else {
-    this->drop_reason_ = "unknown_link_mode";
+    chosen = &pick_better_failure_(first, second);
+  }
+
+  // Copy chosen result back into the packet object used by the rest of the pipeline.
+  this->data_ = chosen->data;
+  this->link_mode_ = chosen->mode;
+  this->frame_format_ = chosen->frame_format;
+  this->truncated_ = chosen->truncated;
+  this->want_len_ = chosen->want_len;
+  this->got_len_ = chosen->got_len;
+  this->decoded_len_ = chosen->decoded_len;
+  this->final_len_ = chosen->final_len;
+  this->dll_crc_removed_ = chosen->dll_crc_removed;
+  this->suffix_ignored_ = chosen->suffix_ignored;
+  this->drop_reason_ = chosen->drop_reason;
+  this->drop_stage_ = chosen->drop_stage;
+  this->drop_detail_ = chosen->drop_detail;
+  this->t1_symbols_total_ = chosen->t1_symbols_total;
+  this->t1_symbols_invalid_ = chosen->t1_symbols_invalid;
+
+  if (!chosen->ok) {
+    if (fallback_used) {
+      this->drop_detail_ += (this->drop_detail_.empty() ? "" : " ");
+      this->drop_detail_ += "fallback_used=1";
+    }
     return {};
   }
 
-  // OK -> publish
+  if (fallback_used) {
+    // Keep a short breadcrumb in diagnostics: it helps explain why an apparently
+    // odd packet still decoded successfully.
+    this->drop_detail_ = "fallback_used=1";
+  }
+
   frame.emplace(this);
   return frame;
 }
@@ -261,6 +484,8 @@ std::string Frame::format() { return this->format_; }
 
 std::vector<uint8_t> Frame::as_raw() { return this->data_; }
 std::string Frame::as_hex() { return format_hex(this->data_); }
+
+bool Frame::try_get_meter_id(uint32_t &out_id) const { return try_extract_meter_id_(this->data_, out_id); }
 
 std::string Frame::as_rtlwmbus() {
   const size_t time_repr_size = sizeof("YYYY-MM-DD HH:MM:SS.00Z");

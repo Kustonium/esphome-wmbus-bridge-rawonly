@@ -28,35 +28,9 @@ inline uint16_t crc16_en13757(const uint8_t *data, size_t len) {
   return (uint16_t)(~crc);
 }
 
-struct DLLCRCResult {
-  bool ok{false};
-  const char *format{""};
-  const char *stage{"none"};
-  uint16_t calculated{0};
-  uint16_t expected{0};
-  size_t data_pos{0};
-  size_t data_len{0};
-  size_t crc_pos{0};
-  size_t input_len{0};
-  size_t output_len{0};
-  uint16_t removed_bytes{0};
-};
-
-inline void dll_crc_result_reset_(DLLCRCResult *diag, const char *format, size_t input_len) {
-  if (diag == nullptr) return;
-  *diag = {};
-  diag->format = format;
-  diag->input_len = input_len;
-  diag->stage = "none";
-}
-
 // Try trim DLL CRC for Frame Format A (returns true if trimmed & CRCs OK)
-inline bool trim_dll_crc_format_a(std::vector<uint8_t> &payload, DLLCRCResult *diag = nullptr) {
-  dll_crc_result_reset_(diag, "A", payload.size());
-  if (payload.size() < 12) {
-    if (diag != nullptr) diag->stage = "format_a_too_short";
-    return false;
-  }
+inline bool trim_dll_crc_format_a(std::vector<uint8_t> &payload) {
+  if (payload.size() < 12) return false;
 
   const size_t len = payload.size();
   std::vector<uint8_t> out;
@@ -65,14 +39,6 @@ inline bool trim_dll_crc_format_a(std::vector<uint8_t> &payload, DLLCRCResult *d
   {
     uint16_t calc = crc16_en13757(payload.data(), 10);
     uint16_t check = (uint16_t)(payload[10] << 8 | payload[11]);
-    if (diag != nullptr) {
-      diag->stage = "dll_crc_first";
-      diag->calculated = calc;
-      diag->expected = check;
-      diag->data_pos = 0;
-      diag->data_len = 10;
-      diag->crc_pos = 10;
-    }
     if (calc != check) return false;
     out.insert(out.end(), payload.begin(), payload.begin() + 10);
   }
@@ -83,14 +49,6 @@ inline bool trim_dll_crc_format_a(std::vector<uint8_t> &payload, DLLCRCResult *d
     uint16_t calc = crc16_en13757(payload.data() + pos, 16);
     size_t crc_pos = pos + 16;
     uint16_t check = (uint16_t)(payload[crc_pos] << 8 | payload[crc_pos + 1]);
-    if (diag != nullptr) {
-      diag->stage = "dll_crc_mid";
-      diag->calculated = calc;
-      diag->expected = check;
-      diag->data_pos = pos;
-      diag->data_len = 16;
-      diag->crc_pos = crc_pos;
-    }
     if (calc != check) return false;
     out.insert(out.end(), payload.begin() + pos, payload.begin() + pos + 16);
   }
@@ -100,42 +58,21 @@ inline bool trim_dll_crc_format_a(std::vector<uint8_t> &payload, DLLCRCResult *d
     const size_t data_len = (len - 2) - pos;
     uint16_t calc = crc16_en13757(payload.data() + pos, data_len);
     uint16_t check = (uint16_t)(payload[len - 2] << 8 | payload[len - 1]);
-    if (diag != nullptr) {
-      diag->stage = "dll_crc_final";
-      diag->calculated = calc;
-      diag->expected = check;
-      diag->data_pos = pos;
-      diag->data_len = data_len;
-      diag->crc_pos = len - 2;
-    }
     if (calc != check) return false;
     out.insert(out.end(), payload.begin() + pos, payload.begin() + (len - 2));
   }
 
-  if (out.empty()) {
-    if (diag != nullptr) diag->stage = "format_a_empty_output";
-    return false;
-  }
+  if (out.empty()) return false;
 
   // Fix L-field (length without itself)
   out[0] = (uint8_t)(out.size() - 1);
-  if (diag != nullptr) {
-    diag->ok = true;
-    diag->stage = "ok";
-    diag->output_len = out.size();
-    diag->removed_bytes = (uint16_t)(len - out.size());
-  }
   payload = std::move(out);
   return true;
 }
 
 // Try trim DLL CRC for Frame Format B (returns true if trimmed & CRCs OK)
-inline bool trim_dll_crc_format_b(std::vector<uint8_t> &payload, DLLCRCResult *diag = nullptr) {
-  dll_crc_result_reset_(diag, "B", payload.size());
-  if (payload.size() < 12) {
-    if (diag != nullptr) diag->stage = "format_b_too_short";
-    return false;
-  }
+inline bool trim_dll_crc_format_b(std::vector<uint8_t> &payload) {
+  if (payload.size() < 12) return false;
 
   const size_t len = payload.size();
   std::vector<uint8_t> out;
@@ -153,14 +90,6 @@ inline bool trim_dll_crc_format_b(std::vector<uint8_t> &payload, DLLCRCResult *d
   {
     uint16_t calc = crc16_en13757(payload.data(), crc1_pos);
     uint16_t check = (uint16_t)(payload[crc1_pos] << 8 | payload[crc1_pos + 1]);
-    if (diag != nullptr) {
-      diag->stage = "dll_crc_b1";
-      diag->calculated = calc;
-      diag->expected = check;
-      diag->data_pos = 0;
-      diag->data_len = crc1_pos;
-      diag->crc_pos = crc1_pos;
-    }
     if (calc != check) return false;
     out.insert(out.end(), payload.begin(), payload.begin() + crc1_pos);
   }
@@ -171,30 +100,13 @@ inline bool trim_dll_crc_format_b(std::vector<uint8_t> &payload, DLLCRCResult *d
     const size_t data_len = crc2_pos - start;
     uint16_t calc = crc16_en13757(payload.data() + start, data_len);
     uint16_t check = (uint16_t)(payload[crc2_pos] << 8 | payload[crc2_pos + 1]);
-    if (diag != nullptr) {
-      diag->stage = "dll_crc_b2";
-      diag->calculated = calc;
-      diag->expected = check;
-      diag->data_pos = start;
-      diag->data_len = data_len;
-      diag->crc_pos = crc2_pos;
-    }
     if (calc != check) return false;
     out.insert(out.end(), payload.begin() + start, payload.begin() + crc2_pos);
   }
 
-  if (out.empty()) {
-    if (diag != nullptr) diag->stage = "format_b_empty_output";
-    return false;
-  }
+  if (out.empty()) return false;
 
   out[0] = (uint8_t)(out.size() - 1);
-  if (diag != nullptr) {
-    diag->ok = true;
-    diag->stage = "ok";
-    diag->output_len = out.size();
-    diag->removed_bytes = (uint16_t)(len - out.size());
-  }
   payload = std::move(out);
   return true;
 }

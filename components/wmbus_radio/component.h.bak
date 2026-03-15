@@ -40,10 +40,6 @@ public:
   // Diagnostics runtime controls (can be toggled from YAML via template switches)
   void set_diag_verbose(bool enabled) { this->diag_verbose_ = enabled; }
   void set_diag_publish_raw(bool enabled) { this->diag_publish_raw_ = enabled; }
-  void set_diag_publish_summary(bool enabled) { this->diag_publish_summary_ = enabled; }
-  void set_diag_publish_drop_events(bool enabled) { this->diag_publish_drop_events_ = enabled; }
-  void set_diag_publish_rx_path_events(bool enabled) { this->diag_publish_rx_path_events_ = enabled; }
-  void set_diag_publish_highlight_only(bool enabled) { this->diag_publish_highlight_only_ = enabled; }
   void set_diag_summary_interval_ms(uint32_t interval_ms) {
     // Keep it sane: minimum 5s
     this->diag_summary_interval_ms_ = interval_ms < 5000 ? 5000 : interval_ms;
@@ -82,16 +78,10 @@ protected:
   // Diagnostics counters (published periodically if diagnostic_topic is set)
   uint32_t diag_summary_interval_ms_{60000};
 
-  // When false, only the periodic summary is published to MQTT (still counts internally)
+  // When false, only the periodic summary is published (still counts internally)
   bool diag_verbose_{true};
   // When false, per-packet payloads/logs omit the raw hex (much less spam)
   bool diag_publish_raw_{true};
-  bool diag_publish_summary_{true};
-  bool diag_publish_drop_events_{true};
-  bool diag_publish_rx_path_events_{true};
-  // If enabled, publish per-packet MQTT diagnostics only for ids present in
-  // highlight_meters. Summary remains global and still counts everything.
-  bool diag_publish_highlight_only_{false};
 
   enum DropBucket : uint8_t {
     DB_TOO_SHORT = 0,
@@ -103,35 +93,6 @@ protected:
     DB_UNKNOWN_LINK_MODE,
     DB_OTHER,
     DB_COUNT
-  };
-
-  enum StageBucket : uint8_t {
-    SB_PRECHECK = 0,
-    SB_T1_DECODE3OF6,
-    SB_T1_L_FIELD,
-    SB_T1_LENGTH_CHECK,
-    SB_C1_PRECHECK,
-    SB_C1_PREAMBLE,
-    SB_C1_SUFFIX,
-    SB_C1_L_FIELD,
-    SB_C1_LENGTH_CHECK,
-    SB_DLL_CRC_FIRST,
-    SB_DLL_CRC_MID,
-    SB_DLL_CRC_FINAL,
-    SB_DLL_CRC_B1,
-    SB_DLL_CRC_B2,
-    SB_LINK_MODE,
-    SB_OTHER,
-    SB_COUNT
-  };
-
-  struct RxPathCounters {
-    uint32_t irq_timeout{0};
-    uint32_t preamble_read_failed{0};
-    uint32_t t1_header_read_failed{0};
-    uint32_t payload_size_unknown{0};
-    uint32_t payload_read_failed{0};
-    uint32_t queue_send_failed{0};
   };
 
   // Windowed counters (reset after each published summary)
@@ -156,8 +117,6 @@ protected:
   std::array<uint32_t, 3> diag_mode_rssi_drop_n_{};
 
   std::array<uint32_t, DB_COUNT> diag_dropped_by_bucket_{};
-  std::array<uint32_t, SB_COUNT> diag_dropped_by_stage_{};
-  RxPathCounters diag_rx_path_{};
 
   // T1 symbol-level diagnostics (windowed, reset after each summary)
   uint32_t diag_t1_symbols_total_{0};
@@ -165,11 +124,7 @@ protected:
   uint32_t last_diag_summary_ms_{0};
 
   static DropBucket bucket_for_reason_(const std::string &reason);
-  static StageBucket bucket_for_stage_(const std::string &stage);
-  bool meter_is_highlighted_(uint32_t meter_id) const;
-  bool should_publish_packet_event_(const Packet *packet) const;
   void maybe_publish_diag_summary_(uint32_t now_ms);
-  void publish_rx_path_event_(const char *event, const char *stage, const char *detail = nullptr, int rssi = 0);
 
   std::string diag_topic_{"wmbus/diag"};
 };

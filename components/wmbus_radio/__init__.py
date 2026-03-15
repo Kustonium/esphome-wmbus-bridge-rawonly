@@ -18,9 +18,10 @@ CODEOWNERS = ["@SzczepanLeon", "@kubasaw"]
 
 DEPENDENCIES = ["esp32", "spi", "mqtt"]
 
-# Keep this component lightweight: decoding is meant to happen outside ESP.
-# Do not auto-load the full wmbus_common stack.
-#AUTO_LOAD = []
+# Single public component only.
+# Everything needed by the raw-only bridge lives inside wmbus_radio, so the user
+# can keep a simple YAML declaration: components: [wmbus_radio]
+AUTO_LOAD = []
 
 MULTI_CONF = True
 
@@ -54,6 +55,10 @@ CONF_DIAG_TOPIC = "diagnostic_topic"
 CONF_DIAG_VERBOSE = "diagnostic_verbose"
 CONF_DIAG_PUBLISH_RAW = "diagnostic_publish_raw"
 CONF_DIAG_SUMMARY_INTERVAL = "diagnostic_summary_interval"
+CONF_DIAG_PUBLISH_SUMMARY = "diagnostic_publish_summary"
+CONF_DIAG_PUBLISH_DROP_EVENTS = "diagnostic_publish_drop_events"
+CONF_DIAG_PUBLISH_RX_PATH_EVENTS = "diagnostic_publish_rx_path_events"
+CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY = "diagnostic_publish_highlight_only"
 
 # Heltec V4 FEM pins (SX1262 external front-end)
 CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
@@ -108,9 +113,15 @@ CONFIG_SCHEMA = (
             # Publish diagnostics (e.g. truncated frames) to MQTT
             cv.Optional(CONF_DIAG_TOPIC, default="wmbus/diag"): cv.string,
 
-            # Diagnostics verbosity (runtime can also be changed via template switches)
+            # Diagnostics verbosity / publication controls
             cv.Optional(CONF_DIAG_VERBOSE, default=True): cv.boolean,
             cv.Optional(CONF_DIAG_PUBLISH_RAW, default=True): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY, default=True): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_DROP_EVENTS, default=True): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, default=True): cv.boolean,
+            # If true, per-packet MQTT diagnostics are published only for meter ids
+            # listed in highlight_meters. Global summary still counts everything.
+            cv.Optional(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, default=False): cv.boolean,
             cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
 
             # Optional log highlighting for selected meter IDs
@@ -188,6 +199,10 @@ async def to_code(config):
 
     cg.add(var.set_diag_verbose(config.get(CONF_DIAG_VERBOSE, True)))
     cg.add(var.set_diag_publish_raw(config.get(CONF_DIAG_PUBLISH_RAW, True)))
+    cg.add(var.set_diag_publish_summary(config.get(CONF_DIAG_PUBLISH_SUMMARY, True)))
+    cg.add(var.set_diag_publish_drop_events(config.get(CONF_DIAG_PUBLISH_DROP_EVENTS, True)))
+    cg.add(var.set_diag_publish_rx_path_events(config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, True)))
+    cg.add(var.set_diag_publish_highlight_only(config.get(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, False)))
     cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
 
     # Log highlight config

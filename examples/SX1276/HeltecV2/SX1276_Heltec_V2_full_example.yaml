@@ -187,20 +187,42 @@ wmbus_radio:
 
   # -------------------------------------------------------------------------
   # PODŚWIETLANIE LOGÓW / LOG HIGHLIGHTING (opcjonalne)
+  #
+  # highlight_meters wyróżnia liczniki w logach serial/API.
+  # Tę samą listę można też wykorzystać jako filtr dla per-packet MQTT diag,
+  # jeśli ustawisz diagnostic_publish_highlight_only: true.
+  #
+  # highlight_meters highlights selected meters in serial/API logs.
+  # The same list can also filter per-packet MQTT diagnostics when
+  # diagnostic_publish_highlight_only: true.
   # -------------------------------------------------------------------------
   highlight_meters:
-    - "12345678"
-  highlight_ansi: true
-  highlight_tag: "wmbus_user"
-  highlight_prefix: "★ "
+    - "12345678"             # przykładowy licznik usera / example user meter
+  highlight_ansi: true        # ANSI w terminalu / ANSI color in terminal
+  highlight_tag: "wmbus_user" # osobny tag dla wyróżnionych / dedicated tag
+  highlight_prefix: "★ "      # prefiks w logu / log prefix
 
   # -------------------------------------------------------------------------
   # DIAGNOSTYKA – MQTT / DIAGNOSTICS – MQTT (opcjonalne)
+  #
+  # Na co dzień zwykle wystarczy:
+  # - summary włączone,
+  # - rx_path wyłączone,
+  # - dropped/truncated tylko dla highlight_meters.
+  #
+  # For daily use this is usually enough:
+  # - keep summary enabled,
+  # - disable rx_path spam,
+  # - publish dropped/truncated only for highlight_meters.
   # -------------------------------------------------------------------------
   diagnostic_topic: "wmbus/diag"
   diagnostic_summary_interval: 120s
-  diagnostic_verbose: false
-  diagnostic_publish_raw: true
+  diagnostic_verbose: false              # ciszej na serial/API / quieter serial/API
+  diagnostic_publish_summary: true       # publikuj summary / publish summary
+  diagnostic_publish_drop_events: true   # dropped/truncated na MQTT / dropped/truncated to MQTT
+  diagnostic_publish_rx_path_events: false # wyłącz RX-path spam / disable RX-path spam
+  diagnostic_publish_highlight_only: true  # tylko dla highlight_meters
+  diagnostic_publish_raw: false          # mniejsze payloady / smaller payloads
 
   # -------------------------------------------------------------------------
   # ON_FRAME – callback dla każdej poprawnej ramki / for every valid frame

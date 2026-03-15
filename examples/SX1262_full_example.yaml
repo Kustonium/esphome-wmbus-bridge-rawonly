@@ -33,7 +33,7 @@ esphome:
 esp32:
   variant: esp32s3
   flash_size: 16MB
-  cpu_frequency: 160MHz
+  cpu_frequency: 240MHz
   framework:
     type: esp-idf             # wymagane / required (Arduino nie jest wspierane)
 
@@ -183,71 +183,6 @@ spi:
   miso_pin: GPIO11
 
 # =============================================================================
-#  LED STATUSU / STATUS LED – Heltec WiFi LoRa 32 V4
-#
-#  Biała dioda (GPIO35) miga przy każdym odebranym telgramie wMBus.
-#  White LED (GPIO35) blinks on every received wMBus telegram.
-#
-#  LED jest aktywne-niskie (inverted: true) – bez tego świeci cały czas.
-#  LED is active-low (inverted: true) – without this it stays on permanently.
-#
-#  WAŻNE / IMPORTANT:
-#  Miganie realizowane jest przez script: blink_led z mode: single.
-#  Dzięki temu gdy ramki przychodzą szybko jedna po drugiej, animacja
-#  nie nakłada się na siebie – nowe wywołanie jest ignorowane jeśli
-#  poprzednie mignięcie jeszcze trwa. Bez tego przy bezpośrednim
-#  output.turn_on/delay/turn_off LED świeciłaby ciągle lub migotała chaotycznie.
-#
-#  Blinking is handled by script: blink_led with mode: single.
-#  This prevents animation overlap when frames arrive in rapid succession –
-#  a new call is ignored if the previous blink is still in progress.
-#  Without this, direct output.turn_on/delay/turn_off would cause the LED
-#  to stay on permanently or flicker randomly under high frame load.
-#
-#  Żeby wyłączyć miganie / To disable blinking:
-#    1) Usuń bloki output:, light: i script: / Remove output:, light: and script: blocks
-#    2) Usuń linię "script.execute: blink_led" z on_frame
-#       Remove "script.execute: blink_led" from on_frame
-# =============================================================================
-output:
-  - platform: gpio
-    id: led_output
-    pin:
-      number: GPIO35            # biała dioda na Heltec V4 / white LED on Heltec V4
-      inverted: true            # aktywne-niskie / active-low
-
-# -----------------------------------------------------------------------------
-# LIGHT – binarny wrapper nad output / binary wrapper over output
-#
-# Wymagany przez script: który używa light.turn_on / light.turn_off.
-# restore_mode: ALWAYS_OFF – nie świeć po restarcie / do not light up after restart.
-# -----------------------------------------------------------------------------
-light:
-  - platform: binary
-    name: "LED"
-    output: led_output
-    id: status_led
-    restore_mode: ALWAYS_OFF
-
-# -----------------------------------------------------------------------------
-# SCRIPT – miganie LED / LED blink script
-#
-# mode: single – nowe wywołanie jest ignorowane, jeśli poprzednie
-# mignięcie jeszcze trwa. To daje krótkie, czytelne błyski bez nakładania.
-# mode: single – a new call is ignored if the previous blink is still running.
-# This gives short, clean blinks without overlap.
-# -----------------------------------------------------------------------------
-script:
-  - id: blink_led
-    mode: single
-    then:
-      - light.turn_on:
-          id: status_led
-      - delay: 50ms
-      - light.turn_off:
-          id: status_led
-
-# =============================================================================
 #  WMBUS RADIO – główna konfiguracja
 #  WMBUS RADIO – main configuration
 # =============================================================================
@@ -372,20 +307,10 @@ wmbus_radio:
   # PODŚWIETLANIE LOGÓW / LOG HIGHLIGHTING  (opcjonalne)
   #
   # Wyróżnia wybrane liczniki w logach serial/API.
-  # Dodatkowo ta sama lista może posłużyć jako filtr dla diagnostyki MQTT
-  # per-packet (dropped / truncated), jeśli włączysz:
-  #   diagnostic_publish_highlight_only: true
-  #
-  # To NIE filtruje on_frame ani głównej publikacji telegramów.
-  # Summary dalej liczy cały ruch z eteru.
+  # NIE filtruje MQTT – każda poprawna ramka i tak trafia do on_frame.
   #
   # Highlights selected meters in serial/API logs.
-  # The same list can also be reused as a filter for per-packet MQTT
-  # diagnostics (dropped / truncated) when:
-  #   diagnostic_publish_highlight_only: true
-  #
-  # This does NOT filter on_frame or your main telegram publish.
-  # Summary still counts all RF traffic.
+  # Does NOT filter MQTT – every valid frame still fires on_frame.
   #
   # highlight_meters: lista ID liczników (BCD, bez spacji)
   #                   list of meter IDs (BCD, no spaces)
@@ -395,8 +320,8 @@ wmbus_radio:
   # highlight_prefix: prefiks przed treścią logu / prefix before log message
   # ---------------------------------------------------------------------------
   highlight_meters:
-    - "12345678"             # przykładowy licznik usera / example user meter
-    # - "87654321"           # możesz dodać więcej / add more as needed
+    - "12345678"
+    # - "12345678"           # możesz dodać więcej / add more as needed
   highlight_ansi: true        # domyślnie: false / default: false
   highlight_tag: "wmbus_user" # domyślnie: "wmbus_user" / default: "wmbus_user"
   highlight_prefix: "★ "      # domyślnie: "★ " / default: "★ "
@@ -411,57 +336,29 @@ wmbus_radio:
   #   Empty string → diagnostics disabled.
   #
   # diagnostic_summary_interval:
-  #   Co ile wysyłać summary.
+  #   Co ile wysyłać podsumowanie (summary event).
   #   Minimum 5s (wymuszane przez kod).
-  #   How often to publish summary.
+  #   How often to send the summary event.
   #   Minimum 5s (enforced by code).
   #
   # diagnostic_verbose:
-  #   true  = dropped/truncated logowane także na serial/API
-  #   false = serial/API cichsze; nie wpływa na same publikacje MQTT
-  #   true  = dropped/truncated are also logged to serial/API
-  #   false = quieter serial/API; does not control MQTT publishing itself
-  #
-  # diagnostic_publish_summary:
-  #   true  = publikuj okresowe summary na MQTT
-  #   false = nie publikuj summary
-  #   true  = publish periodic summary to MQTT
-  #   false = do not publish summary
-  #
-  # diagnostic_publish_drop_events:
-  #   true  = publikuj pojedyncze eventy dropped/truncated
-  #   false = tylko liczniki w summary, bez pojedynczych eventów
-  #   true  = publish per-packet dropped/truncated events
-  #   false = summary counters only, no per-packet events
-  #
-  # diagnostic_publish_rx_path_events:
-  #   true  = publikuj eventy z toru RX (IRQ timeout, payload_read_failed itp.)
-  #   false = nie publikuj eventów rx_path
-  #   true  = publish RX-path events (IRQ timeout, payload_read_failed, etc.)
-  #   false = do not publish rx_path events
-  #
-  # diagnostic_publish_highlight_only:
-  #   true  = per-packet MQTT diag tylko dla liczników z highlight_meters
-  #   false = per-packet MQTT diag dla wszystkiego
-  #   Uwaga: działa dla dropped/truncated. Summary nadal liczy cały eter.
-  #   true  = per-packet MQTT diagnostics only for meters from highlight_meters
-  #   false = per-packet MQTT diagnostics for everything
-  #   Note: applies to dropped/truncated. Summary still counts all RF traffic.
+  #   true  = każdy drop/truncate pojawia się w logach serial/API
+  #   false = logi serial/API ciche; eventy MQTT lecą ZAWSZE niezależnie
+  #   true  = each drop/truncate appears in serial/API logs
+  #   false = serial/API logs silent; MQTT events fire ALWAYS regardless
   #
   # diagnostic_publish_raw:
-  #   true  = eventy dropped/truncated zawierają pole "raw" z HEX
-  #   false = bez pola "raw" (mniejszy payload MQTT)
-  #   true  = dropped/truncated events include "raw" HEX field
-  #   false = no "raw" field (smaller MQTT payload)
+  #   true  = eventy dropped/truncated na MQTT zawierają pole "raw" z HEX
+  #           (do analizy w wmbusmeters.org/analyze)
+  #   false = bez pola "raw" (mniejszy payload MQTT, mniej ruchu)
+  #   true  = dropped/truncated MQTT events include "raw" HEX field
+  #           (for analysis at wmbusmeters.org/analyze)
+  #   false = no "raw" field (smaller MQTT payload, less traffic)
   # ---------------------------------------------------------------------------
-  diagnostic_topic: "wmbus/heltec/diag" # przykładowy topic / example topic
-  diagnostic_summary_interval: 120s      # summary co 2 min / summary every 2 min
-  diagnostic_verbose: false              # lokalny log ciszej / quieter local logging
-  diagnostic_publish_summary: true       # summary zostaje / keep summary
-  diagnostic_publish_drop_events: true   # dropped/truncated publikuj, ale patrz niżej
-  diagnostic_publish_rx_path_events: false # mniej spamu / less spam
-  diagnostic_publish_highlight_only: true  # tylko dla highlight_meters
-  diagnostic_publish_raw: false          # mniejsze payloady MQTT
+  diagnostic_topic: "wmbus/diag"        # domyślnie: "wmbus/diag" / default: "wmbus/diag"
+  diagnostic_summary_interval: 120s     # domyślnie: 60s / default: 60s
+  diagnostic_verbose: false             # domyślnie: true / default: true
+  diagnostic_publish_raw: true          # domyślnie: true / default: true
 
   # ---------------------------------------------------------------------------
   # ON_FRAME – callback wywoływany dla każdej poprawnej ramki
@@ -492,29 +389,9 @@ wmbus_radio:
       # This is the main payload – wmbusmeters/HA add-on reads this topic.
       # -----------------------------------------------------------------------
       - mqtt.publish:
-          topic: "wmbus_bridge/heltec/telegram"
+          topic: "wmbus_bridge/telegram"
           payload: !lambda |-
             return frame->as_hex();
-
-      # -----------------------------------------------------------------------
-      # MIGANIE LED / LED BLINK – przy każdym telgramie wMBus
-      #
-      # Wizualne potwierdzenie że radio odebrało ramkę.
-      # Visual confirmation that the radio received a frame.
-      #
-      # script.execute zamiast bezpośredniego output.turn_on/delay/turn_off.
-      # mode: single w skrypcie zapewnia że mignięcia się nie nakładają –
-      # szczegóły w komentarzu przy bloku script: powyżej.
-      #
-      # script.execute instead of direct output.turn_on/delay/turn_off.
-      # mode: single in the script ensures blinks do not overlap –
-      # see comment at script: block above for details.
-      #
-      # Żeby wyłączyć / To disable:
-      #   1) Usuń tę linię / Remove this line
-      #   2) Usuń bloki output:, light: i script: / Remove output:, light: and script: blocks
-      # -----------------------------------------------------------------------
-      - script.execute: blink_led
 
       # -----------------------------------------------------------------------
       # OPCJONALNIE: RSSI na osobnym topicu

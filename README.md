@@ -60,11 +60,14 @@ For people who:
 ✅ diagnostyka (opcjonalnie):
 ✅ diagnostics (optional):
 
-* zliczanie zdarzeń `dropped` (np. `decode_failed`, `too_short`)
-  counting `dropped` events (e.g. `decode_failed`, `too_short`)
+* zliczanie zdarzeń `dropped` z rozbiciem po `reason` i `stage`
+  counting `dropped` events broken down by `reason` and `stage`
 
-* okresowe `summary` na MQTT
-  periodic MQTT `summary`
+* okresowe `summary` na MQTT (globalne dla całego eteru)
+  periodic MQTT `summary` (global for all RF traffic)
+
+* osobne eventy `rx_path` (opcjonalnie) dla problemów toru odbioru
+  separate `rx_path` events (optional) for receive-path problems
 
 * (opcjonalnie) publikacja `raw(hex)` przy dropach
   (optional) publish `raw(hex)` on drops
@@ -134,7 +137,7 @@ wmbus_radio:
   on_frame:
     then:
       - mqtt.publish:
-          topic: "wmbus_bridge/nazwa/telegram"
+          topic: "wmbus_bridge/telegram"
           payload: !lambda |-
             return frame->as_hex();
 ```
@@ -196,7 +199,11 @@ This is already handled in `examples/SX1262.yaml` (GPIO2/GPIO7/GPIO46).
 | Klucz / Key | Domyślnie / Default | Opis / Description |
 |---|---|---|
 | `diagnostic_topic` | `"wmbus/diag"` | Topic MQTT dla diagnostyki / MQTT topic for diagnostics |
-| `diagnostic_verbose` | `true` | Publikuj każdy drop osobno na MQTT / Publish each drop individually to MQTT |
+| `diagnostic_verbose` | `true` | Loguj `dropped/truncated` także na serial/API / Also log `dropped/truncated` to serial/API |
+| `diagnostic_publish_summary` | `true` | Publikuj okresowe `summary` / Publish periodic `summary` |
+| `diagnostic_publish_drop_events` | `true` | Publikuj pojedyncze eventy `dropped` / `truncated` / Publish per-packet `dropped` / `truncated` events |
+| `diagnostic_publish_rx_path_events` | `true` | Publikuj eventy `rx_path` (IRQ timeout, read_failed, queue_send_failed) / Publish `rx_path` events |
+| `diagnostic_publish_highlight_only` | `false` | Ogranicz per-packet MQTT diag do liczników z `highlight_meters` / Limit per-packet MQTT diagnostics to `highlight_meters` |
 | `diagnostic_publish_raw` | `true` | Dołączaj `raw(hex)` do dropów / Include `raw(hex)` in drop events |
 | `diagnostic_summary_interval` | `60s` | Jak często wysyłać podsumowanie / How often to send summary |
 
@@ -220,8 +227,8 @@ wmbus_radio:
   highlight_ansi: true
 ```
 
-Wyróżnienie działa tylko w logach ESP (serial/API). Nie filtruje MQTT — każda poprawna ramka i tak trafia do `on_frame`.
-Highlighting works only in ESP logs (serial/API). It does not filter MQTT — every valid frame still fires `on_frame`.
+Wyróżnienie działa w logach ESP (serial/API) i może też zostać użyte jako filtr dla per-packet MQTT diag, jeśli ustawisz `diagnostic_publish_highlight_only: true`. Nie filtruje `on_frame` ani głównej publikacji telegramów.
+Highlighting works in ESP logs (serial/API) and can also be reused as a filter for per-packet MQTT diagnostics when `diagnostic_publish_highlight_only: true`. It does not filter `on_frame` or your main telegram publish.
 
 ---
 
@@ -249,7 +256,7 @@ on_frame:
   then:
     # Telegram HEX dla wmbusmeters
     - mqtt.publish:
-        topic: "wmbus_bridge/nazwa/telegram"
+        topic: "wmbus_bridge/telegram"
         payload: !lambda return frame->as_hex();
 
     # RSSI na osobnym topicu
@@ -273,7 +280,7 @@ on_frame:
   mark_as_handled: true
   then:
     - mqtt.publish:
-        topic: "wmbus_bridge/name/telegram"
+        topic: "wmbus_bridge/telegram"
         payload: !lambda return frame->as_hex();
 ```
 
@@ -290,8 +297,8 @@ on_frame:
 Domyślnie w przykładach:
 Default in examples:
 
-* `wmbus_bridge//nazwa/telegram` → **HEX telegramu** (to jest to, co ma czytać wmbusmeters)
-  `wmbus_bridge/name/telegram` → **telegram HEX** (this is what wmbusmeters should read)
+* `wmbus_bridge/telegram` → **HEX telegramu** (to jest to, co ma czytać wmbusmeters)
+  `wmbus_bridge/telegram` → **telegram HEX** (this is what wmbusmeters should read)
 
 Możesz zmienić topic na własny.
 You can change the topic to your own.
@@ -300,16 +307,42 @@ You can change the topic to your own.
 
 ### Diagnostics (optional)
 
-W `wmbus_radio` możesz włączyć/wyłączyć publikowanie diagnostyki (domyślnie: wszystko włączone):
-In `wmbus_radio` you can tune diagnostic publishing (defaults: everything enabled):
+W `wmbus_radio` możesz sterować nie tylko samą diagnostyką, ale też tym, **ile** z niej ma lecieć na MQTT.
+In `wmbus_radio` you can control not only diagnostics itself, but also **how much** of it should be published to MQTT.
+
+Praktyczny, "cichy" profil do codziennego użycia:
+A practical, "quiet" profile for daily use:
 
 ```yaml
 wmbus_radio:
-  diagnostic_topic: "wmbus/diag"          # domyślnie / default
-  diagnostic_summary_interval: 60s        # domyślnie / default
-  diagnostic_verbose: false               # wyłącz osobne eventy dla każdego dropu / disable per-drop events
-  diagnostic_publish_raw: false           # wyłącz raw hex w dropach / disable raw hex in drops
+  diagnostic_topic: "wmbus/diag"
+  diagnostic_summary_interval: 60s
+  diagnostic_verbose: false
+  diagnostic_publish_summary: true
+  diagnostic_publish_drop_events: true
+  diagnostic_publish_rx_path_events: false
+  diagnostic_publish_highlight_only: true
+  diagnostic_publish_raw: false
+
+  highlight_meters:
+    - "00089907"
+    - "12345678"
 ```
+
+Co to daje:
+What this gives you:
+
+* `summary` dalej liczy cały eter,
+  `summary` still counts all RF traffic,
+
+* pojedyncze eventy `dropped` / `truncated` lecą tylko dla liczników z `highlight_meters`,
+  per-packet `dropped` / `truncated` events are published only for meters from `highlight_meters`,
+
+* `rx_path` nie spamuje MQTT,
+  `rx_path` does not spam MQTT,
+
+* payloady są mniejsze, bo bez `raw(hex)`.
+  payloads are smaller because they do not include `raw(hex)`.
 
 Wtedy na `diagnostic_topic` pojawiają się JSON-y:
 Then JSON messages appear on `diagnostic_topic`:
@@ -378,6 +411,34 @@ wmbus_radio:
     "other": 0
   },
 
+  "dropped_by_stage": {
+    "precheck": 0,
+    "t1_decode3of6": 5,
+    "t1_l_field": 0,
+    "t1_length_check": 0,
+    "c1_precheck": 0,
+    "c1_preamble": 0,
+    "c1_suffix": 0,
+    "c1_l_field": 0,
+    "c1_length_check": 0,
+    "dll_crc_first": 2,
+    "dll_crc_mid": 0,
+    "dll_crc_final": 0,
+    "dll_crc_b1": 0,
+    "dll_crc_b2": 0,
+    "link_mode": 0,
+    "other": 0
+  },
+
+  "rx_path": {
+    "irq_timeout": 0,
+    "preamble_read_failed": 0,
+    "t1_header_read_failed": 0,
+    "payload_size_unknown": 0,
+    "payload_read_failed": 0,
+    "queue_send_failed": 0
+  },
+
   "reasons_sum": 7,
   "reasons_sum_mismatch": 0,
 
@@ -413,7 +474,7 @@ wmbus_radio:
 #### 2) Dropped (single drop)
 
 ```json
-{"event":"dropped","reason":"dll_crc_failed","mode":"C1","want":60,"got":60,"raw_got":62,"rssi":-99}
+{"event":"dropped","reason":"decode_failed","stage":"t1_decode3of6","mode":"T1","want":0,"got":0,"raw_got":134,"decoded_len":0,"final_len":0,"dll_crc_removed":0,"suffix_ignored":0,"rssi":-86,"detail":"symbols_total=178 symbols_invalid=2 raw_len=134"}
 ```
 
 Opcjonalnie (gdy `diagnostic_publish_raw: true`, domyślnie) pojawi się też `raw(hex)` dla analizy.

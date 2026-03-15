@@ -301,19 +301,11 @@ wmbus_radio:
   # ---------------------------------------------------------------------------
   # PODSWIETLANIE LOGOW / LOG HIGHLIGHTING  (opcjonalne)
   #
-  # Wyroznia wybrane liczniki w logach serial/API kolorem ANSI i prefixem.
-  # Ta sama lista moze tez filtrowac per-packet MQTT diag (dropped/truncated),
-  # jesli ustawisz diagnostic_publish_highlight_only: true.
-  #
-  # To NIE filtruje on_frame ani glownego topicu z telegramami.
-  # Summary nadal liczy caly eter.
+  # Wyroznoa wybrane liczniki w logach serial/API kolorem ANSI i prefixem.
+  # NIE filtruje MQTT - kazda poprawna ramka dalej trafia do on_frame.
   #
   # Highlights selected meters in serial/API logs with ANSI color and prefix.
-  # The same list can also filter per-packet MQTT diagnostics
-  # (dropped/truncated) when diagnostic_publish_highlight_only: true.
-  #
-  # This does NOT filter on_frame or your main telegram topic.
-  # Summary still counts all RF traffic.
+  # Does NOT filter MQTT - every valid frame still fires on_frame.
   #
   # highlight_meters: lista ID licznikow BCD / list of BCD meter IDs
   # highlight_ansi:   true = kolor zielony ANSI w terminalu / green ANSI in terminal
@@ -323,10 +315,10 @@ wmbus_radio:
   # highlight_prefix: tekst przed trescia logu / text prefix before log message
   # ---------------------------------------------------------------------------
   highlight_meters:
-    - "00089907"             # przyklad / example
-    - "03534159"             # przyklad / example
-    - "03528221"             # przyklad / example
-    # - "XXXXXXXX"           # dodaj kolejne ID jesli potrzeba / add more IDs as needed
+    - "12345678"
+    - "12345678"
+    - "12345678"
+    # - "XXXXXXXX"             # dodaj kolejne ID jesli potrzeba / add more IDs as needed
   highlight_ansi: true          # domyslnie: false / default: false
   highlight_tag: "wmbus_user"   # domyslnie: "wmbus_user" / default: "wmbus_user"
   highlight_prefix: "★ "        # domyslnie: "★ " / default: "★ "
@@ -334,52 +326,38 @@ wmbus_radio:
   # ---------------------------------------------------------------------------
   # DIAGNOSTYKA / DIAGNOSTICS  (opcjonalne)
   #
+  # diagnostic_topic:
+  #   Topic MQTT dla eventow diagnostycznych. Ustaw na "" zeby calkowicie wylaczyc.
+  #   MQTT topic for diagnostic events. Set to "" to completely disable.
+  #
+  # diagnostic_summary_interval:
+  #   Co ile wysylac podsumowanie (summary event z licznikami ok/drop/crc/rssi).
+  #   Minimum 5s (wymuszane przez kod). Domyslnie: 60s.
+  #   How often to publish the summary event (ok/drop/crc/rssi counters).
+  #   Minimum 5s (enforced by code). Default: 60s.
+  #
   # diagnostic_verbose:
-  #   true  = dropped/truncated logowane takze na serial/API
-  #   false = serial/API cichsze; nie wylacza samych publikacji MQTT
-  #   true  = dropped/truncated are also logged to serial/API
-  #   false = quieter serial/API; does not disable MQTT publishing by itself
+  #   true  = kazdy drop/truncate logowany jako ESP_LOGW na serial/API
+  #   false = serial/API cichy; eventy MQTT (dropped/truncated) sa wysylane
+  #           ZAWSZE niezaleznie od tej flagi gdy diagnostic_topic jest ustawiony
   #
-  # diagnostic_publish_summary:
-  #   true  = publikuj okresowe summary na MQTT
-  #   false = bez summary
-  #   true  = publish periodic summary to MQTT
-  #   false = no summary
-  #
-  # diagnostic_publish_drop_events:
-  #   true  = publikuj pojedyncze eventy dropped/truncated
-  #   false = tylko statystyki w summary
-  #   true  = publish per-packet dropped/truncated events
-  #   false = summary statistics only
-  #
-  # diagnostic_publish_rx_path_events:
-  #   true  = publikuj eventy rx_path (irq timeout, payload_read_failed, itd.)
-  #   false = wycisz eventy rx_path
-  #   true  = publish rx_path events (irq timeout, payload_read_failed, etc.)
-  #   false = silence rx_path events
-  #
-  # diagnostic_publish_highlight_only:
-  #   true  = dropped/truncated na MQTT tylko dla licznikow z highlight_meters
-  #   false = dropped/truncated dla wszystkiego
-  #   Uwaga: summary nadal liczy caly ruch RF.
-  #   true  = dropped/truncated on MQTT only for meters from highlight_meters
-  #   false = dropped/truncated for everything
-  #   Note: summary still counts all RF traffic.
+  #   true  = each drop/truncate logged as ESP_LOGW to serial/API
+  #   false = serial/API silent; MQTT events (dropped/truncated) are ALWAYS
+  #           published regardless of this flag when diagnostic_topic is set
   #
   # diagnostic_publish_raw:
-  #   true  = eventy dropped/truncated zawieraja pole "raw" z HEX ramki
+  #   true  = eventy dropped/truncated na MQTT zawieraja pole "raw" z HEX ramki
+  #           Wklej raw do wmbusmeters.org/analyze zeby zbadac uszkodzona ramke.
   #   false = bez pola "raw" (mniejszy payload, mniej ruchu MQTT)
-  #   true  = dropped/truncated events include "raw" hex field
+  #
+  #   true  = dropped/truncated MQTT events include "raw" hex field
+  #           Paste raw into wmbusmeters.org/analyze to inspect damaged frames.
   #   false = no "raw" field (smaller payload, less MQTT traffic)
   # ---------------------------------------------------------------------------
   diagnostic_topic: "wmbus/lilygo/diag"
-  diagnostic_summary_interval: 60s       # summary co 60 s / summary every 60 s
-  diagnostic_verbose: false              # ciszej lokalnie / quieter locally
-  diagnostic_publish_summary: true       # summary zostaje / keep summary
-  diagnostic_publish_drop_events: true   # per-packet diag wlaczone / per-packet diag enabled
-  diagnostic_publish_rx_path_events: false # brak spamu rx_path / no rx_path spam
-  diagnostic_publish_highlight_only: true  # tylko dla highlight_meters
-  diagnostic_publish_raw: false          # mniejsze payloady / smaller payloads
+  diagnostic_summary_interval: 60s     # domyslnie: 60s / default: 60s
+  diagnostic_verbose: false            # domyslnie: true / default: true
+  diagnostic_publish_raw: true         # domyslnie: true / default: true
 
   # ---------------------------------------------------------------------------
   # ON_FRAME - callback wywoływany dla każdej poprawnej ramki
