@@ -6,8 +6,8 @@ A minimal **RF → MQTT** bridge that turns ESP into a pure wM-Bus "radio" only.
 * ESPHome odbiera telegram wM-Bus z modułu **SX1262** lub **SX1276**.
   ESPHome receives wM-Bus telegrams from **SX1262** or **SX1276**.
 
-* Wykrywa **tryb link layer (T1/C1)**.
-  It detects the **link layer mode (T1/C1)**.
+* Wykrywa **tryb link layer (T1/C1)** z dual-path parserem i fallbackiem.
+  It detects the **link layer mode (T1/C1)** using a dual-path parser with fallback.
 
 * Składa ramkę i publikuje ją jako **HEX** na MQTT.
   It assembles the frame and publishes it as **HEX** over MQTT.
@@ -51,6 +51,12 @@ For people who:
 ✅ wykrywanie i obsługa ramek **T1** i **C1**
 ✅ detection and support for **T1** and **C1** frames
 
+✅ **dual-path parser z fallbackiem** — jeśli preferowana ścieżka (T1/C1) zawiedzie, automatycznie próbuje drugiej; `pick_better_failure_()` wybiera diagnostykę z najdalej zaawansowanego etapu
+✅ **dual-path parser with fallback** — if the preferred path (T1/C1) fails, automatically tries the other; `pick_better_failure_()` selects diagnostics from the furthest parsing stage
+
+✅ **łagodny precheck T1** — minimum 12 bajtów raw (wcześniej 60B); krótsze pakiety trafiają do parsera zamiast być odrzucane z miejsca
+✅ **soft T1 precheck** — minimum 12 raw bytes (previously 60B); shorter packets reach the parser instead of being dropped immediately
+
 ✅ publikacja telegramu jako **HEX** (payload do wmbusmeters)
 ✅ telegram published as **HEX** (payload for wmbusmeters)
 
@@ -93,11 +99,14 @@ For people who:
 * Radio:
   Radio:
 
-  * **SX1262** (np. Heltec WiFi LoRa 32 V4.x)
-    **SX1262** (e.g. Heltec WiFi LoRa 32 V4.x)
+  * **SX1262** (np. Heltec WiFi LoRa 32 V4.x) — testowane
+    **SX1262** (e.g. Heltec WiFi LoRa 32 V4.x) — tested
 
-  * **SX1276** (moduły/płytki LoRa z SX1276)
-    **SX1276** (LoRa modules/boards with SX1276)
+  * **SX1276** (np. Lilygo T3-S3, moduły LoRa z SX1276) — testowane
+    **SX1276** (e.g. Lilygo T3-S3, LoRa modules with SX1276) — tested
+
+  * **SX1276** (Heltec WiFi LoRa 32 V2) — tylko przykład YAML, **nie testowane przez autora**
+    **SX1276** (Heltec WiFi LoRa 32 V2) — example YAML only, **not tested by the author**
 
 ---
 
@@ -121,8 +130,14 @@ Then configure `wmbus_radio` and publish telegrams to MQTT.
 Repo ma gotowe przykłady:
 The repo includes ready examples:
 
-* `examples/SX1262.yaml`
-* `examples/SX1276.yaml`
+* `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml` — Heltec V4 (SX1262), testowane
+  `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml` — Heltec V4 (SX1262), tested
+
+* `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml` — Lilygo T3-S3 (SX1276), testowane
+  `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml` — Lilygo T3-S3 (SX1276), tested
+
+* `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml` — Heltec V2 (SX1276), **nie testowane przez autora**
+  `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml` — Heltec V2 (SX1276), **not tested by the author**
 
 Najprostszy wzór publikacji:
 Minimal publish pattern:
@@ -137,7 +152,7 @@ wmbus_radio:
   on_frame:
     then:
       - mqtt.publish:
-          topic: "wmbus_bridge/telegram"
+          topic: "wmbus_bridge/lilygo/telegram"
           payload: !lambda |-
             return frame->as_hex();
 ```
@@ -155,8 +170,8 @@ Heltec V4 has an RF FEM, and for good RX it usually helps to set:
 * PA OFF
   PA OFF
 
-W przykładzie `examples/SX1262.yaml` jest to już uwzględnione (GPIO2/GPIO7/GPIO46).
-This is already handled in `examples/SX1262.yaml` (GPIO2/GPIO7/GPIO46).
+W przykładzie `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml` jest to już uwzględnione (GPIO2/GPIO7/GPIO46).
+This is already handled in `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml` (GPIO2/GPIO7/GPIO46).
 
 ---
 
@@ -198,7 +213,7 @@ This is already handled in `examples/SX1262.yaml` (GPIO2/GPIO7/GPIO46).
 
 | Klucz / Key | Domyślnie / Default | Opis / Description |
 |---|---|---|
-| `diagnostic_topic` | `"wmbus/diag"` | Topic MQTT dla diagnostyki / MQTT topic for diagnostics |
+| `diagnostic_topic` | `"wmbus/name/diag"` | Topic MQTT dla diagnostyki / MQTT topic for diagnostics |
 | `diagnostic_verbose` | `true` | Loguj `dropped/truncated` także na serial/API / Also log `dropped/truncated` to serial/API |
 | `diagnostic_publish_summary` | `true` | Publikuj okresowe `summary` / Publish periodic `summary` |
 | `diagnostic_publish_drop_events` | `true` | Publikuj pojedyncze eventy `dropped` / `truncated` / Publish per-packet `dropped` / `truncated` events |
@@ -241,8 +256,8 @@ In the `on_frame` callback, a `frame` pointer of type `Frame *` is available:
 
 | Metoda / Method | Zwraca / Returns | Opis / Description |
 |---|---|---|
-| `frame->as_hex()` | `std::string` | Telegram jako HEX (do wmbusmeters) / Telegram as HEX (for wmbusmeters) |
-| `frame->as_raw()` | `std::vector<uint8_t>` | Surowe bajty ramki / Raw frame bytes |
+| `frame->as_hex()` | `std::string` | Telegram jako HEX po usunięciu CRC DLL (do wmbusmeters) / Telegram as HEX after DLL CRC removal (for wmbusmeters) |
+| `frame->as_raw()` | `std::vector<uint8_t>` | Surowe bajty ramki (bez CRC DLL) / Raw frame bytes (DLL CRC stripped) |
 | `frame->as_rtlwmbus()` | `std::string` | Format rtl-wmbus (tryb/czas/rssi/hex) / rtl-wmbus format (mode/time/rssi/hex) |
 | `frame->rssi()` | `int8_t` | RSSI w dBm / RSSI in dBm |
 | `frame->link_mode()` | `LinkMode` | Tryb (T1/C1) / Mode (T1/C1) |
@@ -256,7 +271,7 @@ on_frame:
   then:
     # Telegram HEX dla wmbusmeters
     - mqtt.publish:
-        topic: "wmbus_bridge/telegram"
+        topic: "wmbus_bridge/name/telegram"
         payload: !lambda return frame->as_hex();
 
     # RSSI na osobnym topicu
@@ -280,7 +295,7 @@ on_frame:
   mark_as_handled: true
   then:
     - mqtt.publish:
-        topic: "wmbus_bridge/telegram"
+        topic: "wmbus_bridge/name/telegram"
         payload: !lambda return frame->as_hex();
 ```
 
@@ -315,8 +330,8 @@ A practical, "quiet" profile for daily use:
 
 ```yaml
 wmbus_radio:
-  diagnostic_topic: "wmbus/diag"
-  diagnostic_summary_interval: 60s
+  diagnostic_topic: "wmbus/name/diag"
+  diagnostic_summary_interval: 120s
   diagnostic_verbose: false
   diagnostic_publish_summary: true
   diagnostic_publish_drop_events: true
@@ -344,9 +359,6 @@ What this gives you:
 * payloady są mniejsze, bo bez `raw(hex)`.
   payloads are smaller because they do not include `raw(hex)`.
 
-Wtedy na `diagnostic_topic` pojawiają się JSON-y:
-Then JSON messages appear on `diagnostic_topic`:
-
 Dodatkowo (SX1262), żeby opublikować latched błędy radia po starcie:
 Additionally (SX1262), to publish latched radio errors after boot:
 
@@ -354,7 +366,7 @@ Additionally (SX1262), to publish latched radio errors after boot:
 wmbus_radio:
   clear_device_errors_on_boot: true
   publish_dev_err_after_clear: true
-  diagnostic_topic: "wmbus/diag"
+  diagnostic_topic: "wmbus/name/diag"
 ```
 
 #### 1) Summary (co interval)
@@ -477,6 +489,9 @@ wmbus_radio:
 {"event":"dropped","reason":"decode_failed","stage":"t1_decode3of6","mode":"T1","want":0,"got":0,"raw_got":134,"decoded_len":0,"final_len":0,"dll_crc_removed":0,"suffix_ignored":0,"rssi":-86,"detail":"symbols_total=178 symbols_invalid=2 raw_len=134"}
 ```
 
+Pole `detail` zawiera dodatkowy kontekst etapu który zawiódł. Jeśli parser użył ścieżki fallback (np. pakiet wyglądał jak C1, ale zdekodował się jako T1), pojawi się `"fallback_used=1"`.
+The `detail` field contains extra context from the failing stage. If the parser used the fallback path (e.g. packet looked like C1 but decoded as T1), `"fallback_used=1"` will appear.
+
 Opcjonalnie (gdy `diagnostic_publish_raw: true`, domyślnie) pojawi się też `raw(hex)` dla analizy.
 Optionally (when `diagnostic_publish_raw: true`, which is the default) you'll also get `raw(hex)` for analysis.
 
@@ -500,12 +515,12 @@ When `publish_dev_err_after_clear: true`:
 **PL:** Ten komponent jest zaprojektowany do pracy z dedykowanym dodatkiem HA:
 **`Kustonium/homeassistant-wmbus-mqtt-bridge`**.
 
-Dodatek subskrybuje surowe telegramy **HEX** z MQTT (np. `wmbus_bridge/telegram`), podaje je do `wmbusmeters` przez `stdin:hex`, a wynik publikuje ponownie na MQTT (JSON) + wspiera HA Discovery.
+Dodatek subskrybuje surowe telegramy **HEX** z MQTT (np. `wmbus_bridge/name/telegram`), podaje je do `wmbusmeters` przez `stdin:hex`, a wynik publikuje ponownie na MQTT (JSON) + wspiera HA Discovery.
 
 **EN:** This component is designed to work with the dedicated HA add-on:
 **`Kustonium/homeassistant-wmbus-mqtt-bridge`**.
 
-The add-on subscribes to raw **HEX** telegrams from MQTT (e.g. `wmbus_bridge/telegram`), feeds them into `wmbusmeters` via `stdin:hex`, then republishes decoded JSON to MQTT and supports HA Discovery.
+The add-on subscribes to raw **HEX** telegrams from MQTT (e.g. `wmbus_bridge/name/telegram`), feeds them into `wmbusmeters` via `stdin:hex`, then republishes decoded JSON to MQTT and supports HA Discovery.
 
 Repo dodatku / Add-on repo:
 `https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge`
@@ -528,8 +543,8 @@ The idea is simple:
 Jak to skonfigurować dokładnie zależy od Twojej instalacji wmbusmeters (addon/standalone) i sposobu wczytywania z MQTT.
 Exact configuration depends on your wmbusmeters setup (addon/standalone) and how you feed data from MQTT.
 
-W praktyce interesuje Cię tylko, żeby wmbusmeters „dostał" payload **HEX** z topicu `wmbus_bridge/telegram`.
-In practice, you only need wmbusmeters to receive the **HEX** payload from `wmbus_bridge/telegram`.
+W praktyce interesuje Cię tylko, żeby wmbusmeters „dostał" payload **HEX** z topicu `wmbus_bridge/+/telegram`.
+In practice, you only need wmbusmeters to receive the **HEX** payload from `wmbus_bridge/+/telegram`.
 
 ---
 
