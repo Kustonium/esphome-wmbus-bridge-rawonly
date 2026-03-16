@@ -1,0 +1,96 @@
+esphome:
+  name: ultimate-reader
+  friendly_name: UltimateReader
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+    # wmbus: info        # odkomentuj do debugowania
+
+debug:
+
+api:
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+spi:
+  id: spi_lora
+  clk_pin: GPIO05
+  mosi_pin: GPIO06
+  miso_pin: GPIO03  # u Ciebie działa, ale pamiętaj: strapping pin
+
+# (opcjonalnie) LED do sygnalizacji ramek
+output:
+  - platform: gpio
+    id: status_led
+    pin:
+      number: GPIO37
+
+wmbus_radio:
+  radio_type: SX1276
+
+  # --- Highlight (Twoje liczniki w logu) ---
+  highlight_meters:
+    - "00000000"
+    - "11111111"
+    - "22222222"
+  highlight_tag: "wmbus_user"
+  highlight_prefix: "★ "
+  highlight_ansi: true   # kolory w terminalu; w dashboard bywa, że nie
+
+  # --- Piny radia ---
+  spi_id: spi_lora
+  cs_pin: GPIO07
+  reset_pin: GPIO08
+  irq_pin:
+    number: GPIO33
+    mode:
+      input: true
+      pullup: true
+
+  # --- Diagnostyka (MQTT) ---
+  diagnostic_topic: "wmbus/diag"
+  diagnostic_summary_interval: 60s
+  diagnostic_publish_raw: true
+  diagnostic_verbose: false
+
+  # --- Co robimy z poprawną ramką ---
+  on_frame:
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return frame->as_hex().size() >= 30;
+          then:
+            - mqtt.publish:
+                topic: "wmbus_bridge/telegram"
+                payload: !lambda |-
+                  return frame->as_hex();
+            # Miganie LED (opcjonalne)
+            - output.turn_on: status_led
+            - delay: 50ms
+            - output.turn_off: status_led

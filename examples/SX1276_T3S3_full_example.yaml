@@ -1,0 +1,454 @@
+# =============================================================================
+#  ESPHome - wM-Bus Bridge (RAW-only)
+#  Pelny przyklad konfiguracji z komentarzami / Full configuration example
+#
+#  Plytka / Board: LilyGO T3-S3 v1.2  (ESP32-S3 + SX1276)
+#  Projekt: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly
+# =============================================================================
+
+# =============================================================================
+#  ESPHOME CORE
+# =============================================================================
+esphome:
+  name: esphome-web-5a16c4
+  friendly_name: UltimateReader
+  min_version: 2026.1.3       # minimalna wersja ESPHome / minimum ESPHome version
+  name_add_mac_suffix: false  # true = dodaje sufiks MAC (przydatne gdy wiele urzadzen)
+                               # true = adds MAC suffix (useful for multiple devices)
+
+# =============================================================================
+#  PLATFORMA / PLATFORM - ESP32-S3
+#
+#  board: esp32-s3-devkitc-1 - standardowa definicja dla modulow ESP32-S3.
+#  T3-S3 nie ma wlasnego board ID w ESPHome, wiec uzywamy generycznej definicji.
+#  Brak cpu_frequency i flash_size - ESP-IDF uzyje domyslnych (240 MHz, 4 MB).
+#
+#  board: esp32-s3-devkitc-1 - generic definition for ESP32-S3 modules.
+#  T3-S3 has no own board ID in ESPHome, so we use the generic definition.
+#  No cpu_frequency and flash_size - ESP-IDF will use defaults (240 MHz, 4 MB).
+# =============================================================================
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf              # wymagane przez wmbus_radio / required by wmbus_radio
+
+# Brak bloku psram: - T3-S3 v1.2 ma PSRAM ale ESPHome moze go nie potrzebowac.
+# Jesli pojawia sie bledy pamieci, dodaj:
+#   psram:
+#     mode: quad
+# No psram: block - T3-S3 v1.2 has PSRAM but ESPHome may not need it.
+# If you get memory errors, add:
+#   psram:
+#     mode: quad
+
+# =============================================================================
+#  ZEWNETRZNY KOMPONENT / EXTERNAL COMPONENT
+#
+#  Stara wersja z dekodowaniem na ESP (zostawiona jako komentarz historyczny):
+#  Old version with on-device decoding (kept as historical reference):
+# =============================================================================
+# external_components:
+#   - source: github://Kustonium/esphome-wmbus-bridge@main
+#     components: [wmbus_common, wmbus_radio]
+#     refresh: 0s
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s               # 0s = zawsze uzywaj cache / always use cached version
+                               # 1d = sprawdzaj aktualizacje raz dziennie / check daily
+
+# =============================================================================
+#  LOGGER
+#
+#  Poziomy / Levels: VERBOSE < DEBUG < INFO < WARN < ERROR < NONE
+#  Zmien na DEBUG gdy cos nie dziala - zobaczysz kazdy odebrany bajt SX1276.
+#  Switch to DEBUG when troubleshooting - you will see every SX1276 byte.
+# =============================================================================
+logger:
+  level: info                  # zalecane dla produkcji / recommended for production
+  # level: debug               # do diagnozy problemu / for troubleshooting
+  # level: verbose             # setup SX1276 krok po kroku / SX1276 setup step by step
+  logs:
+    mqtt: warn                 # wewnetrzne logi MQTT ESPHome - domyslnie gadatliwe
+                               # ESPHome internal MQTT logs - noisy by default
+    component: warn            # ogolne logi komponentow / general component framework logs
+    # SX1276: debug            # logi sterownika SX1276 (init, RSSI, itd.)
+    # wmbus: info              # logi warstwy wMBus (decode, CRC, link mode)
+
+# =============================================================================
+#  DIAGNOSTYKA ESP / ESP DIAGNOSTICS
+#  Sensory dostępne w Home Assistant – wolna pamięć, temperatura, WiFi, itp.
+#  Sensors available in Home Assistant – free memory, temperature, WiFi, etc.
+# =============================================================================
+debug:
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: debug
+    free:
+      name: "Heap Free"
+    block:
+      name: "Heap Max Block"
+    min_free:
+      name: "Heap Min Free"
+    loop_time:
+      name: "Loop Time"
+    cpu_frequency:
+      name: "CPU Frequency"
+  - platform: internal_temperature
+    name: "MCU Temperature"
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    update_interval: 60s
+
+text_sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: debug
+    device:
+      name: "Device Info"
+    reset_reason:
+      name: "Reset Reason"
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "WiFi SSID"
+    bssid:
+      name: "WiFi BSSID"
+
+# =============================================================================
+#  mDNS
+#
+#  disabled: false - mDNS wlaczone (urzadzenie widoczne jako hostname.local)
+#  disabled: true  - wylacz gdy masz problemy z siecia lub chcesz mniej ruchu
+#  disabled: false - mDNS on (device visible as hostname.local on network)
+#  disabled: true  - disable if you have network issues or want less traffic
+# =============================================================================
+mdns:
+  disabled: false
+
+# =============================================================================
+#  OTA - aktualizacje przez Wi-Fi / over-the-air updates
+# =============================================================================
+ota:
+  - platform: esphome
+
+# =============================================================================
+#  API - Home Assistant
+#
+#  Zostaw aby widziec urzadzenie w HA i korzystac z diagnostyki.
+#  Usun jesli uzywasz WYLACZNIE MQTT i nie potrzebujesz integracji HA.
+#  Keep to see device in HA and use diagnostics.
+#  Remove if you use MQTT ONLY and do not need HA integration.
+# =============================================================================
+api:
+
+# =============================================================================
+#  IMPROV SERIAL
+#
+#  Umozliwia pierwsze skonfigurowanie Wi-Fi przez USB bez twardego hasla.
+#  Allows first Wi-Fi setup via USB without hardcoding the password.
+# =============================================================================
+improv_serial:
+
+# =============================================================================
+#  CZAS / TIME
+#
+#  Synchronizacja czasu z HA. Alternatywnie: platform: sntp (nie wymaga HA).
+#  Time sync with HA. Alternative: platform: sntp (does not require HA).
+# =============================================================================
+time:
+  - platform: homeassistant
+  # - platform: sntp          # alternatywa bez HA / alternative without HA
+
+# =============================================================================
+#  WI-FI
+# =============================================================================
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none        # none = brak oszczedzania energii (stabilniejszy RX i MQTT)
+                                # light/modem = oszczednosc pradu kosztem latencji
+                                # none = no power saving (more stable RX and MQTT)
+
+# =============================================================================
+#  MQTT BROKER
+# =============================================================================
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  # port: 1883                 # domyslnie / default: 1883
+
+  # Uwaga: dla trybu MQTT-only bez HA - usun blok api: powyzej.
+  # Note: for MQTT-only mode without HA - remove the api: block above.
+
+# =============================================================================
+#  SPI BUS - LilyGO T3-S3 v1.2
+#
+#  id: spi_lora - identyfikator potrzebny gdy masz kilka magistral SPI.
+#  wmbus_radio odwoluje sie do niego przez spi_id: spi_lora.
+#  id: spi_lora - needed when you have multiple SPI buses.
+#  wmbus_radio references it via spi_id: spi_lora.
+#
+#  UWAGA: GPIO03 (MISO) jest strapping pinem ESP32-S3.
+#  W wiekszosci ukladow nie stanowi problemu - SX1276 trzyma go wysoko podczas
+#  bootu, wiec ESP32-S3 normalnie sie uruchamia. Warto pamietac przy diagnozie
+#  dziwnych restartow zaraz po wlaczeniu zasilania.
+#  NOTE: GPIO03 (MISO) is a strapping pin on ESP32-S3.
+#  In most setups not a problem - SX1276 holds it high at boot so ESP32-S3
+#  starts normally. Worth knowing when diagnosing unexpected power-on resets.
+# =============================================================================
+spi:
+  id: spi_lora
+  clk_pin: GPIO05
+  mosi_pin: GPIO06
+  miso_pin: GPIO03              # strapping pin - patrz komentarz powyzej / see comment above
+
+# =============================================================================
+#  LED STATUSU / STATUS LED - LilyGO T3-S3 v1.2
+#
+#  Dioda miga przez 50 ms przy kazdym odebranym telgramie wMBus.
+#  Zeby wylaczyc miganie:
+#    1) Usun caly ten blok output:
+#    2) Usun 3 linie w on_frame: output.turn_on, delay, output.turn_off
+#
+#  LED blinks for 50 ms on every received wMBus telegram.
+#  To disable blinking:
+#    1) Remove this entire output: block
+#    2) Remove 3 lines in on_frame: output.turn_on, delay, output.turn_off
+# =============================================================================
+output:
+  - platform: gpio
+    id: status_led
+    pin:
+      number: GPIO37            # on-board LED na T3-S3 v1.2 / on-board LED on T3-S3 v1.2
+      # inverted: true          # odkomentuj gdy LED jest aktywne-niskie (swieci bez sterowania)
+                                 # uncomment if LED is active-low (lights without control)
+
+# =============================================================================
+#  WMBUS RADIO - glowna konfiguracja / main configuration
+# =============================================================================
+wmbus_radio:
+
+  # ---------------------------------------------------------------------------
+  # TYP RADIA / RADIO TYPE  [wymagane / required]
+  #
+  # SX1276: starszy uklad (seria SX127x). Wszystkie parametry RF sa zahardkodowane:
+  #   868.950 MHz, 100 kbps, fdev=50 kHz, BW~125 kHz
+  #   Sync word: 0x54/0x3D (Format B) lub 0x54/0xCD (Format A)
+  #   Automatyczne przelaczanie Format A / B co 4 cykl RX (3:1 na korzysc B).
+  #
+  # Opcje NIEDOSTEPNE dla SX1276 (dostepne tylko dla SX1262):
+  #   busy_pin            - SX1276 nie ma pinu BUSY
+  #   dio2_rf_switch      - brak wewnetrznego przelacznika RF w SX127x
+  #   has_tcxo            - brak sterowania TCXO przez DIO3
+  #   rx_gain             - brak programowalnego wzmocnienia RX
+  #   long_gfsk_packets   - brak trybu AN1200.53 (SX1276 ma wieksze FIFO niz SX1262)
+  #   fem_en/ctrl/pa_pin  - brak obslugi zewnetrznego FEM
+  #   clear_device_errors_on_boot / publish_dev_err_after_clear - brak Get/ClearDeviceErrors
+  #
+  # SX1276: older chip (SX127x series). All RF parameters are hardcoded:
+  #   868.950 MHz, 100 kbps, fdev=50 kHz, BW~125 kHz
+  #   Sync word: 0x54/0x3D (Format B) or 0x54/0xCD (Format A)
+  #   Automatic Format A / B switching every 4th RX cycle (3:1 towards B).
+  #
+  # Options NOT available for SX1276 (SX1262 only):
+  #   busy_pin            - SX1276 has no BUSY pin
+  #   dio2_rf_switch      - no internal RF switch in SX127x
+  #   has_tcxo            - no DIO3 TCXO control
+  #   rx_gain             - no programmable RX gain register
+  #   long_gfsk_packets   - no AN1200.53 mode (SX1276 has larger FIFO than SX1262)
+  #   fem_en/ctrl/pa_pin  - no external FEM support
+  #   clear_device_errors_on_boot / publish_dev_err_after_clear - no Get/ClearDeviceErrors
+  # ---------------------------------------------------------------------------
+  radio_type: SX1276
+
+  # ---------------------------------------------------------------------------
+  # SPI - wskazanie magistrali / SPI bus reference
+  #
+  # Wymagane gdy magistrala SPI ma nadane id (jak tutaj: spi_lora).
+  # Pomin jesli masz tylko jedna magistrale SPI bez id.
+  # Required when the SPI bus has an id (as here: spi_lora).
+  # Omit if you have only one SPI bus without an id.
+  # ---------------------------------------------------------------------------
+  spi_id: spi_lora
+
+  # ---------------------------------------------------------------------------
+  # PINY RADIA / RADIO PINS  [wymagane / required]
+  # ---------------------------------------------------------------------------
+  cs_pin: GPIO07                # SPI Chip Select
+  reset_pin: GPIO08             # sprzEtowy reset radia / hardware radio reset
+
+  irq_pin:
+    number: GPIO33
+    mode:
+      input: true
+      pullup: true              # SX1276 uzywa DIO1 jako "FIFO not empty" (aktywne-niskie).
+                                 # Pull-up utrzymuje stan wysoki gdy nic nie odbiera.
+                                 # Bez pull-up pin moze fluktuowac i wywolywac falszywe IRQ.
+                                 # SX1276 uses DIO1 as "FIFO not empty" (active-low).
+                                 # Pull-up keeps the line high when nothing is being received.
+                                 # Without pull-up the pin may float and cause spurious IRQs.
+
+  # Brak busy_pin - SX1276 nie ma pinu BUSY (inaczej niz SX1262).
+  # No busy_pin - SX1276 has no BUSY pin (unlike SX1262).
+
+  # ---------------------------------------------------------------------------
+  # PODSWIETLANIE LOGOW / LOG HIGHLIGHTING  (opcjonalne)
+  #
+  # Wyroznoa wybrane liczniki w logach serial/API kolorem ANSI i prefixem.
+  # NIE filtruje MQTT - kazda poprawna ramka dalej trafia do on_frame.
+  #
+  # Highlights selected meters in serial/API logs with ANSI color and prefix.
+  # Does NOT filter MQTT - every valid frame still fires on_frame.
+  #
+  # highlight_meters: lista ID licznikow BCD / list of BCD meter IDs
+  # highlight_ansi:   true = kolor zielony ANSI w terminalu / green ANSI in terminal
+  #                   UWAGA: w HA Dashboard pokazuje sie jako surowe kody ESC[...m
+  #                   NOTE: in HA Dashboard shows as raw ESC[...m escape sequences
+  # highlight_tag:    tag w logach dla wyroznionych linii / log tag for highlighted lines
+  # highlight_prefix: tekst przed trescia logu / text prefix before log message
+  # ---------------------------------------------------------------------------
+  highlight_meters:
+    - "12345678"
+    - "12345678"
+    - "12345678"
+    # - "XXXXXXXX"             # dodaj kolejne ID jesli potrzeba / add more IDs as needed
+  highlight_ansi: true          # domyslnie: false / default: false
+  highlight_tag: "wmbus_user"   # domyslnie: "wmbus_user" / default: "wmbus_user"
+  highlight_prefix: "★ "        # domyslnie: "★ " / default: "★ "
+
+  # ---------------------------------------------------------------------------
+  # DIAGNOSTYKA / DIAGNOSTICS  (opcjonalne)
+  #
+  # diagnostic_topic:
+  #   Topic MQTT dla eventow diagnostycznych. Ustaw na "" zeby calkowicie wylaczyc.
+  #   MQTT topic for diagnostic events. Set to "" to completely disable.
+  #
+  # diagnostic_summary_interval:
+  #   Co ile wysylac podsumowanie (summary event z licznikami ok/drop/crc/rssi).
+  #   Minimum 5s (wymuszane przez kod). Domyslnie: 60s.
+  #   How often to publish the summary event (ok/drop/crc/rssi counters).
+  #   Minimum 5s (enforced by code). Default: 60s.
+  #
+  # diagnostic_verbose:
+  #   true  = kazdy drop/truncate logowany jako ESP_LOGW na serial/API
+  #   false = serial/API cichy; eventy MQTT (dropped/truncated) sa wysylane
+  #           ZAWSZE niezaleznie od tej flagi gdy diagnostic_topic jest ustawiony
+  #
+  #   true  = each drop/truncate logged as ESP_LOGW to serial/API
+  #   false = serial/API silent; MQTT events (dropped/truncated) are ALWAYS
+  #           published regardless of this flag when diagnostic_topic is set
+  #
+  # diagnostic_publish_raw:
+  #   true  = eventy dropped/truncated na MQTT zawieraja pole "raw" z HEX ramki
+  #           Wklej raw do wmbusmeters.org/analyze zeby zbadac uszkodzona ramke.
+  #   false = bez pola "raw" (mniejszy payload, mniej ruchu MQTT)
+  #
+  #   true  = dropped/truncated MQTT events include "raw" hex field
+  #           Paste raw into wmbusmeters.org/analyze to inspect damaged frames.
+  #   false = no "raw" field (smaller payload, less MQTT traffic)
+  # ---------------------------------------------------------------------------
+  diagnostic_topic: "wmbus/lilygo/diag"
+  diagnostic_summary_interval: 60s     # domyslnie: 60s / default: 60s
+  diagnostic_verbose: false            # domyslnie: true / default: true
+  diagnostic_publish_raw: true         # domyslnie: true / default: true
+
+  # ---------------------------------------------------------------------------
+  # ON_FRAME - callback wywoływany dla każdej poprawnej ramki
+  # ON_FRAME - callback called for every valid frame
+  #
+  # Kazda ramka ktora dotrze tutaj przeszla juz:
+  #   - detekcje preamble i sync word
+  #   - sprawdzenie DLL CRC (Data Link Layer CRC)
+  # To co tu dostajemy jest poprawne strukturalnie i radiowo.
+  #
+  # Every frame that reaches here has already passed:
+  #   - preamble and sync word detection
+  #   - DLL CRC check (Data Link Layer CRC)
+  # What we receive here is valid at RF and structural level.
+  #
+  # Dostepne metody / Available methods on "frame":
+  #   frame->as_hex()       - std::string - telegram HEX (dla wmbusmeters)
+  #   frame->as_raw()       - vector<u8>  - surowe bajty / raw bytes
+  #   frame->as_rtlwmbus()  - std::string - format rtl-wmbus: T1;1;1;timestamp;rssi;hex
+  #   frame->rssi()         - int8_t      - RSSI w dBm (np. -74)
+  #   frame->link_mode()    - LinkMode    - T1 lub C1
+  #   frame->format()       - std::string - format bloku: A lub B
+  #
+  # mark_as_handled (domyslnie: false):
+  #   true  - log: Telegram handled by N handlers
+  #   false - log: Telegram not handled by any handler
+  # ---------------------------------------------------------------------------
+  on_frame:
+    then:
+
+      # -----------------------------------------------------------------------
+      # FILTR MINIMALNEJ DLUGOSCI / MINIMUM LENGTH FILTER
+      #
+      # Kazda ramka docierajaca do on_frame juz przeszla DLL CRC - z definicji
+      # ma wiecej niz 15 bajtow (30 znakow HEX). Ten warunek jest technicznie
+      # zbedny ale nie szkodzi. Mozna go bezpiecznie usunac.
+      #
+      # Every frame reaching on_frame has already passed DLL CRC - by definition
+      # has more than 15 bytes (30 HEX chars). This condition is technically
+      # redundant but harmless. It can be safely removed.
+      # -----------------------------------------------------------------------
+      - if:
+          condition:
+            lambda: |-
+              return frame->as_hex().size() >= 30;
+          then:
+
+            # -------------------------------------------------------------------
+            # PUBLIKACJA DO WMBUSMETERS / PUBLISH TO WMBUSMETERS
+            # Glowny payload - wmbusmeters lub HA addon czyta ten topic.
+            # Main payload - wmbusmeters or HA add-on reads this topic.
+            # -------------------------------------------------------------------
+            - mqtt.publish:
+                topic: "wmbus_bridge/lilygo/telegram"
+                payload: !lambda |-
+                  return frame->as_hex();
+
+            # -------------------------------------------------------------------
+            # MIGANIE LED / LED BLINK - 50 ms przy kazdym telgramie wMBus
+            #
+            # Wizualne potwierdzenie ze radio odebralo ramke.
+            # Visual confirmation that the radio received a frame.
+            #
+            # Zeby wylaczyc miganie:
+            #   1) Usun te 3 linie ponizej
+            #   2) Usun blok output: powyzej
+            # To disable blinking:
+            #   1) Remove these 3 lines below
+            #   2) Remove the output: block above
+            # -------------------------------------------------------------------
+            - output.turn_on: status_led
+            - delay: 50ms
+            - output.turn_off: status_led
+
+            # -------------------------------------------------------------------
+            # OPCJONALNIE / OPTIONAL: RSSI na osobnym topicu
+            # Przydatne do monitorowania jakosci sygnalu w HA jako sensor.
+            # Useful for monitoring signal quality in HA as a sensor.
+            # -------------------------------------------------------------------
+            # - mqtt.publish:
+            #     topic: "wmbus_bridge/rssi"
+            #     payload: !lambda |-
+            #       return to_string((int) frame->rssi());
+
+            # -------------------------------------------------------------------
+            # OPCJONALNIE / OPTIONAL: Format rtl-wmbus
+            # Format przykladowy: T1;1;1;2026-03-01 12:00:00.000;-74;2F2F...hex...
+            # Przydatne jesli uzywasz narzedzia ktore ten format konsumuje.
+            # Useful if you have a tool that consumes this format.
+            # -------------------------------------------------------------------
+            # - mqtt.publish:
+            #     topic: "wmbus_bridge/rtlwmbus"
+            #     payload: !lambda |-
+            #       return frame->as_rtlwmbus();
