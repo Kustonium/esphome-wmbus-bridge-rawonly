@@ -230,6 +230,10 @@ This is already handled in `examples/SX1262/HeltecV4/SX1262_full_example_LED.yam
 | `highlight_tag` | `"wmbus_user"` | tag logu dla wyróżnionych liczników / log tag for highlighted meters |
 | `highlight_prefix` | `"★ "` | prefiks logu / log prefix |
 
+##### Mała uwaga :
+ID liczników wM-Bus to liczby dziesiętne (BCD) — wpisuj bez prefiksu `0x`.
+wM-Bus meter IDs are decimal (BCD) — enter them without `0x` prefix.
+
 Przykład / Example:
 
 ```yaml
