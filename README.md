@@ -193,6 +193,7 @@ This is already handled in `examples/SX1262/HeltecV4/SX1262_full_example_LED.yam
 |---|---|---|
 | `busy_pin` | _(brak / none)_ | pin BUSY (SX1262, zalecany / recommended) |
 | `on_frame` | _(brak / none)_ | callback dla każdej poprawnej ramki / callback for every valid frame |
+| `listen_mode` | `both` | tryb nasłuchu ramek (t1, t2, both) / frame listening mode (t1, t2, both) |
 
 ### SX1262 – opcje specyficzne / SX1262-specific options
 
