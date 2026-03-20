@@ -30,6 +30,7 @@ CONF_ON_FRAME = "on_frame"
 CONF_RADIO_TYPE = "radio_type"
 CONF_MARK_AS_HANDLED = "mark_as_handled"
 CONF_BUSY_PIN = "busy_pin"
+CONF_LISTEN_MODE = "listen_mode"
 
 # SX1262 board helpers
 CONF_DIO2_RF_SWITCH = "dio2_rf_switch"
@@ -88,6 +89,9 @@ CONFIG_SCHEMA = (
             cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_schema,
             cv.Required(CONF_IRQ_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_BUSY_PIN): pins.internal_gpio_input_pin_schema,
+            cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
+                "t1", "c1", "both", lower=True
+            ),
 
             # SX1262-specific tuning (ignored for other radios)
             cv.Optional(CONF_DIO2_RF_SWITCH, default=True): cv.boolean,
@@ -180,6 +184,14 @@ async def to_code(config):
 
     reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
     cg.add(radio_var.set_reset_pin(reset_pin))
+
+    ListenMode = radio_ns.enum("ListenMode", is_class=False)
+    listen_mode_map = {
+        "t1": ListenMode.LISTEN_MODE_T1,
+        "c1": ListenMode.LISTEN_MODE_C1,
+        "both": ListenMode.LISTEN_MODE_BOTH,
+    }
+    cg.add(radio_var.set_listen_mode(listen_mode_map[config[CONF_LISTEN_MODE]]))
 
     irq_pin = await cg.gpio_pin_expression(config[CONF_IRQ_PIN])
     cg.add(radio_var.set_irq_pin(irq_pin))

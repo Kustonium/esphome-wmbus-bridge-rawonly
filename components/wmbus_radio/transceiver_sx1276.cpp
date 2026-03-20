@@ -163,8 +163,15 @@ optional<uint8_t> SX1276::read() {
 }
 
 void SX1276::restart_rx() {
-  const uint8_t sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-  this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
+  uint8_t sync2;
+  if (this->listen_mode_ == LISTEN_MODE_T1) {
+    sync2 = 0x3D;
+  } else if (this->listen_mode_ == LISTEN_MODE_C1) {
+    sync2 = 0xCD;
+  } else {
+    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
+    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
+  }
 
   this->spi_write(REG_OP_MODE, (uint8_t) 0b001);  // standby
   this->spi_write(0x28, {0x54, sync2});

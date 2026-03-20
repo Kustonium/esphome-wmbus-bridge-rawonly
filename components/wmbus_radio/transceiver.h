@@ -9,6 +9,9 @@
 
 namespace esphome {
 namespace wmbus_radio {
+
+enum ListenMode : uint8_t { LISTEN_MODE_BOTH = 0, LISTEN_MODE_T1 = 1, LISTEN_MODE_C1 = 2 };
+
 class RadioTransceiver
     : public Component,
       public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW,
@@ -35,6 +38,7 @@ public:
   void set_reset_pin(InternalGPIOPin *reset_pin);
   void set_irq_pin(InternalGPIOPin *irq_pin);
   void set_busy_pin(InternalGPIOPin *busy_pin);
+  void set_listen_mode(ListenMode mode) { this->listen_mode_ = mode; }
 
 protected:
   InternalGPIOPin *reset_pin_;
@@ -44,6 +48,8 @@ protected:
   // SX127x DIO for FIFO level is typically active-low (falling edge).
   // SX126x DIO for IRQ is active-high (rising edge).
   gpio::InterruptType irq_edge_{gpio::INTERRUPT_FALLING_EDGE};
+
+  ListenMode listen_mode_{LISTEN_MODE_BOTH};
 
   virtual optional<uint8_t> read() = 0;
 
