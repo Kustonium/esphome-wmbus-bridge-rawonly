@@ -1,27 +1,25 @@
 # ESPHome wM-Bus Bridge (RAW-only)
 
 Minimalny mostek **RF → MQTT**, który robi z ESP tylko „radio" do wM-Bus.
-A minimal **RF → MQTT** bridge that turns ESP into a pure wM-Bus radio.
+A minimal **RF → MQTT** bridge that turns ESP into a pure wM-Bus "radio" only.
 
-## Co ten projekt robi / What this project does
-
-* ESPHome odbiera telegramy wM-Bus z radia **SX1262** albo **SX1276**.
+* ESPHome odbiera telegram wM-Bus z modułu **SX1262** lub **SX1276**.
   ESPHome receives wM-Bus telegrams from **SX1262** or **SX1276**.
 
-* Rozpoznaje i składa ramki **T1** oraz **C1** — dual-path parser z fallbackiem i łagodnym precheck'iem.
-  It recognizes and assembles **T1** and **C1** frames — dual-path parser with fallback and soft precheck.
+* Wykrywa **tryb link layer (T1/C1)**.
+  It detects the **link layer mode (T1/C1)**.
 
-* Publikuje gotowy telegram jako **HEX** na MQTT.
-  It publishes the final telegram as **HEX** over MQTT.
+* Składa ramkę i publikuje ją jako **HEX** na MQTT.
+  It assembles the frame and publishes it as **HEX** over MQTT.
 
-* Opcjonalnie publikuje diagnostykę RF/parsowania na MQTT.
-  Optionally, it publishes RF/parser diagnostics to MQTT.
+* (SX1262) Opcjonalny tryb `long_gfsk_packets`, który omija limit ~255B bufora RX i bywa stabilniejszy w „trudnym eterze".
+  (SX1262) Optional `long_gfsk_packets` mode that bypasses the ~255B RX buffer limit and is often more stable in noisy RF environments.
 
-* Dekodowanie liczników (driver, pola, jednostki) zostaje po stronie **Home Assistant / Linux** w **wmbusmeters**.
-  Meter decoding (driver, fields, units) stays on **Home Assistant / Linux** using **wmbusmeters**.
+* Dekodowanie licznika (driver, wartości, jednostki) robisz **po stronie Home Assistant / Linux** w **wmbusmeters**.
+  Meter decoding (driver, values, units) is done **on Home Assistant / Linux** using **wmbusmeters**.
 
-To repo jest celowo odchudzone: **bez dekodowania na ESP**, bez dobierania driverów i bez kombajnu „all-in-one".
-This repo is intentionally slim: **no decoding on ESP**, no driver juggling, and no all-in-one monster.
+To repo jest celowo „odchudzone": **bez dekodowania na ESP**, bez dobierania sterowników, bez „kombajnu".
+This repo is intentionally "slim": **no decoding on ESP**, no driver juggling, no "all-in-one monster".
 
 ---
 
@@ -30,14 +28,14 @@ This repo is intentionally slim: **no decoding on ESP**, no driver juggling, and
 Dla osób, które:
 For people who:
 
-* już używają **wmbusmeters** (np. w Home Assistant),
+* i tak używają **wmbusmeters** (np. w Home Assistant),
   already use **wmbusmeters** (e.g. in Home Assistant),
 
-* chcą mieć **stabilny odbiór na ESP + MQTT**,
-  want **stable ESP reception + MQTT**,
+* chcą mieć **stabilne radio na ESP + MQTT**,
+  want a **stable ESP radio + MQTT** setup,
 
-* wolą debugować i dekodować po stronie HA/Linux zamiast upychać wszystko w ESP.
-  prefer debugging and decoding on HA/Linux instead of pushing everything into ESP.
+* wolą debugować/dekodować na HA (mniej bólu przy aktualizacjach, mniej RAM/CPU na ESP).
+  prefer debugging/decoding on HA (less pain during updates, less RAM/CPU load on ESP).
 
 ---
 
@@ -46,61 +44,44 @@ For people who:
 ✅ obsługa **SX1262** i **SX1276** (SPI)
 ✅ **SX1262** and **SX1276** support (SPI)
 
-✅ obsługa ramek **T1** i **C1**
-✅ **T1** and **C1** frame handling
+✅ wykrywanie i obsługa ramek **T1** i **C1**
+✅ detection and support for **T1** and **C1** frames
 
-✅ **dual-path parser z fallbackiem** — jeśli preferowana ścieżka (T1/C1) zawiedzie, automatycznie próbuje drugiej; `pick_better_failure_()` wybiera diagnostykę z najdalej zaawansowanego etapu
-✅ **dual-path parser with fallback** — if the preferred path (T1/C1) fails, automatically tries the other; `pick_better_failure_()` selects diagnostics from the furthest parsing stage
+✅ **selektywny nasłuch** (`listen_mode: t1 / c1 / both`) — radio skupia się na wybranym trybie, diagnostyka liczy tylko pasujące ramki
+✅ **selective listening** (`listen_mode: t1 / c1 / both`) — radio focuses on the chosen mode, diagnostics counts only matching frames
 
-✅ **łagodny precheck T1** — minimum 12 bajtów raw (wcześniej 60B); krótsze pakiety trafiają do parsera zamiast być odrzucane z miejsca
-✅ **soft T1 precheck** — minimum 12 raw bytes (previously 60B); shorter packets reach the parser instead of being dropped immediately
+✅ publikacja telegramu jako **HEX** (payload do wmbusmeters)
+✅ telegram published as **HEX** (payload for wmbusmeters)
 
-✅ publikacja telegramów jako **HEX** do MQTT
-✅ **HEX** telegram publishing to MQTT
+✅ dostęp do **RSSI** każdej ramki w callbacku `on_frame`
+✅ **RSSI** of every frame available in the `on_frame` callback
 
-✅ `on_frame` z dostępem do **RSSI**, trybu link layer i gotowej ramki
-✅ `on_frame` with **RSSI**, link mode and final frame access
+✅ **statystyki per-licznik** dla liczników z `highlight_meters` — interwał między pakietami, licznik okienkowy, RSSI, publikacja MQTT
+✅ **per-meter statistics** for meters in `highlight_meters` — packet interval, windowed counter, RSSI, MQTT publish
 
-✅ rozbudowana diagnostyka (opcjonalna):
+✅ **boot event na MQTT** z informacją o typie radia i aktywnym trybie nasłuchu
+✅ **MQTT boot event** with radio type and active listen mode
+
+✅ rozbudowana diagnostyka (opcjonalnie):
 ✅ extended diagnostics (optional):
 
-* `summary` dla całego eteru / global RF summary
+* `summary` dla całego eteru (tylko ramki pasujące do `listen_mode`) / global RF summary (only frames matching `listen_mode`)
 * `dropped_by_reason` i `dropped_by_stage`
 * `rx_path` dla problemów toru odbioru
-* `highlight_meters` do wyróżniania wybranych liczników
+* `highlight_meters` do wyróżniania i śledzenia wybranych liczników
 * filtrowanie per-packet MQTT diag tylko do `highlight_meters`
 
-❌ brak dekodowania liczników na ESP
-❌ no meter decoding on ESP
+❌ brak dekodowania liczników na ESP (to robi wmbusmeters)
+❌ no meter decoding on ESP (wmbusmeters does it)
 
 ---
 
 ## Wymagania / Requirements
 
-* **ESPHome**: 2026.1.x+ (testowane na 2026.2.x)
-  **ESPHome**: 2026.1.x+ (tested on 2026.2.x)
-
+* **ESPHome**: 2026.1.x+ (testowane na 2026.2.x / tested on 2026.2.x)
 * **ESP32 / ESP32-S3** (S3 działa bardzo stabilnie / S3 is very stable)
-
-* **MQTT broker** (np. Mosquitto / e.g. Mosquitto)
-
-* Radio / Radio: **SX1262** lub/or **SX1276**
-
----
-
-## Płytki i status testów / Boards and test status
-
-### Przetestowane przeze mnie / Tested by me
-
-* **Heltec WiFi LoRa 32 V4.x — SX1262**
-* **LilyGO T3-S3 — SX1276**
-
-### Przykład pinów, bez testów sprzętowych / Pin-based example, not hardware-tested by me
-
-* **Heltec WiFi LoRa 32 V2 — SX1276**
-
-To ważne: przykład dla **Heltec V2** jest oparty na pinach i logice komponentu, ale sama płytka **nie była przeze mnie testowana sprzętowo**.
-Important: the **Heltec V2** example is based on pin mapping and component logic, but the board itself **was not hardware-tested by me**.
+* **MQTT broker** (np. Mosquitto w HA / e.g. Mosquitto in HA)
+* Radio: **SX1262** lub/or **SX1276**
 
 ---
 
@@ -116,28 +97,6 @@ external_components:
     refresh: 0s
 ```
 
-> Do testów możesz używać `@main`. Do bardziej stabilnego wdrożenia lepiej przypiąć konkretny tag/release.
-> For testing you can use `@main`. For a more stable deployment, pin a specific tag/release.
-
-Zalecany wzorzec topicu dla telegramów:
-Recommended topic pattern for telegrams:
-
-```
-wmbus_bridge/<node>/telegram
-```
-
-Na przykład / For example:
-
-* `wmbus_bridge/heltec/telegram`
-* `wmbus_bridge/lilygo/telegram`
-
-Dzięki temu decoder po stronie HA może słuchać wildcardem:
-This lets the HA-side decoder subscribe using a wildcard:
-
-```
-wmbus_bridge/+/telegram
-```
-
 Najprostszy wzór publikacji:
 Minimal publish pattern:
 
@@ -149,9 +108,8 @@ wmbus_radio:
   on_frame:
     then:
       - mqtt.publish:
-          topic: "wmbus_bridge/heltec/telegram"
-          payload: !lambda |-
-            return frame->as_hex();
+          topic: "wmbus_bridge/telegram"
+          payload: !lambda return frame->as_hex();
 ```
 
 Repo zawiera gotowe przykłady:
@@ -165,34 +123,36 @@ The repo includes ready examples:
 
 ## Heltec V4 (SX1262) – uwaga o FEM / FEM note
 
-Heltec V4 ma tor RF z FEM i dla dobrego RX zwykle pomaga ustawienie:
-Heltec V4 has an RF front-end with FEM and for good RX it usually helps to set:
+Heltec V4 ma układ FEM i dla dobrego RX zwykle pomaga ustawić LNA ON, PA OFF.
+Heltec V4 has an RF FEM, and for good RX it usually helps to set LNA ON, PA OFF.
 
-* **LNA ON**
-* **PA OFF**
-
-W przykładzie `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml` jest to już uwzględnione (GPIO2/GPIO7/GPIO46).
-This is already handled in `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml` (GPIO2/GPIO7/GPIO46).
+W przykładzie `examples/SX1262/HeltecV4/` jest to już uwzględnione (GPIO2/GPIO7/GPIO46).
+This is already handled in `examples/SX1262/HeltecV4/` (GPIO2/GPIO7/GPIO46).
 
 ---
 
-## Opcje konfiguracji / Configuration options
+## Wszystkie opcje konfiguracji / All configuration options
 
 ### Wymagane / Required
 
 | Klucz / Key | Opis / Description |
 |---|---|
-| `radio_type` | `SX1262` albo/or `SX1276` |
-| `reset_pin` | pin RESET radia / radio RESET pin |
-| `irq_pin` | pin IRQ/DIO1 radia / radio IRQ/DIO1 pin |
+| `radio_type` | `SX1262` lub/or `SX1276` |
+| `reset_pin` | GPIO pin RESET radia / radio RESET pin |
+| `irq_pin` | GPIO pin IRQ/DIO1 radia / radio IRQ/DIO1 pin |
 | `spi_id` / `clk_pin` / `mosi_pin` / `miso_pin` / `cs_pin` | konfiguracja SPI / SPI configuration |
 
 ### Ogólne / General
 
 | Klucz / Key | Domyślnie / Default | Opis / Description |
 |---|---|---|
-| `busy_pin` | _(brak / none)_ | pin BUSY (SX1262, zalecany / recommended) |
-| `on_frame` | _(brak / none)_ | callback dla każdej poprawnej ramki / callback for every valid frame |
+| `busy_pin` | _(brak / none)_ | GPIO pin BUSY (SX1262, zalecany / recommended) |
+| `listen_mode` | `both` | Tryb nasłuchu: `t1`, `c1`, `both` — filtruje ramki i diagnostykę / Listen mode: filters frames and diagnostics |
+| `on_frame` | _(brak)_ | Callback dla każdej poprawnej ramki / Callback for every valid frame |
+
+> **`listen_mode`**: w trybie `t1` radio skupia się wyłącznie na ramkach T1 — diagnostyka (w tym `summary`) liczy tylko T1, ramki C1 są cicho odrzucane zanim trafią do liczników. Analogicznie dla `c1`. Tryb `both` zachowuje się jak dotychczas.
+>
+> **`listen_mode`**: in `t1` mode the radio focuses exclusively on T1 frames — diagnostics (including `summary`) counts only T1, C1 frames are silently discarded before reaching any counter. Same applies to `c1`. `both` behaves as before.
 
 ### SX1262 – opcje specyficzne / SX1262-specific options
 
@@ -200,41 +160,73 @@ This is already handled in `examples/SX1262/HeltecV4/SX1262_full_example_LED.yam
 |---|---|---|
 | `dio2_rf_switch` | `true` | DIO2 jako wewnętrzny przełącznik RF / DIO2 as internal RF switch |
 | `has_tcxo` | `false` | TCXO zamiast kwarcu (Heltec V4: zwykle `false`) / TCXO instead of crystal |
-| `rx_gain` | `boosted` | czułość RX: `boosted` albo/or `power_saving` |
-| `long_gfsk_packets` | `false` | tryb długich pakietów GFSK (AN1200.53), omija limit 255B bufora / long GFSK packet mode, bypasses 255B buffer limit |
-| `fem_en_pin` | _(brak)_ | pin LNA enable (Heltec V4: GPIO2) |
-| `fem_ctrl_pin` | _(brak)_ | pin FEM control / RX path (Heltec V4: GPIO7) |
-| `fem_pa_pin` | _(brak)_ | pin PA enable (Heltec V4: GPIO46) |
-| `clear_device_errors_on_boot` | `false` | jednokrotne wyczyszczenie latched errors po starcie / one-shot clear of latched errors at boot |
-| `publish_dev_err_after_clear` | `false` | publikacja błędów przed/po clear do MQTT (wymaga `diagnostic_topic`) / publish errors before/after clear to MQTT |
+| `rx_gain` | `boosted` | Czułość RX: `boosted` lub `power_saving` / RX sensitivity |
+| `long_gfsk_packets` | `false` | Tryb długich pakietów GFSK (AN1200.53), omija limit 255B bufora / Long GFSK packet mode, bypasses 255B buffer limit |
+| `fem_en_pin` | _(brak)_ | GPIO pinu LNA enable (Heltec V4: GPIO2) |
+| `fem_ctrl_pin` | _(brak)_ | GPIO pinu FEM control/RX path (Heltec V4: GPIO7) |
+| `fem_pa_pin` | _(brak)_ | GPIO pinu PA enable (Heltec V4: GPIO46) |
+| `clear_device_errors_on_boot` | `false` | Jednorazowe wyczyszczenie latched errors po starcie / One-shot clear of latched errors at boot |
+| `publish_dev_err_after_clear` | `false` | Publikacja błędów przed/po clear do MQTT (wymaga `diagnostic_topic`) / Publish errors before/after clear to MQTT |
 
 ### Diagnostyka / Diagnostics
 
 | Klucz / Key | Domyślnie / Default | Opis / Description |
 |---|---|---|
-| `diagnostic_topic` | `"wmbus/diag"` | topic MQTT dla diagnostyki / MQTT diagnostics topic |
-| `diagnostic_verbose` | `true` | logowanie `dropped/truncated` także na serial/API / also log `dropped/truncated` to serial/API |
-| `diagnostic_publish_summary` | `true` | publikuj okresowe `summary` / publish periodic `summary` |
-| `diagnostic_publish_drop_events` | `true` | publikuj pojedyncze eventy `dropped` / `truncated` |
-| `diagnostic_publish_rx_path_events` | `true` | publikuj eventy `rx_path` (IRQ timeout, read_failed, queue_send_failed) |
-| `diagnostic_publish_highlight_only` | `false` | ogranicz per-packet MQTT diag do liczników z `highlight_meters` |
-| `diagnostic_publish_raw` | `true` | dołącz `raw(hex)` do dropów / include `raw(hex)` in drop events |
-| `diagnostic_summary_interval` | `60s` | interwał `summary` / summary interval |
+| `diagnostic_topic` | `"wmbus/diag"` | Topic MQTT dla diagnostyki / MQTT diagnostics topic |
+| `diagnostic_verbose` | `true` | Loguj `dropped/truncated` także na serial/API / Also log to serial/API |
+| `diagnostic_publish_summary` | `true` | Publikuj okresowe `summary` / Publish periodic `summary` |
+| `diagnostic_publish_drop_events` | `true` | Publikuj pojedyncze eventy `dropped` / `truncated` |
+| `diagnostic_publish_rx_path_events` | `true` | Publikuj eventy `rx_path` |
+| `diagnostic_publish_highlight_only` | `false` | Ogranicz per-packet MQTT diag do liczników z `highlight_meters` |
+| `diagnostic_publish_raw` | `true` | Dołączaj `raw(hex)` do dropów |
+| `diagnostic_summary_interval` | `60s` | Interwał `summary` / Summary interval |
 
-### Podświetlanie logów / Log highlighting
+### Podświetlanie i statystyki per-licznik / Log highlighting and per-meter statistics
 
 | Klucz / Key | Domyślnie / Default | Opis / Description |
 |---|---|---|
-| `highlight_meters` | `[]` | lista ID liczników do wyróżnienia w logach ESP / list of meter IDs to highlight in ESP logs |
-| `highlight_ansi` | `false` | kolorowanie ANSI (zielony) w logach / ANSI color (green) in logs |
-| `highlight_tag` | `"wmbus_user"` | tag logu dla wyróżnionych liczników / log tag for highlighted meters |
-| `highlight_prefix` | `"★ "` | prefiks logu / log prefix |
+| `highlight_meters` | `[]` | Lista ID liczników do wyróżnienia i śledzenia / List of meter IDs to highlight and track |
+| `highlight_ansi` | `false` | Kolorowanie ANSI (zielony) w logach / ANSI color (green) in logs |
+| `highlight_tag` | `"wmbus_user"` | Tag logu dla wyróżnionych liczników / Log tag for highlighted meters |
+| `highlight_prefix` | `"★ "` | Prefiks przed komunikatem logu / Log message prefix |
 
-##### Mała uwaga :
+Dla każdego licznika z `highlight_meters` komponent śledzi statystyki odbioru i publikuje je na MQTT.
+For each meter in `highlight_meters` the component tracks reception statistics and publishes them to MQTT.
+
+**Dwa niezależne triggery publikacji / Two independent publish triggers:**
+
+| Trigger | Warunek / Condition | Pole `trigger` w payload |
+|---|---|---|
+| `count` | co 10 odebranych pakietów od danego licznika / every 10 received packets per meter | `"count"` |
+| `time` | co 15 minut (niezależnie od liczby pakietów) / every 15 minutes (regardless of packet count) | `"time"` |
+
+Topic: `{diagnostic_topic}/meter/{meter_id}`
+
+```json
+{
+  "event": "meter_window",
+  "trigger": "count",
+  "id": "00089907",
+  "elapsed_s": 312,
+  "count_window": 10,
+  "count_total": 42,
+  "avg_interval_s": 30,
+  "last_rssi": -59,
+  "win_avg_rssi": -59
+}
+```
+
+Dodatkowo przy każdym odebranym pakiecie pojawia się log i event `meter_stats` z polami lifetime:
+Additionally, on every received packet a log line and `meter_stats` event with lifetime fields is emitted:
+
+```
+★ [id:00089907] count=5 interval=30.000s avg_interval=40s avg_rssi=-59dBm
+```
+
+##### Uwaga o ID liczników / Note on meter IDs
+
 ID liczników wM-Bus to liczby dziesiętne (BCD) — wpisuj bez prefiksu `0x`.
 wM-Bus meter IDs are decimal (BCD) — enter them without `0x` prefix.
-
-Przykład / Example:
 
 ```yaml
 wmbus_radio:
@@ -245,55 +237,25 @@ wmbus_radio:
   highlight_ansi: true
 ```
 
-Wyróżnianie działa w logach ESP (serial/API) i może też filtrować per-packet MQTT diag, jeśli ustawisz `diagnostic_publish_highlight_only: true`. Nie filtruje `on_frame` ani głównej publikacji telegramów.
-Highlighting works in ESP logs (serial/API) and can also filter per-packet MQTT diagnostics when `diagnostic_publish_highlight_only: true`. It does not filter `on_frame` or your main telegram publish.
-
 ---
 
 ## Metody dostępne w `on_frame` / Methods available in `on_frame`
 
-W callbacku `on_frame` dostępny jest wskaźnik `frame` typu `Frame *`:
-In the `on_frame` callback, a `frame` pointer of type `Frame *` is available:
-
-| Metoda / Method | Typ / Type | Opis / Description |
+| Metoda / Method | Zwraca / Returns | Opis / Description |
 |---|---|---|
-| `frame->as_hex()` | `std::string` | telegram HEX po usunięciu CRC DLL / HEX telegram after DLL CRC removal |
-| `frame->as_raw()` | `std::vector<uint8_t>` | surowe bajty ramki (bez CRC DLL) / frame bytes (DLL CRC stripped) |
-| `frame->as_rtlwmbus()` | `std::string` | format rtl-wmbus (tryb/czas/rssi/hex) / rtl-wmbus format |
+| `frame->as_hex()` | `std::string` | Telegram HEX po usunięciu CRC DLL / HEX telegram after DLL CRC removal |
+| `frame->as_raw()` | `std::vector<uint8_t>` | Surowe bajty ramki / Raw frame bytes |
+| `frame->as_rtlwmbus()` | `std::string` | Format rtl-wmbus (tryb/czas/rssi/hex) |
 | `frame->rssi()` | `int8_t` | RSSI w dBm |
-| `frame->link_mode()` | `LinkMode` | tryb / mode (`T1` / `C1`) |
-| `frame->format()` | `std::string` | format bloku, np. `"A"` / `"B"` |
-
-Przykład / Example:
-
-```yaml
-on_frame:
-  then:
-    - mqtt.publish:
-        topic: "wmbus_bridge/heltec/telegram"
-        payload: !lambda return frame->as_hex();
-
-    - mqtt.publish:
-        topic: "wmbus_bridge/heltec/rssi"
-        payload: !lambda return to_string((int) frame->rssi());
-
-    # Format rtl-wmbus (jeśli coś go konsumuje / if anything consumes it)
-    # - mqtt.publish:
-    #     topic: "wmbus_bridge/heltec/rtlwmbus"
-    #     payload: !lambda return frame->as_rtlwmbus();
-```
-
-### `mark_as_handled`
-
-`mark_as_handled: true` sygnalizuje komponentowi, że ramka została obsłużona (wpływa na logi diagnostyczne).
-`mark_as_handled: true` signals to the component that the frame was handled (affects diagnostic logs).
+| `frame->link_mode()` | `LinkMode` | Tryb: `T1` / `C1` |
+| `frame->format()` | `std::string` | Format bloku, np. `"A"`, `"B"` |
 
 ```yaml
 on_frame:
   mark_as_handled: true
   then:
     - mqtt.publish:
-        topic: "wmbus_bridge/heltec/telegram"
+        topic: "wmbus_bridge/telegram"
         payload: !lambda return frame->as_hex();
 ```
 
@@ -301,25 +263,78 @@ on_frame:
 
 ## MQTT – jakie tematy? / MQTT – which topics?
 
-### Telegramy do wmbusmeters / Telegrams for wmbusmeters
+### Telegramy / Telegrams
 
-Zalecany wzorzec topicu:
-Recommended topic pattern:
-
-* `wmbus_bridge/<node>/telegram` → **HEX telegramu** / **HEX telegram**
-
-Decoder po stronie HA może słuchać na:
-The HA-side decoder can subscribe to:
-
-* `wmbus_bridge/+/telegram`
-
-Możesz zmienić wzorzec na własny — ważne tylko, żeby wmbusmeters dostał payload **HEX**.
-You can use your own topic pattern — the only requirement is that wmbusmeters receives the **HEX** payload.
+* `wmbus_bridge/telegram` → **HEX telegramu** (do wmbusmeters / for wmbusmeters)
 
 ### Diagnostyka / Diagnostics
 
-Praktyczny, cichy profil do codziennego użycia:
-A practical, quiet profile for daily use:
+Topic bazowy: `diagnostic_topic` (domyślnie `wmbus/diag` / default `wmbus/diag`)
+
+#### 1) `boot` — jednorazowo po starcie / once after boot
+
+Publikowany zaraz po nawiązaniu połączenia MQTT. Zawiera typ radia i aktywny tryb nasłuchu.
+Published as soon as MQTT connection is established. Contains radio type and active listen mode.
+
+Topic: `{diagnostic_topic}/boot` (retained), dodatkowo na `{diagnostic_topic}` (not retained)
+
+```json
+{"event":"boot","radio":"SX1276","listen_mode":"T1+C1 (both, 3:1 bias)","uptime_ms":8120}
+```
+
+#### 2) `summary` — co interval / every interval
+
+Liczy tylko ramki pasujące do aktywnego `listen_mode`.
+Counts only frames matching the active `listen_mode`.
+
+```json
+{
+  "event": "summary",
+  "total": 25,
+  "ok": 22,
+  "truncated": 0,
+  "dropped": 3,
+  "crc_failed": 0,
+  "listen_mode": "both",
+  "hint_code": "OK",
+  "hint_pl": "wygląda dobrze"
+}
+```
+
+**Jak czytać `summary` / How to read `summary`:**
+
+* `total` — ramki które przeszły filtr `listen_mode` i dotarły do parsera / frames that passed `listen_mode` filter and reached the parser
+* `ok` — ramki poprawnie dostarczone do końca / frames successfully delivered end-to-end
+* `avg_ok_rssi` vs `avg_drop_rssi` — szybki sygnał czy problem wygląda na RF / quick signal whether the issue looks like RF
+* `t1.per_pct` / `c1.per_pct` — procent ramek odrzuconych w danym trybie / dropped packet rate per mode
+* `hint_*` — automatyczna podpowiedź PL/EN na podstawie bieżących statystyk / automatic PL/EN hint based on current stats
+
+#### 3) `dropped` / `truncated` — per pakiet / per packet
+
+```json
+{"event":"dropped","reason":"decode_failed","stage":"t1_decode3of6","mode":"T1","rssi":-86}
+```
+
+#### 4) `meter_window` — statystyki per-licznik / per-meter statistics
+
+Topic: `{diagnostic_topic}/meter/{meter_id}`
+
+Dla każdego licznika z `highlight_meters`, dwa triggery: co 10 pakietów (`"count"`) i co 15 minut (`"time"`).
+For each meter in `highlight_meters`, two triggers: every 10 packets (`"count"`) and every 15 minutes (`"time"`).
+
+```json
+{"event":"meter_window","trigger":"time","id":"00089907","elapsed_s":900,"count_window":3,"count_total":42,"avg_interval_s":127,"last_rssi":-59,"win_avg_rssi":-60}
+```
+
+#### 5) `dev_err_cleared` — SX1262, jednorazowo po starcie / once after boot
+
+```json
+{"event":"dev_err_cleared","before":4,"before_hex":"0004","after":0,"after_hex":"0000"}
+```
+
+---
+
+## Praktyczny profil diagnostyki / Practical diagnostics profile
 
 ```yaml
 wmbus_radio:
@@ -333,179 +348,20 @@ wmbus_radio:
   diagnostic_publish_raw: false
 
   highlight_meters:
-    - "00089907"
+    - "00089908"
     - "12345678"
 ```
 
-Co to daje / What this gives you:
-
-* `summary` dalej liczy cały eter / `summary` still counts all RF traffic
-* per-packet eventy `dropped` / `truncated` lecą tylko dla liczników z `highlight_meters`
-* `rx_path` nie spamuje MQTT
-* payloady są mniejsze, bo bez `raw(hex)`
-
-Dodatkowo (SX1262), żeby opublikować latched błędy radia po starcie:
-Additionally (SX1262), to publish latched radio errors after boot:
-
-```yaml
-wmbus_radio:
-  clear_device_errors_on_boot: true
-  publish_dev_err_after_clear: true
-  diagnostic_topic: "wmbus/diag"
-```
-
-#### 1) `summary` (co interval / every interval)
-
-```json
-{
-  "event": "summary",
-  "total": 32,
-  "ok": 25,
-  "truncated": 0,
-  "dropped": 7,
-  "crc_failed": 2,
-  "crc_fail_pct": 6,
-  "drop_pct": 21,
-  "trunc_pct": 0,
-  "avg_ok_rssi": -80,
-  "avg_drop_rssi": -97,
-  "t1": {
-    "total": 31,
-    "ok": 24,
-    "dropped": 7,
-    "per_pct": 22,
-    "crc_failed": 0,
-    "crc_pct": 0,
-    "avg_ok_rssi": -80,
-    "avg_drop_rssi": -96,
-    "sym_total": 5780,
-    "sym_invalid": 13,
-    "sym_invalid_pct": 0
-  },
-  "c1": {
-    "total": 1,
-    "ok": 1,
-    "dropped": 0,
-    "per_pct": 0,
-    "crc_failed": 0,
-    "crc_pct": 0
-  },
-  "dropped_by_reason": {
-    "too_short": 0,
-    "decode_failed": 7,
-    "dll_crc_failed": 0,
-    "unknown_preamble": 0,
-    "l_field_invalid": 0,
-    "unknown_link_mode": 0,
-    "other": 0
-  },
-  "dropped_by_stage": {
-    "precheck": 0,
-    "t1_decode3of6": 7,
-    "t1_l_field": 0,
-    "t1_length_check": 0,
-    "c1_precheck": 0,
-    "c1_preamble": 0,
-    "c1_suffix": 0,
-    "c1_l_field": 0,
-    "c1_length_check": 0,
-    "dll_crc_first": 0,
-    "dll_crc_mid": 0,
-    "dll_crc_final": 0,
-    "dll_crc_b1": 0,
-    "dll_crc_b2": 0,
-    "link_mode": 0,
-    "other": 0
-  },
-  "rx_path": {
-    "irq_timeout": 0,
-    "preamble_read_failed": 0,
-    "t1_header_read_failed": 0,
-    "payload_size_unknown": 0,
-    "payload_read_failed": 0,
-    "queue_send_failed": 0
-  },
-  "reasons_sum": 7,
-  "reasons_sum_mismatch": 0,
-  "hint_code": "OK",
-  "hint_en": "Looks good.",
-  "hint_pl": "Wygląda dobrze."
-}
-```
-
-Jak czytać `summary` praktycznie / How to read `summary` in practice:
-
-* `total` – wszystko, co radio zobaczyło / everything the radio saw
-* `ok` – ramki poprawnie dostarczone do końca / frames successfully delivered end-to-end
-* `avg_ok_rssi` vs `avg_drop_rssi` – szybki sygnał czy problem wygląda na RF / quick signal whether the problem looks like RF
-* `t1.per_pct` / `c1.per_pct` – procent ramek odrzuconych w danym trybie / dropped packet rate per mode
-* `*_crc_pct` – ile % ramek w trybie padło na CRC DLL (bitflipy / słaby RF) / how many % failed DLL CRC
-* `t1.sym_invalid_pct` – quasi-BER dla T1 (3-of-6) / T1 quasi-BER
-* `dropped_by_stage` – pokazuje, na którym etapie najczęściej padają ramki / shows at which stage frames most often fail
-* `rx_path` – pokazuje problemy jeszcze przed parserem / shows problems before the parser
-
-> Większe `total` nie zawsze znaczy lepiej — liczy się relacja `ok` do `dropped`. Różnice między urządzeniami mogą wynikać z całego toru odbiorczego (RF, antena, chip), nie tylko z parsera.
-> Higher `total` does not always mean better — what matters is the `ok` to `dropped` ratio. Differences between devices can come from the full receive chain (RF, antenna, chip), not only the parser.
-
-> `reasons_sum_mismatch=1` oznacza błąd spójności liczników (diagnostyka nadal działa, ale liczby mogą być niepewne).
-> `reasons_sum_mismatch=1` means a counter consistency error (diagnostics still works but numbers may be unreliable).
-
-#### 2) `dropped` (pojedynczy drop / single drop)
-
-```json
-{"event":"dropped","reason":"decode_failed","stage":"t1_decode3of6","mode":"T1","want":0,"got":0,"raw_got":134,"decoded_len":0,"final_len":0,"dll_crc_removed":0,"suffix_ignored":0,"rssi":-86,"detail":"symbols_total=178 symbols_invalid=2 raw_len=134"}
-```
-
-Pole `detail` zawiera dodatkowy kontekst etapu który zawiódł. Jeśli parser użył ścieżki fallback, pojawi się `"fallback_used=1"`.
-The `detail` field contains extra context from the failing stage. If the parser used the fallback path, `"fallback_used=1"` will appear.
-
-Opcjonalnie (gdy `diagnostic_publish_raw: true`, domyślnie) pojawi się też `raw(hex)` dla analizy.
-Optionally (when `diagnostic_publish_raw: true`, which is the default) you'll also get `raw(hex)` for analysis.
-
-#### 3) `dev_err_cleared` (SX1262, jednorazowo po starcie / once after boot)
-
-```json
-{"event":"dev_err_cleared","before":4,"before_hex":"0004","after":0,"after_hex":"0000"}
-```
-
 ---
 
-## Dodatek Home Assistant / Home Assistant add-on
-
-Ten komponent jest projektowany do współpracy z dodatkiem:
-This component is designed to work with the add-on:
+## Dedykowany dodatek do Home Assistant / Dedicated Home Assistant add-on
 
 **`Kustonium/homeassistant-wmbus-mqtt-bridge`**
 
-Dodatek subskrybuje surowe telegramy **HEX** z MQTT (`wmbus_bridge/+/telegram`), podaje je do `wmbusmeters` przez `stdin:hex`, a wynik publikuje ponownie na MQTT jako JSON i wspiera HA Discovery.
-The add-on subscribes to raw **HEX** telegrams from MQTT (`wmbus_bridge/+/telegram`), feeds them into `wmbusmeters` via `stdin:hex`, republishes decoded JSON to MQTT, and supports HA Discovery.
+Subskrybuje surowe telegramy HEX z MQTT, podaje je do `wmbusmeters` przez `stdin:hex`, publikuje wynik jako JSON + wspiera HA Discovery.
+Subscribes to raw HEX telegrams from MQTT, feeds them into `wmbusmeters` via `stdin:hex`, republishes decoded JSON and supports HA Discovery.
 
-Repo dodatku / Add-on repo:
 `https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge`
-
----
-
-## Jak to spiąć z wmbusmeters? / How to connect it to wmbusmeters?
-
-1. ESP publikuje telegramy **HEX** na MQTT.
-   ESP publishes **HEX** telegrams to MQTT.
-
-2. `wmbusmeters` subskrybuje topic z telegramami i dekoduje liczniki.
-   `wmbusmeters` subscribes to the telegram topic and decodes meters.
-
-W praktyce interesuje Cię tylko to, żeby `wmbusmeters` dostał payload **HEX** z topicu:
-In practice, you only need `wmbusmeters` to receive the **HEX** payload from a topic like:
-
-```
-wmbus_bridge/+/telegram
-```
-
----
-
-## T1 / C1 / T2 – co z T2? / What about T2?
-
-Ten komponent skupia się na **T1** i **C1** — najczęstszych i najbardziej praktycznych przypadkach.
-This component focuses on **T1** and **C1** — the most common and practical cases.
 
 ---
 
@@ -513,56 +369,33 @@ This component focuses on **T1** and **C1** — the most common and practical ca
 
 ### 1) ESPHome nie widzi komponentu / ESPHome can't see the component
 
-Upewnij się, że:
-Make sure that:
+Sprawdź czy `external_components` ma `components: [wmbus_radio]` i czy repo ma katalog `components/` w root.
+Check that `external_components` has `components: [wmbus_radio]` and the repo has a `components/` directory in root.
 
-* repo ma katalog `components/` w root (to repo ma),
-  the repo has `components/` in root (this repo does),
+### 2) Dużo `DROPPED decode_failed` / Many `DROPPED decode_failed`
 
-* w `external_components` używasz `components: [wmbus_radio]`.
-  you set `components: [wmbus_radio]` in `external_components`.
-
-### 2) Widzisz dużo `DROPPED decode_failed` / You see many `DROPPED decode_failed`
-
-To bywa normalne w gęstym eterze, szczególnie w blokach i miastach.
-That can be normal in dense RF environments, especially in cities/apartment buildings.
-
-Jeśli chcesz diagnozować głębiej / If you want deeper diagnostics:
-
-* sprawdź `dropped_by_stage` w `summary` / check `dropped_by_stage` in `summary`
-* sprawdź `rx_path` / check `rx_path`
-* ewentualnie włącz `diagnostic_publish_raw: true` i podeślij `raw(hex)` do online analyzera `wmbusmeters.org/analyze/…`
+Normalne w gęstym eterze (bloki, miasto). Włącz `diagnostic_publish_raw: true` i podeślij `raw(hex)` do `wmbusmeters.org/analyze/`.
+Normal in dense RF environments (apartments, cities). Enable `diagnostic_publish_raw: true` and submit `raw(hex)` to `wmbusmeters.org/analyze/`.
 
 ### 3) wmbusmeters pokazuje `wrong key` / `payload crc failed`
 
-`wmbusmeters` potrafi wyświetlić „wrong key", gdy telegram jest **uszkodzony radiowo** (bitflipy / ucięcie). Ten projekt odrzuca śmieci **przed** wmbusmeters: sprawdza CRC na warstwie łącza (DLL) i nie publikuje błędnych ramek.
-`wmbusmeters` may report "wrong key" when the telegram is **RF-corrupted** (bitflips / truncated). This project drops garbage **before** wmbusmeters by validating DLL CRC and rejecting bad frames.
+Sprawdź `wmbus/diag` → sekcję `c1`/`t1`: jeśli `ok=0` i `crc_failed=total` przy niskim RSSI → problem RF (antena/pozycja). Jeśli `ok>0` — klucz lub blacklist.
+Check `wmbus/diag` → `c1`/`t1`: if `ok=0` and `crc_failed=total` at low RSSI → RF issue (antenna/placement). If `ok>0` — key/config or blacklist.
 
-Co zrobić / What to do:
+### 4) W trybie `listen_mode: c1` `summary` pokazuje `total=0` / In `listen_mode: c1` summary shows `total=0`
 
-* sprawdź `wmbus/diag` → sekcję `c1`/`t1` / check `wmbus/diag` → `c1`/`t1` section:
-  * jeśli `ok=0` i `crc_failed=total` przy bardzo niskim RSSI → problem RF (antena/pozycja)
-    if `ok=0` and `crc_failed=total` at very low RSSI → RF issue (antenna/placement)
-  * jeśli `ok>0`, a wmbusmeters nadal krzyczy → klucz/konfiguracja lub blacklist po wcześniejszych próbach
-    if `ok>0` but wmbusmeters still complains → key/config or a previous blacklist
+Poprawne zachowanie — diagnostyka liczy tylko ramki C1. Jeśli w pobliżu nie ma urządzeń C1, `total` będzie 0 lub bardzo niskie.
+Expected behavior — diagnostics counts only C1 frames. If there are no C1 devices nearby, `total` will be 0 or very low.
 
-### 4) Heltec V4 – słaby odbiór / poor reception
+### 5) Heltec V4 – słaby odbiór / poor reception
 
-Sprawdź / Check:
+Sprawdź piny SPI i radia, ustawienia FEM (`fem_en_pin`, `fem_ctrl_pin`, `fem_pa_pin`), `has_tcxo`.
+Check SPI and radio pins, FEM settings (`fem_en_pin`, `fem_ctrl_pin`, `fem_pa_pin`), `has_tcxo`.
 
-* piny SPI i radia (zgodne z przykładem) / SPI and radio pins (match the example)
-* ustawienia FEM (LNA/PA) — `fem_en_pin`, `fem_ctrl_pin`, `fem_pa_pin`
-* `has_tcxo` (czasem `false` działa lepiej, zależnie od płytki / sometimes `false` works better depending on the board)
+### 6) Losowe restarty (SX1262) / Random resets (SX1262)
 
-### 5) Losowe restarty / rozłączenia API (SX1262) / Random resets / API disconnects
-
-Najczęstsza przyczyna: zasilanie z portu USB komputera, słaby kabel lub zbyt „miękki" zasilacz.
-Most common cause: powering from a PC USB port, a poor cable, or a weak power supply.
-
-Co zwykle pomaga / What usually helps:
-
-* zasilacz 5V 2A+ i krótki, porządny kabel / 5V 2A+ adapter and a short, decent cable
-* na czas testów wyłącz automatyczne restarty Wi-Fi/API (`reboot_timeout: 0s`) / for testing, disable Wi-Fi/API auto-reboots
+Zasilacz 5V 2A+ i porządny kabel. Na czas testów `reboot_timeout: 0s`.
+5V 2A+ adapter and a decent cable. For testing use `reboot_timeout: 0s`.
 
 ---
 
@@ -575,4 +408,3 @@ This project is based on experience and parts of the ecosystem:
 * wmbusmeters/wmbusmeters
 
 Licencja: **GPL-3.0-or-later** (patrz `LICENSE` i `NOTICE` / see `LICENSE` and `NOTICE`).
-License: **GPL-3.0-or-later** (see `LICENSE` and `NOTICE`).
