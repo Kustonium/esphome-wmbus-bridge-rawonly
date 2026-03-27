@@ -52,6 +52,7 @@ public:
 
   void setup() override;
   void loop() override;
+  void dump_config() override;
   void receive_frame();
 
   void add_frame_handler(std::function<void(Frame *)> &&callback);
@@ -197,6 +198,13 @@ protected:
   // Count-based trigger: publish after this many packets per window (0 = disabled)
   uint32_t meter_window_count_threshold_{10};
   void publish_rx_path_event_(const char *event, const char *stage, const char *detail = nullptr, int rssi = 0);
+
+  // Boot log / boot info fields
+  bool boot_log_done_{false};
+  uint32_t boot_log_last_ms_{0};
+  uint32_t boot_log_count_{0};
+  bool boot_info_mqtt_pending_{false};
+  bool boot_info_event_pending_{false};
 
   std::string diag_topic_{"wmbus/diag"};
 };

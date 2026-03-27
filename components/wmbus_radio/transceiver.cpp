@@ -81,6 +81,10 @@ void RadioTransceiver::dump_config() {
   LOG_PIN("  IRQ Pin: ", this->irq_pin_);
   if (this->busy_pin_ != nullptr)
     LOG_PIN("  Busy Pin: ", this->busy_pin_);
+  const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
+                       : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
+                       : "T1+C1 (both, 3:1 bias)";
+  ESP_LOGCONFIG(TAG, "  Listen mode: %s", mode_str);
 }
 } // namespace wmbus_radio
 } // namespace esphome

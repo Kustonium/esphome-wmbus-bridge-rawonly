@@ -468,6 +468,12 @@ void SX1262::setup() {
   this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE;
   this->common_setup();
   ESP_LOGV(TAG, "Setup");
+  {
+    const char *lm = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
+                   : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
+                   : "T1+C1 (both, 3:1 bias)";
+    ESP_LOGI(TAG, "Listen mode: %s", lm);
+  }
 
   // MUST be before any SPI transfers
   this->spi_setup();
@@ -567,8 +573,15 @@ void SX1262::restart_rx() {
   // by changing the 2nd sync byte. This lets us catch both variants
   // without user-side configuration.
   // Bias towards Block B: every 4th hop uses Block A.
-  const uint8_t sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-  this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
+  uint8_t sync2;
+  if (this->listen_mode_ == LISTEN_MODE_T1) {
+    sync2 = 0x3D;
+  } else if (this->listen_mode_ == LISTEN_MODE_C1) {
+    sync2 = 0xCD;
+  } else {
+    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
+    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
+  }
 
   this->set_sync_word_(sync2);
 

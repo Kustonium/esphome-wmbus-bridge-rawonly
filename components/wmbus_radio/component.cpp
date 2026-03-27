@@ -34,6 +34,18 @@ namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "wmbus";
 
+static const char *listen_mode_to_string_(ListenMode mode) {
+  switch (mode) {
+    case LISTEN_MODE_T1:
+      return "T1 only";
+    case LISTEN_MODE_C1:
+      return "C1 only";
+    case LISTEN_MODE_BOTH:
+    default:
+      return "T1+C1 (both, 3:1 bias)";
+  }
+}
+
 static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &out) {
   out.clear();
   if (csv.empty()) return;
@@ -97,7 +109,7 @@ Radio::StageBucket Radio::bucket_for_stage_(const std::string &stage) {
   if (stage == "dll_crc_final") return SB_DLL_CRC_FINAL;
   if (stage == "dll_crc_b1") return SB_DLL_CRC_B1;
   if (stage == "dll_crc_b2") return SB_DLL_CRC_B2;
-  if (stage == "link_mode") return SB_LINK_MODE;
+  if (stage == "link_mode" || stage == "listen_mode_filter") return SB_LINK_MODE;
   return SB_OTHER;
 }
 
@@ -498,28 +510,103 @@ void Radio::setup() {
       this->dev_err_cleared_pending_ = true;
     }
   }
+
+  this->boot_log_done_ = false;
+  this->boot_log_last_ms_ = (uint32_t) esphome::millis();
+  this->boot_log_count_ = 0;
+  this->boot_info_mqtt_pending_ = true;
+  this->boot_info_event_pending_ = true;
+}
+
+void Radio::dump_config() {
+  ESP_LOGCONFIG(TAG, "wM-Bus Radio:");
+  if (this->radio == nullptr) {
+    ESP_LOGCONFIG(TAG, "  Radio: <null>");
+    return;
+  }
+
+  ESP_LOGCONFIG(TAG, "  Radio type: %s", this->radio->get_name());
+  ESP_LOGCONFIG(TAG, "  Listen mode: %s",
+                listen_mode_to_string_(this->radio->get_listen_mode()));
+  if (!this->diag_topic_.empty()) {
+    ESP_LOGCONFIG(TAG, "  MQTT boot topic: %s/boot", this->diag_topic_.c_str());
+  }
 }
 
 void Radio::loop() {
-  if (this->dev_err_cleared_pending_ && mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+  const uint32_t loop_now_ms = (uint32_t) esphome::millis();
+
+  if (!this->boot_log_done_ && this->radio != nullptr) {
+    if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
+      ESP_LOGI(TAG, "Radio active: %s | Listen mode: %s",
+               this->radio->get_name(),
+               listen_mode_to_string_(this->radio->get_listen_mode()));
+      this->boot_log_last_ms_ = loop_now_ms;
+      this->boot_log_count_++;
+      if (this->boot_log_count_ >= 3) {
+        this->boot_log_done_ = true;
+      }
+    }
+  }
+
+  auto *mqtt = mqtt::global_mqtt_client;
+  if (this->radio != nullptr && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
+    std::string boot_payload = str_sprintf(
+        "{\"event\":\"boot\",\"radio\":\"%s\",\"listen_mode\":\"%s\",\"uptime_ms\":%lu}",
+        this->radio->get_name(),
+        listen_mode_to_string_(this->radio->get_listen_mode()),
+        (unsigned long) loop_now_ms);
+
+    if (this->boot_info_mqtt_pending_) {
+      std::string boot_topic = this->diag_topic_ + "/boot";
+      mqtt->publish(boot_topic, boot_payload, static_cast<uint8_t>(0), true);
+      this->boot_info_mqtt_pending_ = false;
+    }
+    if (this->boot_info_event_pending_) {
+      mqtt->publish(this->diag_topic_, boot_payload, static_cast<uint8_t>(0), false);
+      this->boot_info_event_pending_ = false;
+    }
+  }
+
+  if (this->dev_err_cleared_pending_ && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
     char payload[180];
     snprintf(payload, sizeof(payload),
              "{\"event\":\"dev_err_cleared\",\"before\":%u,\"before_hex\":\"%04X\",\"after\":%u,\"after_hex\":\"%04X\"}",
              (unsigned) this->dev_err_before_, (unsigned) this->dev_err_before_,
              (unsigned) this->dev_err_after_, (unsigned) this->dev_err_after_);
-    mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+    mqtt->publish(this->diag_topic_, payload);
     this->dev_err_cleared_pending_ = false;
   }
 
-  const uint32_t loop_now_ms = (uint32_t) esphome::millis();
   this->maybe_publish_diag_summary_(loop_now_ms);
   this->maybe_publish_meter_windows_(loop_now_ms);
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
 
-  this->diag_total_++;
   const uint8_t mode_idx = (uint8_t) p->get_link_mode();
+
+  // Filter by listen_mode BEFORE convert_to_frame() and before any counters.
+  // Use packet's raw link mode (detected from preamble) — valid even if frame
+  // conversion later fails (e.g. T1 3-of-6 decode error).
+  if (this->radio != nullptr) {
+    const auto want = this->radio->get_listen_mode();
+    const LinkMode got = p->get_link_mode();
+    const bool reject =
+        (want == LISTEN_MODE_C1 && got != LinkMode::C1) ||
+        (want == LISTEN_MODE_T1 && got != LinkMode::T1);
+    if (reject) {
+      ESP_LOGD(TAG, "Filtered by listen_mode: want=%s got=%s RSSI=%ddBm",
+               (want == LISTEN_MODE_C1) ? "C1" : "T1",
+               link_mode_name(got),
+               (int) p->get_rssi());
+      delete p;
+      return;
+    }
+  }
+
+  // Count only frames that pass the listen_mode filter
+  this->diag_total_++;
   if (mode_idx < this->diag_mode_total_.size()) this->diag_mode_total_[mode_idx]++;
 
   auto frame = p->convert_to_frame();
