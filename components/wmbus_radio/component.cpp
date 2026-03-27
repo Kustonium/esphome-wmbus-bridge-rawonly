@@ -395,12 +395,87 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   this->diag_rx_path_ = {};
 }
 
+// Publish windowed stats for a single meter and reset its window counters.
+// trigger: "count" = packet threshold reached, "time" = periodic timer fired
+void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
+                                      const char *id_str, MeterStats &st) {
+  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  if (mqtt == nullptr || !mqtt->is_connected()) return;
+
+  const int32_t win_avg_rssi = (st.rssi_n_window > 0)
+      ? (st.rssi_sum_window / (int32_t) st.rssi_n_window) : 0;
+  const uint32_t avg_interval_s = (st.interval_n > 0)
+      ? (st.interval_sum_ms / st.interval_n) / 1000 : 0;
+
+  char payload[280];
+  snprintf(payload, sizeof(payload),
+           "{"
+           "\"event\":\"meter_window\","
+           "\"trigger\":\"%s\","
+           "\"id\":\"%s\","
+           "\"elapsed_s\":%u,"
+           "\"count_window\":%u,"
+           "\"count_total\":%u,"
+           "\"avg_interval_s\":%u,"
+           "\"last_rssi\":%d,"
+           "\"win_avg_rssi\":%d"
+           "}",
+           trigger, id_str,
+           (unsigned) elapsed_s,
+           (unsigned) st.count_window,
+           (unsigned) st.count,
+           (unsigned) avg_interval_s,
+           (int) st.rssi_last,
+           (int) win_avg_rssi);
+
+  if (!this->diag_topic_.empty()) {
+    std::string meter_topic = this->diag_topic_ + "/meter/" + std::string(id_str);
+    mqtt->publish(meter_topic, payload);
+  }
+  ESP_LOGI(TAG, "METER [%s] id=%s win=%us count_window=%u total=%u avg_interval=%us win_avg_rssi=%ddBm",
+           trigger, id_str,
+           (unsigned) elapsed_s,
+           (unsigned) st.count_window,
+           (unsigned) st.count,
+           (unsigned) avg_interval_s,
+           (int) win_avg_rssi);
+
+  st.count_window = 0;
+  st.rssi_sum_window = 0;
+  st.rssi_n_window = 0;
+}
+
+void Radio::maybe_publish_meter_windows_(uint32_t now_ms) {
+  if (this->highlight_meter_stats_.empty()) return;
+  if (this->diag_topic_.empty()) return;
+
+  if (this->last_meter_window_ms_ == 0) {
+    this->last_meter_window_ms_ = now_ms;
+    return;
+  }
+  if (now_ms - this->last_meter_window_ms_ < this->meter_window_interval_ms_) return;
+  const uint32_t elapsed_s = (now_ms - this->last_meter_window_ms_) / 1000;
+  this->last_meter_window_ms_ = now_ms;
+
+  for (auto &kv : this->highlight_meter_stats_) {
+    char id_str[9];
+    snprintf(id_str, sizeof(id_str), "%08u", (unsigned) kv.first);
+    this->publish_meter_window_for_("time", elapsed_s, id_str, kv.second);
+  }
+}
+
 void Radio::setup() {
   // Parse optional highlight meter list (CSV provided by python/YAML).
   parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_);
   if (!this->highlight_meter_ids_.empty()) {
-    ESP_LOGI(TAG, "Highlight meters enabled (%u ids) tag=%s ansi=%s", (unsigned) this->highlight_meter_ids_.size(),
-             this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(), this->highlight_ansi_ ? "true" : "false");
+    // meter_window_interval_ms_ defaults to 15 min; cap it at diag_summary_interval_ms_ minimum
+    if (this->meter_window_interval_ms_ < this->diag_summary_interval_ms_)
+      this->meter_window_interval_ms_ = this->diag_summary_interval_ms_;
+    ESP_LOGI(TAG, "Highlight meters enabled (%u ids) tag=%s ansi=%s window=%us",
+             (unsigned) this->highlight_meter_ids_.size(),
+             this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(),
+             this->highlight_ansi_ ? "true" : "false",
+             (unsigned) (this->meter_window_interval_ms_ / 1000));
   }
 
   ASSERT_SETUP(this->packet_queue_ = xQueueCreate(3, sizeof(Packet *)));
@@ -436,7 +511,9 @@ void Radio::loop() {
     this->dev_err_cleared_pending_ = false;
   }
 
-  this->maybe_publish_diag_summary_((uint32_t) esphome::millis());
+  const uint32_t loop_now_ms = (uint32_t) esphome::millis();
+  this->maybe_publish_diag_summary_(loop_now_ms);
+  this->maybe_publish_meter_windows_(loop_now_ms);
   Packet *p;
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
@@ -619,6 +696,35 @@ void Radio::loop() {
     highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
   }
 
+  // Update per-meter statistics for highlighted meters.
+  if (highlight) {
+    uint32_t now_ms = (uint32_t) esphome::millis();
+    auto &stats = this->highlight_meter_stats_[id_val];
+    stats.count++;
+    stats.rssi_last = frame->rssi();
+    stats.rssi_sum += (int32_t) frame->rssi();
+    stats.rssi_n++;
+    // Windowed counters — reset on count threshold or periodic timer
+    stats.count_window++;
+    stats.rssi_sum_window += (int32_t) frame->rssi();
+    stats.rssi_n_window++;
+
+    // Count-based trigger: publish when window reaches threshold
+    if (this->meter_window_count_threshold_ > 0 &&
+        stats.count_window >= this->meter_window_count_threshold_) {
+      const uint32_t elapsed_s = (stats.last_seen_ms > 0 && this->last_meter_window_ms_ > 0)
+          ? ((uint32_t) esphome::millis() - this->last_meter_window_ms_) / 1000 : 0;
+      this->publish_meter_window_for_("count", elapsed_s, id_str, stats);
+    }
+
+    if (stats.last_seen_ms != 0) {
+      stats.last_interval_ms = now_ms - stats.last_seen_ms;
+      stats.interval_sum_ms += stats.last_interval_ms;
+      stats.interval_n++;
+    }
+    stats.last_seen_ms = now_ms;
+  }
+
   const char *log_tag = TAG;
   if (highlight) {
     if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
@@ -631,6 +737,57 @@ void Radio::loop() {
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
              ansi_suf);
+
+    // Log and optionally publish per-meter interval statistics.
+    const auto &stats = this->highlight_meter_stats_[id_val];
+    if (stats.count == 1) {
+      ESP_LOGI(log_tag, "%s[id:%s] first packet seen (count=1)",
+               this->highlight_prefix_.c_str(), id_str);
+    } else {
+      const uint32_t interval_s  = stats.last_interval_ms / 1000;
+      const uint32_t interval_ms = stats.last_interval_ms % 1000;
+      const uint32_t avg_interval_s = (stats.interval_n > 0)
+          ? (stats.interval_sum_ms / stats.interval_n) / 1000 : 0;
+      const int32_t avg_rssi = (stats.rssi_n > 0)
+          ? (stats.rssi_sum / (int32_t) stats.rssi_n) : stats.rssi_last;
+      ESP_LOGI(log_tag, "%s[id:%s] count=%u interval=%u.%03us avg_interval=%us avg_rssi=%ddBm",
+               this->highlight_prefix_.c_str(), id_str,
+               (unsigned) stats.count,
+               (unsigned) interval_s, (unsigned) interval_ms,
+               (unsigned) avg_interval_s,
+               (int) avg_rssi);
+    }
+
+    // Publish per-meter stats to MQTT if connected.
+    if (!this->diag_topic_.empty()) {
+      auto *mqtt = esphome::mqtt::global_mqtt_client;
+      if (mqtt != nullptr && mqtt->is_connected()) {
+        const auto &st = this->highlight_meter_stats_[id_val];
+        const uint32_t avg_interval_s = (st.interval_n > 0)
+            ? (st.interval_sum_ms / st.interval_n) / 1000 : 0;
+        const int32_t avg_rssi = (st.rssi_n > 0)
+            ? (st.rssi_sum / (int32_t) st.rssi_n) : st.rssi_last;
+        char meter_payload[256];
+        snprintf(meter_payload, sizeof(meter_payload),
+                 "{"
+                 "\"event\":\"meter_stats\","
+                 "\"id\":\"%s\","
+                 "\"count\":%u,"
+                 "\"last_interval_s\":%u,"
+                 "\"avg_interval_s\":%u,"
+                 "\"last_rssi\":%d,"
+                 "\"avg_rssi\":%d"
+                 "}",
+                 id_str,
+                 (unsigned) st.count,
+                 (unsigned) (st.last_interval_ms / 1000),
+                 (unsigned) avg_interval_s,
+                 (int) st.rssi_last,
+                 (int) avg_rssi);
+        std::string meter_topic = this->diag_topic_ + "/meter/" + std::string(id_str);
+        mqtt->publish(meter_topic, meter_payload);
+      }
+    }
   } else {
     ESP_LOGI(TAG, "Have data (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
              d.size(), frame->rssi(),

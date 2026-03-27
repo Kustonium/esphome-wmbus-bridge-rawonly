@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <vector>
+#include <unordered_map>
 
 #include <functional>
 #include <string>
@@ -64,6 +65,23 @@ protected:
   QueueHandle_t packet_queue_{nullptr};
 
   std::vector<std::function<void(Frame *)>> handlers_;
+
+  // Per-meter reception statistics (only tracked for highlight_meters IDs)
+  struct MeterStats {
+    uint32_t last_seen_ms{0};      // millis() when last packet was received
+    uint32_t last_interval_ms{0};  // elapsed ms since previous packet (0 = first seen)
+    uint32_t interval_sum_ms{0};   // cumulative sum for average interval
+    uint32_t interval_n{0};        // number of intervals recorded
+    uint32_t count{0};             // total packets received (lifetime)
+    int32_t  rssi_last{0};         // RSSI of the last packet
+    int32_t  rssi_sum{0};          // cumulative RSSI sum (lifetime)
+    uint32_t rssi_n{0};            // number of RSSI samples (lifetime)
+    // Windowed counters — reset after each periodic summary
+    uint32_t count_window{0};
+    int32_t  rssi_sum_window{0};
+    uint32_t rssi_n_window{0};
+  };
+  std::unordered_map<uint32_t, MeterStats> highlight_meter_stats_{};
 
   // Highlight configuration
   std::string highlight_meters_csv_{};
@@ -169,6 +187,15 @@ protected:
   bool meter_is_highlighted_(uint32_t meter_id) const;
   bool should_publish_packet_event_(const Packet *packet) const;
   void maybe_publish_diag_summary_(uint32_t now_ms);
+  void publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
+                                   const char *id_str, MeterStats &st);
+  void maybe_publish_meter_windows_(uint32_t now_ms);
+
+  // Periodic timer for meter window summaries (default: 15 min)
+  uint32_t meter_window_interval_ms_{900000};
+  uint32_t last_meter_window_ms_{0};
+  // Count-based trigger: publish after this many packets per window (0 = disabled)
+  uint32_t meter_window_count_threshold_{10};
   void publish_rx_path_event_(const char *event, const char *stage, const char *detail = nullptr, int rssi = 0);
 
   std::string diag_topic_{"wmbus/diag"};
