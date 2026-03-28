@@ -1,0 +1,30 @@
+spi:
+
+  clk_pin: GPIO7 
+
+  mosi_pin: GPIO9 
+
+  miso_pin: GPIO8 
+
+
+wmbus_radio:
+
+  radio_type: SX1262
+
+  cs_pin: GPIO41
+
+  reset_pin: GPIO42
+
+  irq_pin: 
+
+    number: GPIO39
+
+    mode: input
+
+  busy_pin: GPIO40
+
+  has_tcxo: true
+
+  rx_gain: boosted
+
+  long_gfsk_packets: true
