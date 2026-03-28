@@ -407,4 +407,25 @@ This project is based on experience and parts of the ecosystem:
 * SzczepanLeon/esphome-components
 * wmbusmeters/wmbusmeters
 
+## How this project was built / Jak powstał ten projekt
+
+This project was built in March 2026 over 26 days — from zero to a working release with diagnostics, support for two transceivers, and full documentation.
+
+It started from a practical problem: existing solutions did not work the way I needed them to. The project was developed through rapid iteration on real hardware, with a strong focus on stability, observability and keeping decoding outside the ESP device.
+
+The code was created with the help of AI tools (Claude and ChatGPT) used for drafting, refactoring and exploring implementation options. My role was to provide context, define requirements, reject bad ideas, test on real devices and make architectural decisions.
+
+This is not hidden and not treated as a weakness — just as a practical development workflow. If you have a real problem, enough persistence and a clear goal, you can build useful things this way too.
+
+---
+
+Projekt powstał w marcu 2026 w ciągu 26 dni — od zera do działającego release’u z diagnostyką, obsługą dwóch transceiverów i pełną dokumentacją.
+
+Zaczął się od praktycznego problemu: istniejące rozwiązania nie działały tak, jak potrzebowałem. Projekt rozwijał się iteracyjnie na prawdziwym sprzęcie, z naciskiem na stabilność, dobrą diagnostykę i pozostawienie dekodowania poza urządzeniem ESP.
+
+Kod powstawał przy pomocy narzędzi AI (Claude i ChatGPT), używanych do szkicowania, refaktoryzacji i szukania wariantów implementacji. Moją rolą było dostarczanie kontekstu, definiowanie wymagań, odrzucanie złych pomysłów, testowanie na realnym sprzęcie i podejmowanie decyzji architektonicznych.
+
+Nie jest to ukrywane ani traktowane jako wada — to po prostu praktyczny sposób pracy. Jeśli masz realny problem, upór i jasny cel, w ten sposób też da się zbudować użyteczne rzeczy.
+
+
 Licencja: **GPL-3.0-or-later** (patrz `LICENSE` i `NOTICE` / see `LICENSE` and `NOTICE`).
