@@ -407,6 +407,7 @@ This project is based on experience and parts of the ecosystem:
 * SzczepanLeon/esphome-components
 * wmbusmeters/wmbusmeters
 
+---
 ## How this project was built / Jak powstał ten projekt
 
 This project was built in March 2026 over 26 days — from zero to a working release with diagnostics, support for two transceivers, and full documentation.
@@ -427,5 +428,5 @@ Kod powstawał przy pomocy narzędzi AI (Claude i ChatGPT), używanych do szkico
 
 Nie jest to ukrywane ani traktowane jako wada — to po prostu praktyczny sposób pracy. Jeśli masz realny problem, upór i jasny cel, w ten sposób też da się zbudować użyteczne rzeczy.
 
-
+---
 Licencja: **GPL-3.0-or-later** (patrz `LICENSE` i `NOTICE` / see `LICENSE` and `NOTICE`).
