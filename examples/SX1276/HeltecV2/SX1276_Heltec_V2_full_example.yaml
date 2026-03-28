@@ -26,7 +26,8 @@ esphome:
 # PLATFORMA – ESP32 (Heltec V2)
 # ---------------------------------------------------------------------------
 esp32:
-  board: heltec_wifi_lora_32_V2
+  board: esp32dev
+  variant: ESP32
   framework:
     type: esp-idf
 
@@ -179,11 +180,17 @@ wmbus_radio:
   # PINY RADIA / RADIO PINS
   #  LoRa_CS   = GPIO18
   #  LoRa_RST  = GPIO14
-  #  LoRa_DIO0 = GPIO26   (IRQ/RxDone)
+  #  LoRa_DIO0 = GPIO26   (RxDone – nie używany jako IRQ w tym driverze)
+  #  LoRa_DIO1 = GPIO35   (FifoLevel – używany jako IRQ w tym driverze)
+  #
+  # Uwaga: ten driver używa DIO1 (GPIO35) jako linii IRQ, nie DIO0 (GPIO26).
+  # DIO1 sygnalizuje FifoLevel, co jest wymagane przez implementację odbioru.
+  # Note: this driver uses DIO1 (GPIO35) as the IRQ line, not DIO0 (GPIO26).
+  # DIO1 signals FifoLevel, which is required by the receive implementation.
   # -------------------------------------------------------------------------
   cs_pin: GPIO18
   reset_pin: GPIO14
-  irq_pin: GPIO26
+  irq_pin: GPIO35
 
   # -------------------------------------------------------------------------
   # PODŚWIETLANIE LOGÓW / LOG HIGHLIGHTING (opcjonalne)
