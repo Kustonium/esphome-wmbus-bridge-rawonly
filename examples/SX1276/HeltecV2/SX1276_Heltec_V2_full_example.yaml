@@ -224,6 +224,9 @@ wmbus_radio:
   # -------------------------------------------------------------------------
   diagnostic_topic: "wmbus/diag"
   diagnostic_summary_interval: 120s
+  diagnostic_publish_summary_15min: true
+  diagnostic_publish_summary_60min: false
+# summary topics: <diagnostic_topic>/summary, /summary_15min, /summary_60min
   diagnostic_verbose: false              # ciszej na serial/API / quieter serial/API
   diagnostic_publish_summary: true       # publikuj summary / publish summary
   diagnostic_publish_drop_events: true   # dropped/truncated na MQTT / dropped/truncated to MQTT
@@ -231,16 +234,19 @@ wmbus_radio:
   diagnostic_publish_highlight_only: true  # tylko dla highlight_meters
   diagnostic_publish_raw: false          # mniejsze payloady / smaller payloads
 
-  # -------------------------------------------------------------------------
-  # ON_FRAME – callback dla każdej poprawnej ramki / for every valid frame
-  # -------------------------------------------------------------------------
-  on_frame:
-    mark_as_handled: true
-    then:
-      - mqtt.publish:
-          topic: "wmbus_bridge/telegram"
-          payload: !lambda |-
-            return frame->as_hex();
+  # Główna publikacja RAW do wmbusmeters / Main RAW publish to wmbusmeters
+  telegram_topic: "wmbus_bridge/telegram"
 
-      # Jeśli włączyłeś LED powyżej – odkomentuj:
-      # - script.execute: blink_led
+  # -------------------------------------------------------------------------
+  # ON_FRAME – opcjonalny callback dla dodatków / optional callback for extras
+  # -------------------------------------------------------------------------
+  # on_frame:
+  #   then:
+  #     # Jeśli włączyłeś LED powyżej – odkomentuj:
+  #     # - script.execute: blink_led
+  #
+  #     # Opcjonalnie: format rtl-wmbus / Optional: rtl-wmbus format
+  #     - mqtt.publish:
+  #         topic: "wmbus_bridge/rtlwmbus"
+  #         payload: !lambda |-
+  #           return frame->as_rtlwmbus();

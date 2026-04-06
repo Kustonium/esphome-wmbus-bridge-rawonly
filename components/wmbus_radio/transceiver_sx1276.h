@@ -22,6 +22,11 @@ class SX1276 : public RadioTransceiver {
   void restart_rx() override;
   int8_t get_rssi() override;
   const char *get_name() override;
+  bool supports_preamble_retry() const override { return true; }
+  bool supports_unknown_size_raw_drain() const override { return true; }
+  bool supports_weak_partial_start_abort() const override { return true; }
+  bool consume_rx_abort_request() override;
+  uint32_t take_fifo_overrun_count() override;
 
  protected:
   uint8_t sync_cycle_{0};
@@ -37,6 +42,8 @@ class SX1276 : public RadioTransceiver {
 
   int8_t last_rssi_dbm_{-127};
   bool rssi_captured_{false};
+  bool abort_requested_{false};
+  uint32_t fifo_overrun_count_{0};
 
   // Burst SPI: CS held low for the entire transfer.
   // SAFE only when caller knows at least 'len' bytes are already in FIFO.

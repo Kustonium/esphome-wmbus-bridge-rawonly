@@ -112,7 +112,7 @@ void SX1262::wait_while_busy_() {
   const uint32_t start = millis();
   while (this->busy_pin_->digital_read()) {
     if ((millis() - start) > 200) {
-      ESP_LOGW(TAG, "BUSY stuck high (>200ms)");
+      ESP_LOGW(TAG, "BUSY stuck high / linia BUSY utknela w stanie wysokim (>200ms)");
       break;
     }
     delay(1);
@@ -472,7 +472,7 @@ void SX1262::setup() {
     const char *lm = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                    : "T1+C1 (both, 3:1 bias)";
-    ESP_LOGI(TAG, "Listen mode: %s", lm);
+    ESP_LOGI(TAG, "Listen mode / tryb nasluchu: %s", lm);
   }
 
   // MUST be before any SPI transfers
@@ -499,7 +499,7 @@ void SX1262::setup() {
   const uint8_t gain =
       (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? RX_GAIN_POWER_SAVING : RX_GAIN_BOOSTED;
   this->write_register_(REG_RX_GAIN, {gain});
-  ESP_LOGI(TAG, "RX gain: %s", (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? "POWER_SAVING" : "BOOSTED");
+  ESP_LOGI(TAG, "RX gain / wzmocnienie RX: %s", (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? "POWER_SAVING" : "BOOSTED");
 
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
 
@@ -570,14 +570,21 @@ void SX1262::setup() {
 // ---------------------------------------------------------------------------
 void SX1262::restart_rx() {
   // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
-  // by changing the 2nd sync byte. This lets us catch both variants
-  // without user-side configuration.
-  // Bias towards Block B: every 4th hop uses Block A.
+  // WMBus C-mode exists in two Format variants that differ only in the second
+  // sync byte: Format A uses 0x3D, Format B uses 0xCD. Both are valid C1
+  // transmissions and real devices may transmit Format A.
+  // C1-only MUST cycle through both sync bytes exactly like `both` mode —
+  // otherwise Format A packets are silently missed.
+  // Bug: previous code hardcoded 0xCD (Format B only) in C1-only mode.
+  // Fix: apply the same 3:1 (A:B) cycling used in `both` mode.
+  // NOTE: do NOT revert C1-only to a fixed 0xCD; that breaks Format A.
   uint8_t sync2;
   if (this->listen_mode_ == LISTEN_MODE_T1) {
     sync2 = 0x3D;
   } else if (this->listen_mode_ == LISTEN_MODE_C1) {
-    sync2 = 0xCD;
+    // Cycle 3:1 (A:B) — same ratio as `both` mode.
+    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
+    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
   } else {
     sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
     this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);

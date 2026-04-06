@@ -14,7 +14,7 @@ from esphome.const import (
 )
 from pathlib import Path
 
-CODEOWNERS = ["@SzczepanLeon", "@kubasaw"]
+CODEOWNERS = ["@SzczepanLeon", "@kubasaw", "@Kustonium"]
 
 DEPENDENCIES = ["esp32", "spi", "mqtt"]
 
@@ -31,6 +31,12 @@ CONF_RADIO_TYPE = "radio_type"
 CONF_MARK_AS_HANDLED = "mark_as_handled"
 CONF_BUSY_PIN = "busy_pin"
 CONF_LISTEN_MODE = "listen_mode"
+
+# Optional built-in RAW forwarding (avoids YAML on_frame boilerplate)
+CONF_TELEGRAM_TOPIC = "telegram_topic"
+CONF_TARGET_METER_ID = "target_meter_id"
+CONF_TARGET_TOPIC = "target_topic"
+CONF_TARGET_LOG = "target_log"
 
 # SX1262 board helpers
 CONF_DIO2_RF_SWITCH = "dio2_rf_switch"
@@ -56,10 +62,14 @@ CONF_DIAG_TOPIC = "diagnostic_topic"
 CONF_DIAG_VERBOSE = "diagnostic_verbose"
 CONF_DIAG_PUBLISH_RAW = "diagnostic_publish_raw"
 CONF_DIAG_SUMMARY_INTERVAL = "diagnostic_summary_interval"
+CONF_DIAG_PUBLISH_SUMMARY_15MIN = "diagnostic_publish_summary_15min"
+CONF_DIAG_PUBLISH_SUMMARY_60MIN = "diagnostic_publish_summary_60min"
+CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS = "diagnostic_publish_summary_highlight_meters"
 CONF_DIAG_PUBLISH_SUMMARY = "diagnostic_publish_summary"
 CONF_DIAG_PUBLISH_DROP_EVENTS = "diagnostic_publish_drop_events"
 CONF_DIAG_PUBLISH_RX_PATH_EVENTS = "diagnostic_publish_rx_path_events"
 CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY = "diagnostic_publish_highlight_only"
+CONF_SX1276_BUSY_ETHER_MODE = "sx1276_busy_ether_mode"
 
 # Heltec V4 FEM pins (SX1262 external front-end)
 CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
@@ -114,6 +124,13 @@ CONFIG_SCHEMA = (
                 }
             ),
 
+
+            # Optional built-in RAW forwarding (publish full frame hex and/or one selected target meter)
+            cv.Optional(CONF_TELEGRAM_TOPIC, default=""): cv.string,
+            cv.Optional(CONF_TARGET_METER_ID, default=""): cv.string,
+            cv.Optional(CONF_TARGET_TOPIC, default=""): cv.string,
+            cv.Optional(CONF_TARGET_LOG, default=True): cv.boolean,
+
             # Publish diagnostics (e.g. truncated frames) to MQTT
             cv.Optional(CONF_DIAG_TOPIC, default="wmbus/diag"): cv.string,
 
@@ -127,6 +144,12 @@ CONFIG_SCHEMA = (
             # listed in highlight_meters. Global summary still counts everything.
             cv.Optional(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, default=False): cv.boolean,
             cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_15MIN, default=False): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_60MIN, default=False): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, default=False): cv.boolean,
+            cv.Optional(CONF_SX1276_BUSY_ETHER_MODE, default="adaptive"): cv.one_of(
+                "normal", "aggressive", "adaptive", lower=True
+            ),
 
             # Optional log highlighting for selected meter IDs
             cv.Optional(CONF_HIGHLIGHT_METERS, default=[]): cv.ensure_list(cv.string),
@@ -208,6 +231,10 @@ async def to_code(config):
     cg.add(var.set_radio(radio_var))
 
     cg.add(var.set_diag_topic(config.get(CONF_DIAG_TOPIC, "wmbus/diag")))
+    cg.add(var.set_telegram_topic(config.get(CONF_TELEGRAM_TOPIC, "")))
+    cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
+    cg.add(var.set_target_topic(config.get(CONF_TARGET_TOPIC, "")))
+    cg.add(var.set_target_log(config.get(CONF_TARGET_LOG, True)))
 
     cg.add(var.set_diag_verbose(config.get(CONF_DIAG_VERBOSE, True)))
     cg.add(var.set_diag_publish_raw(config.get(CONF_DIAG_PUBLISH_RAW, True)))
@@ -216,6 +243,17 @@ async def to_code(config):
     cg.add(var.set_diag_publish_rx_path_events(config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, True)))
     cg.add(var.set_diag_publish_highlight_only(config.get(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, False)))
     cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
+    cg.add(var.set_diag_publish_summary_15min(config.get(CONF_DIAG_PUBLISH_SUMMARY_15MIN, False)))
+    cg.add(var.set_diag_publish_summary_60min(config.get(CONF_DIAG_PUBLISH_SUMMARY_60MIN, False)))
+    cg.add(var.set_diag_publish_summary_highlight_meters(config.get(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, False)))
+
+    SX1276BusyEtherMode = radio_ns.enum("SX1276BusyEtherMode", is_class=True)
+    busy_ether_mode_map = {
+        "normal": SX1276BusyEtherMode.NORMAL,
+        "aggressive": SX1276BusyEtherMode.AGGRESSIVE,
+        "adaptive": SX1276BusyEtherMode.ADAPTIVE,
+    }
+    cg.add(var.set_sx1276_busy_ether_mode(busy_ether_mode_map[config.get(CONF_SX1276_BUSY_ETHER_MODE, "adaptive")]))
 
     # Log highlight config
     meters = config.get(CONF_HIGHLIGHT_METERS, [])

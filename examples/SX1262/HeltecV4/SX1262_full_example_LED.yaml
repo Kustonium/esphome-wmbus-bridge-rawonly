@@ -56,18 +56,12 @@ external_components:
 # -----------------------------------------------------------------------------
 # LOGGER
 # Poziomy / levels: DEBUG < INFO < WARN < ERROR < NONE
-# Zmień MAIN level na DEBUG żeby zobaczyć wszystko, w tym bajty SX1262.
-# Change MAIN level to DEBUG to see everything including SX1262 bytes.
 # -----------------------------------------------------------------------------
 logger:
-  level: info                 # zalecane dla produkcji / recommended for production
-  # level: debug              # odkomentuj do diagnozy / uncomment for diagnosis
+  level: info
   logs:
-    mqtt: warn                # MQTT wewnętrzne logi ESPHome – domyślnie dużo szumu
-                               # ESPHome internal MQTT logs – noisy by default
-    component: warn           # logi komponentów / component framework logs
-    # SX1262: debug           # logi SX1262 (rejestracja pakietów, RSSI, itp.)
-    # wmbus: debug            # logi warstwy wMBus
+    mqtt: warn
+    component: warn
 
 # -----------------------------------------------------------------------------
 # SIEĆ / NETWORK
@@ -75,61 +69,34 @@ logger:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  power_save_mode: none       # none = brak oszczędzania energii (lepszy odbiór)
-                               # none = no power saving (better reception stability)
+  power_save_mode: none
 
 mdns:
-  disabled: false             # true = wyłącz mDNS (mniej usług sieciowych)
-                               # true = disable mDNS (fewer network services)
+  disabled: false
 
-# -----------------------------------------------------------------------------
-# API – Home Assistant
-# Zostaw aby widzieć urządzenie w HA; usuń jeśli używasz tylko MQTT.
-# Keep to see device in HA; remove if you use MQTT only.
-# -----------------------------------------------------------------------------
 api:
 
-# -----------------------------------------------------------------------------
-# OTA – aktualizacje przez Wi-Fi / over-the-air updates
-# -----------------------------------------------------------------------------
 ota:
   - platform: esphome
 
-# Umożliwia pierwsze wgranie przez USB bez hasła
-# Allows first flash via USB without password
 improv_serial:
 
-# -----------------------------------------------------------------------------
-# CZAS / TIME
-# Potrzebny do timestampów w logach i diagnostyce.
-# Needed for log timestamps and diagnostics.
-# -----------------------------------------------------------------------------
 time:
-  - platform: homeassistant   # synchronizacja z HA / sync with HA
-  # - platform: sntp          # alternatywa bez HA / alternative without HA
-  #   id: sntp_time
+  - platform: homeassistant
 
 # -----------------------------------------------------------------------------
 # MQTT BROKER
-# Centralny punkt wymiany danych. Hass.io: zwykle 192.168.x.x
-# Central data exchange point. Hass.io: usually 192.168.x.x
 # -----------------------------------------------------------------------------
 mqtt:
-  broker: 192.168.1.10        # adres brokera MQTT / MQTT broker address
+  broker: 192.168.1.10
   username: !secret mqtt_user
   password: !secret mqtt_password
-  # port: 1883                # domyślnie 1883 / default 1883
-
-  # Logi ESPHome przekierowane na MQTT (opcjonalnie)
-  # ESPHome logs redirected to MQTT (optional)
   log_topic:
     topic: "${devicename}/debug"
-    level: DEBUG              # wszystkie logi / all logs
+    level: DEBUG
 
 # =============================================================================
 #  DIAGNOSTYKA ESP / ESP DIAGNOSTICS
-#  Sensory dostępne w Home Assistant – wolna pamięć, temperatura, WiFi, itp.
-#  Sensors available in Home Assistant – free memory, temperature, WiFi, etc.
 # =============================================================================
 debug:
 
@@ -173,9 +140,7 @@ text_sensor:
       name: "WiFi BSSID"
 
 # -----------------------------------------------------------------------------
-# SPI BUS
-# Heltec V4: CLK=9, MOSI=10, MISO=11 (nie zmieniaj bez sprawdzenia schematu)
-# Heltec V4: CLK=9, MOSI=10, MISO=11 (don't change without checking schematic)
+# SPI BUS – Heltec V4: CLK=9, MOSI=10, MISO=11
 # -----------------------------------------------------------------------------
 spi:
   clk_pin: GPIO9
@@ -188,40 +153,19 @@ spi:
 #  Biała dioda (GPIO35) miga przy każdym odebranym telgramie wMBus.
 #  White LED (GPIO35) blinks on every received wMBus telegram.
 #
-#  LED jest aktywne-niskie (inverted: true) – bez tego świeci cały czas.
-#  LED is active-low (inverted: true) – without this it stays on permanently.
+#  LED jest aktywne-niskie (inverted: true).
+#  LED is active-low (inverted: true).
 #
-#  WAŻNE / IMPORTANT:
-#  Miganie realizowane jest przez script: blink_led z mode: single.
-#  Dzięki temu gdy ramki przychodzą szybko jedna po drugiej, animacja
-#  nie nakłada się na siebie – nowe wywołanie jest ignorowane jeśli
-#  poprzednie mignięcie jeszcze trwa. Bez tego przy bezpośrednim
-#  output.turn_on/delay/turn_off LED świeciłaby ciągle lub migotała chaotycznie.
-#
-#  Blinking is handled by script: blink_led with mode: single.
-#  This prevents animation overlap when frames arrive in rapid succession –
-#  a new call is ignored if the previous blink is still in progress.
-#  Without this, direct output.turn_on/delay/turn_off would cause the LED
-#  to stay on permanently or flicker randomly under high frame load.
-#
-#  Żeby wyłączyć miganie / To disable blinking:
-#    1) Usuń bloki output:, light: i script: / Remove output:, light: and script: blocks
-#    2) Usuń linię "script.execute: blink_led" z on_frame
-#       Remove "script.execute: blink_led" from on_frame
+#  script: blink_led z mode: single zapobiega nakładaniu się mignięć.
+#  script: blink_led with mode: single prevents blink overlap.
 # =============================================================================
 output:
   - platform: gpio
     id: led_output
     pin:
-      number: GPIO35            # biała dioda na Heltec V4 / white LED on Heltec V4
-      inverted: true            # aktywne-niskie / active-low
+      number: GPIO35
+      inverted: true
 
-# -----------------------------------------------------------------------------
-# LIGHT – binarny wrapper nad output / binary wrapper over output
-#
-# Wymagany przez script: który używa light.turn_on / light.turn_off.
-# restore_mode: ALWAYS_OFF – nie świeć po restarcie / do not light up after restart.
-# -----------------------------------------------------------------------------
 light:
   - platform: binary
     name: "LED"
@@ -229,14 +173,6 @@ light:
     id: status_led
     restore_mode: ALWAYS_OFF
 
-# -----------------------------------------------------------------------------
-# SCRIPT – miganie LED / LED blink script
-#
-# mode: single – nowe wywołanie jest ignorowane, jeśli poprzednie
-# mignięcie jeszcze trwa. To daje krótkie, czytelne błyski bez nakładania.
-# mode: single – a new call is ignored if the previous blink is still running.
-# This gives short, clean blinks without overlap.
-# -----------------------------------------------------------------------------
 script:
   - id: blink_led
     mode: single
@@ -248,312 +184,142 @@ script:
           id: status_led
 
 # =============================================================================
-#  WMBUS RADIO – główna konfiguracja
-#  WMBUS RADIO – main configuration
+#  WMBUS RADIO – główna konfiguracja / main configuration
 # =============================================================================
 wmbus_radio:
 
   # ---------------------------------------------------------------------------
   # TYP RADIA / RADIO TYPE  [wymagane / required]
-  # Obsługiwane: SX1262, SX1276
-  # Supported: SX1262, SX1276
   # ---------------------------------------------------------------------------
   radio_type: SX1262
 
   # ---------------------------------------------------------------------------
   # PINY RADIA / RADIO PINS  [wymagane / required]
   # ---------------------------------------------------------------------------
-  cs_pin: GPIO8               # SPI Chip Select
-  reset_pin: GPIO12           # sprzętowy reset radia / hardware radio reset
+  cs_pin: GPIO8
+  reset_pin: GPIO12
   irq_pin:
     number: GPIO14
-    mode: input               # IRQ/DIO1 – przerwanie od radia / radio interrupt
+    mode: input
 
-  busy_pin: GPIO13            # BUSY – poczekaj na gotowość radia (zalecany dla SX1262)
-                               # BUSY – wait for radio ready (recommended for SX1262)
-                               # Bez busy_pin: ESPHome odpytuje z timeoutem 200ms
-                               # Without busy_pin: ESPHome polls with 200ms timeout
+  busy_pin: GPIO13            # BUSY pin (zalecany dla SX1262 / recommended for SX1262)
 
   # ---------------------------------------------------------------------------
-  # PINY FEM / FEM PINS  [opcjonalne, tylko Heltec V4 / optional, Heltec V4 only]
+  # PINY FEM / FEM PINS  [tylko Heltec V4 / Heltec V4 only]
   #
-  # Heltec V4 ma zewnętrzny Front-End Module (LNA + przełącznik PA/RX).
-  # Komponent ustawia te piny w setup() – RX path zawsze aktywny.
-  # Heltec V4 has an external Front-End Module (LNA + PA/RX switch).
-  # The component sets these pins in setup() – RX path always active.
+  # fem_en_pin:   LNA enable  (GPIO2)  → HIGH = LNA włączone / LNA on
+  # fem_ctrl_pin: RX path     (GPIO7)  → HIGH = tryb RX / RX mode
+  # fem_pa_pin:   PA enable   (GPIO46) → LOW  = PA wyłączone (tylko RX / RX only)
   #
-  # fem_en_pin:   LNA enable (GPIO2)  → HIGH = LNA włączone
-  # fem_ctrl_pin: RX path select (GPIO7) → HIGH = tryb RX / RX mode
-  # fem_pa_pin:   PA enable (GPIO46)  → LOW  = PA wyłączone (tylko RX)
-  #
-  # Jeśli nie masz Heltec V4 albo FEM jest obsługiwane inaczej – usuń te trzy linie.
-  # If you don't have Heltec V4 or FEM is handled differently – remove these three lines.
+  # Jeśli nie masz Heltec V4 – usuń te trzy linie.
+  # If you don't have Heltec V4 – remove these three lines.
   # ---------------------------------------------------------------------------
   fem_en_pin: GPIO2
   fem_ctrl_pin: GPIO7
   fem_pa_pin: GPIO46
 
-  # ---------------------------------------------------------------------------
-  # DIO2 jako wewnętrzny przełącznik RF / DIO2 as internal RF switch
-  # true  = DIO2 steruje wewnętrznym switch (typowe dla modułów SX1262)
-  # false = DIO2 jest zwykłym GPIO (rzadko potrzebne)
-  # true  = DIO2 controls internal RF switch (typical for SX1262 modules)
-  # false = DIO2 is a plain GPIO (rarely needed)
-  # ---------------------------------------------------------------------------
-  dio2_rf_switch: true        # domyślnie: true / default: true
-
-  # ---------------------------------------------------------------------------
-  # TCXO – Temperature Compensated Crystal Oscillator
-  # true  = płytka ma TCXO (np. Heltec V4, większość modułów LoRa)
-  # false = płytka ma zwykły kwarc (niestabilny, ale niektóre tanie klony)
-  # true  = board has TCXO (e.g. Heltec V4, most LoRa modules)
-  # false = board has plain crystal (unstable, but some cheap clones)
-  #
-  # Jeśli nagle tracisz odbiór po kilku minutach → spróbuj false
-  # If you suddenly lose reception after a few minutes → try false
-  # ---------------------------------------------------------------------------
-  has_tcxo: true              # domyślnie: false / default: false
-
-  # ---------------------------------------------------------------------------
-  # WZMOCNIENIE RX / RX GAIN
-  # boosted      = lepsza czułość (~2 dBm), ~2 mA więcej prądu
-  # power_saving = oszczędność energii, nieco mniejszy zasięg
-  # boosted      = better sensitivity (~2 dBm), ~2 mA more current
-  # power_saving = power saving, slightly lower range
-  # ---------------------------------------------------------------------------
-  rx_gain: boosted            # domyślnie: boosted / default: boosted
+  dio2_rf_switch: true        # DIO2 jako wewnętrzny przełącznik RF / internal RF switch
+  has_tcxo: true              # Heltec V4 ma TCXO / Heltec V4 has TCXO
+  rx_gain: boosted            # lepsza czułość / better sensitivity
 
   # ---------------------------------------------------------------------------
   # DŁUGIE PAKIETY GFSK / LONG GFSK PACKETS  (Semtech AN1200.53)
   #
-  # false = tryb standardowy (limit ~255 bajtów w buforze sprzętowym)
   # true  = tryb AN1200.53: strumieniowanie z bufora kołowego, brak limitu ~255B
+  # false = tryb standardowy (limit ~255 bajtów)
   #
-  # Kiedy włączyć:
-  #  → liczniki T-mode z długimi telegramami (po 3-of-6 dekodowaniu > 255 bajtów)
-  #  → gdy masz dużo dropów "too_short" lub "decode_failed" przy trybie T1
-  #  → środowisko z dużą ilością szumu (bardziej deterministyczny odbiór)
-  #
-  # false = standard mode (~255 byte hardware buffer limit)
-  # true  = AN1200.53 mode: stream from circular buffer, no ~255B limit
-  #
-  # When to enable:
-  #  → T-mode meters with long telegrams (after 3-of-6 decoding > 255 bytes)
-  #  → when you see many "too_short" or "decode_failed" drops in T1 mode
-  #  → noisy environment (more deterministic reception)
+  # Włącz gdy masz długie telegramy T1 (>255B po decode) lub dużo dropów.
+  # Enable for long T1 telegrams (>255B after decode) or many drops.
   # ---------------------------------------------------------------------------
-  long_gfsk_packets: true     # domyślnie: false / default: false
+  long_gfsk_packets: true
+
+  # ---------------------------------------------------------------------------
+  # TRYB NASŁUCHU / LISTEN MODE
+  #
+  # t1   = tylko T1 (najczęstszy tryb w Polsce / most common in Poland)
+  # c1   = tylko C1
+  # both = T1+C1 (3:1 bias na T1) — koszt ~20-37% skuteczności na szybkich licznikach
+  #
+  # Uwaga: tryb both na jednym urządzeniu ma realny koszt.
+  # Przy środowisku mieszanym T1/C1 rozważ dwa osobne urządzenia.
+  #
+  # t1   = T1 only (most common in Poland)
+  # c1   = C1 only
+  # both = T1+C1 (3:1 bias towards T1) — ~20-37% cost on fast meters
+  #
+  # Note: both mode on one device has a real reception cost.
+  # For mixed T1/C1 environments consider two separate devices.
+  # ---------------------------------------------------------------------------
+  listen_mode: t1             # domyślnie: both / default: both
 
   # ---------------------------------------------------------------------------
   # BŁĘDY RADIA PRZY STARCIE / RADIO ERRORS AT BOOT  (SX1262, opcjonalne)
-  #
-  # clear_device_errors_on_boot:
-  #   Jednorazowo po pierwszym odebranym pakiecie: odczytaj i wyczyść rejestr
-  #   błędów SX1262 (GetDeviceErrors / ClearDeviceErrors).
-  #   Przydatne do diagnozy problemów oscylatora / zasilania przy starcie.
-  #   Once after the first received packet: read and clear SX1262 error register
-  #   (GetDeviceErrors / ClearDeviceErrors).
-  #   Useful for diagnosing oscillator / power issues at boot.
-  #
-  # publish_dev_err_after_clear:
-  #   Opublikuj wartości przed i po wyczyszczeniu jako event JSON na diagnostic_topic.
-  #   Wymaga diagnostic_topic.
-  #   Publish before/after error values as JSON event on diagnostic_topic.
-  #   Requires diagnostic_topic.
-  #
-  # Przykładowy event: {"event":"dev_err_cleared","before":4,"before_hex":"0004","after":0,"after_hex":"0000"}
-  # Jeśli "before"=0 zawsze → radio startuje czysto, można wyłączyć obie opcje.
-  # If "before"=0 always → radio starts clean, both options can be disabled.
   # ---------------------------------------------------------------------------
-  clear_device_errors_on_boot: true   # domyślnie: false / default: false
-  publish_dev_err_after_clear: true   # domyślnie: false / default: false
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: true
 
   # ---------------------------------------------------------------------------
-  # PODŚWIETLANIE LOGÓW / LOG HIGHLIGHTING  (opcjonalne)
+  # PODŚWIETLANIE I STATYSTYKI PER-LICZNIK / HIGHLIGHTING AND PER-METER STATS
   #
-  # Wyróżnia wybrane liczniki w logach serial/API.
-  # Dodatkowo ta sama lista może posłużyć jako filtr dla diagnostyki MQTT
-  # per-packet (dropped / truncated), jeśli włączysz:
-  #   diagnostic_publish_highlight_only: true
+  # Wyróżnia wybrane liczniki w logach i śledzi statystyki odbioru.
+  # Statystyki publikowane na MQTT co 10 pakietów i co 15 minut.
+  # Topic: {diagnostic_topic}/meter/{id}/{mode}/window/{trigger}
   #
-  # To NIE filtruje on_frame ani głównej publikacji telegramów.
-  # Summary dalej liczy cały ruch z eteru.
-  #
-  # Highlights selected meters in serial/API logs.
-  # The same list can also be reused as a filter for per-packet MQTT
-  # diagnostics (dropped / truncated) when:
-  #   diagnostic_publish_highlight_only: true
-  #
-  # This does NOT filter on_frame or your main telegram publish.
-  # Summary still counts all RF traffic.
-  #
-  # highlight_meters: lista ID liczników (BCD, bez spacji)
-  #                   list of meter IDs (BCD, no spaces)
-  # highlight_ansi:   true = kolor ANSI zielony w logach (terminal/screen)
-  #                   true = green ANSI color in logs (terminal/screen)
-  # highlight_tag:    tag logu dla wyróżnionych / log tag for highlighted meters
-  # highlight_prefix: prefiks przed treścią logu / prefix before log message
+  # Highlights selected meters in logs and tracks reception statistics.
+  # Stats published to MQTT every 10 packets and every 15 minutes.
+  # Topic: {diagnostic_topic}/meter/{id}/{mode}/window/{trigger}
   # ---------------------------------------------------------------------------
   highlight_meters:
-    - "12345678"             # przykładowy licznik usera / example user meter
-    # - "87654321"           # możesz dodać więcej / add more as needed
-  highlight_ansi: true        # domyślnie: false / default: false
-  highlight_tag: "wmbus_user" # domyślnie: "wmbus_user" / default: "wmbus_user"
-  highlight_prefix: "★ "      # domyślnie: "★ " / default: "★ "
+    - "12345678"             # przykładowy licznik / example meter ID
+    # - "87654321"
+  highlight_ansi: true
+  highlight_tag: "wmbus_user"
+  highlight_prefix: "★ "
 
   # ---------------------------------------------------------------------------
-  # DIAGNOSTYKA – MQTT / DIAGNOSTICS – MQTT  (opcjonalne)
-  #
-  # diagnostic_topic:
-  #   Topic MQTT gdzie lądują JSON-y diagnostyczne.
-  #   Jeśli pusty → diagnostyka wyłączona.
-  #   MQTT topic for diagnostic JSON events.
-  #   Empty string → diagnostics disabled.
-  #
-  # diagnostic_summary_interval:
-  #   Co ile wysyłać summary.
-  #   Minimum 5s (wymuszane przez kod).
-  #   How often to publish summary.
-  #   Minimum 5s (enforced by code).
-  #
-  # diagnostic_verbose:
-  #   true  = dropped/truncated logowane także na serial/API
-  #   false = serial/API cichsze; nie wpływa na same publikacje MQTT
-  #   true  = dropped/truncated are also logged to serial/API
-  #   false = quieter serial/API; does not control MQTT publishing itself
-  #
-  # diagnostic_publish_summary:
-  #   true  = publikuj okresowe summary na MQTT
-  #   false = nie publikuj summary
-  #   true  = publish periodic summary to MQTT
-  #   false = do not publish summary
-  #
-  # diagnostic_publish_drop_events:
-  #   true  = publikuj pojedyncze eventy dropped/truncated
-  #   false = tylko liczniki w summary, bez pojedynczych eventów
-  #   true  = publish per-packet dropped/truncated events
-  #   false = summary counters only, no per-packet events
-  #
-  # diagnostic_publish_rx_path_events:
-  #   true  = publikuj eventy z toru RX (IRQ timeout, payload_read_failed itp.)
-  #   false = nie publikuj eventów rx_path
-  #   true  = publish RX-path events (IRQ timeout, payload_read_failed, etc.)
-  #   false = do not publish rx_path events
-  #
-  # diagnostic_publish_highlight_only:
-  #   true  = per-packet MQTT diag tylko dla liczników z highlight_meters
-  #   false = per-packet MQTT diag dla wszystkiego
-  #   Uwaga: działa dla dropped/truncated. Summary nadal liczy cały eter.
-  #   true  = per-packet MQTT diagnostics only for meters from highlight_meters
-  #   false = per-packet MQTT diagnostics for everything
-  #   Note: applies to dropped/truncated. Summary still counts all RF traffic.
-  #
-  # diagnostic_publish_raw:
-  #   true  = eventy dropped/truncated zawierają pole "raw" z HEX
-  #   false = bez pola "raw" (mniejszy payload MQTT)
-  #   true  = dropped/truncated events include "raw" HEX field
-  #   false = no "raw" field (smaller MQTT payload)
+  # DIAGNOSTYKA – MQTT / DIAGNOSTICS – MQTT
   # ---------------------------------------------------------------------------
-  diagnostic_topic: "wmbus/heltec/diag" # przykładowy topic / example topic
-  diagnostic_summary_interval: 120s      # summary co 2 min / summary every 2 min
-  diagnostic_verbose: false              # lokalny log ciszej / quieter local logging
-  diagnostic_publish_summary: true       # summary zostaje / keep summary
-  diagnostic_publish_drop_events: true   # dropped/truncated publikuj, ale patrz niżej
-  diagnostic_publish_rx_path_events: false # mniej spamu / less spam
-  diagnostic_publish_highlight_only: true  # tylko dla highlight_meters
-  diagnostic_publish_raw: false          # mniejsze payloady MQTT
+  diagnostic_topic: "wmbus/heltec/diag"
+  diagnostic_summary_interval: 120s
+  diagnostic_publish_summary_15min: true
+  diagnostic_publish_summary_60min: false
+# summary topics: <diagnostic_topic>/summary, /summary_15min, /summary_60min
+  diagnostic_verbose: false
+  diagnostic_publish_summary: true
+  diagnostic_publish_drop_events: true
+  diagnostic_publish_rx_path_events: false
+  diagnostic_publish_highlight_only: true
+  diagnostic_publish_raw: false
+
+  # Główna publikacja RAW do wmbusmeters / Main RAW publish to wmbusmeters
+  telegram_topic: "wmbus_bridge/heltec/telegram"
 
   # ---------------------------------------------------------------------------
-  # ON_FRAME – callback wywoływany dla każdej poprawnej ramki
-  # ON_FRAME – callback called for every valid frame
+  # ON_FRAME – opcjonalny callback dla dodatków / optional callback for extras
   #
-  # Dostępne metody na obiekcie "frame" / Available methods on "frame" object:
-  #
-  #   frame->as_hex()       → std::string  – telegram w HEX (dla wmbusmeters)
-  #   frame->as_raw()       → vector<u8>   – surowe bajty ramki
-  #   frame->as_rtlwmbus()  → std::string  – format rtl-wmbus: "T1;1;1;timestamp;rssi;hex"
-  #   frame->rssi()         → int8_t       – RSSI w dBm (np. -74)
-  #   frame->link_mode()    → LinkMode     – tryb T1 lub C1
-  #   frame->format()       → std::string  – format bloku: "A" lub "B"
-  #
-  # mark_as_handled:
-  #   false (domyślnie) = komponent loguje "Telegram not handled by any handler"
-  #   true              = komponent loguje "Telegram handled by N handlers"
-  #   false (default)   = component logs "Telegram not handled by any handler"
-  #   true              = component logs "Telegram handled by N handlers"
+  # Dostępne metody / Available methods:
+  #   frame->as_hex()       → HEX po usunięciu CRC (dla własnej logiki)
+  #   frame->as_raw()       → vector<uint8_t> surowych bajtów
+  #   frame->as_rtlwmbus()  → format rtl-wmbus: T1;1;1;timestamp;rssi;hex
+  #   frame->rssi()         → int8_t RSSI w dBm
+  #   frame->link_mode()    → LinkMode (T1 lub C1)
+  #   frame->format()       → std::string ("A" lub "B")
   # ---------------------------------------------------------------------------
   on_frame:
-    mark_as_handled: true     # domyślnie: false / default: false
+    mark_as_handled: true
     then:
 
-      # -----------------------------------------------------------------------
-      # PUBLIKACJA TELEGRAMU DO WMBUSMETERS / PUBLISH TELEGRAM TO WMBUSMETERS
-      # To jest główny payload – wmbusmeters/HA addon czyta ten topic.
-      # This is the main payload – wmbusmeters/HA add-on reads this topic.
-      # -----------------------------------------------------------------------
-      - mqtt.publish:
-          topic: "wmbus_bridge/heltec/telegram"
-          payload: !lambda |-
-            return frame->as_hex();
-
-      # -----------------------------------------------------------------------
-      # MIGANIE LED / LED BLINK – przy każdym telgramie wMBus
-      #
-      # Wizualne potwierdzenie że radio odebrało ramkę.
-      # Visual confirmation that the radio received a frame.
-      #
-      # script.execute zamiast bezpośredniego output.turn_on/delay/turn_off.
-      # mode: single w skrypcie zapewnia że mignięcia się nie nakładają –
-      # szczegóły w komentarzu przy bloku script: powyżej.
-      #
-      # script.execute instead of direct output.turn_on/delay/turn_off.
-      # mode: single in the script ensures blinks do not overlap –
-      # see comment at script: block above for details.
-      #
-      # Żeby wyłączyć / To disable:
-      #   1) Usuń tę linię / Remove this line
-      #   2) Usuń bloki output:, light: i script: / Remove output:, light: and script: blocks
-      # -----------------------------------------------------------------------
+      # Miganie LED przy każdym telegramie / LED blink on every telegram
       - script.execute: blink_led
 
-      # -----------------------------------------------------------------------
-      # OPCJONALNIE: RSSI na osobnym topicu
-      # OPTIONAL: RSSI on a separate topic
-      #
-      # Przydatne gdy chcesz monitorować jakość sygnału w HA jako sensor.
-      # Useful when you want to monitor signal quality in HA as a sensor.
-      # -----------------------------------------------------------------------
+      # Opcjonalnie: RSSI na osobnym topicu / Optional: RSSI on separate topic
       # - mqtt.publish:
       #     topic: "wmbus_bridge/rssi"
       #     payload: !lambda |-
       #       return to_string((int) frame->rssi());
 
-      # -----------------------------------------------------------------------
-      # OPCJONALNIE: Format rtl-wmbus (jeśli masz narzędzie które go czyta)
-      # OPTIONAL: rtl-wmbus format (if you have a tool that consumes it)
-      #
-      # Format: T1;1;1;2026-03-01 12:00:00;-74;2F2F...hex...
-      # -----------------------------------------------------------------------
+      # Opcjonalnie: format rtl-wmbus / Optional: rtl-wmbus format
       # - mqtt.publish:
       #     topic: "wmbus_bridge/rtlwmbus"
       #     payload: !lambda |-
       #       return frame->as_rtlwmbus();
-
-      # -----------------------------------------------------------------------
-      # OPCJONALNIE: Dynamiczny topic per licznik (ID w topicu)
-      # OPTIONAL: Dynamic topic per meter (meter ID in topic path)
-      #
-      # Bajty 4-7 HEX (pozycje 8-15) to ID licznika dla C-mode Format A.
-      # Bytes 4-7 HEX (positions 8-15) are meter ID for C-mode Format A.
-      #
-      # Uwaga: pozycja ID zależy od formatu ramki – to przykład orientacyjny.
-      # Note: ID position depends on frame format – this is an indicative example.
-      # -----------------------------------------------------------------------
-      # - mqtt.publish:
-      #     topic: !lambda |-
-      #       const auto &h = frame->as_hex();
-      #       if (h.size() >= 16)
-      #         return std::string("wmbus_bridge/meter/") + h.substr(8, 8);
-      #       return std::string("wmbus_bridge/meter/unknown");
-      #     payload: !lambda |-
-      #       return frame->as_hex();

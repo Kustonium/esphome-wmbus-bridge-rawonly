@@ -25,6 +25,8 @@ public:
   // Reserve/extend internal buffer and return pointer to the newly appended
   // region. The returned memory is valid until the next reallocation.
   uint8_t *append_space(size_t len);
+  void resize(size_t len);
+  size_t size() const { return this->data_.size(); }
 
   // Expected total packet size (including PHY header bytes as provided by
   // the transceiver). Returns 0 if it can't be determined from current data.

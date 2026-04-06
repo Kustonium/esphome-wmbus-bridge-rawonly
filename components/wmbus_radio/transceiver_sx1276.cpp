@@ -39,7 +39,9 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
     this->frame_active_ = false;
     this->rssi_captured_ = false;
     this->last_rssi_dbm_ = -127;
-    ESP_LOGW(TAG, "FIFO overrun");
+    this->abort_requested_ = true;
+    this->fifo_overrun_count_++;
+    ESP_LOGW(TAG, "FIFO overrun / przepelnienie FIFO");
     return {};
   }
 
@@ -82,13 +84,13 @@ void SX1276::setup() {
     const char *lm = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                    : "T1+C1 (both, 3:1 bias)";
-    ESP_LOGI(TAG, "Listen mode: %s", lm);
+    ESP_LOGI(TAG, "Listen mode / tryb nasluchu: %s", lm);
   }
   this->reset();
 
   const uint8_t revision = this->spi_read(0x42);
   if (revision < 0x11 || revision > 0x13) {
-    ESP_LOGE(TAG, "Invalid silicon revision: %02X", revision);
+    ESP_LOGE(TAG, "Invalid silicon revision / nieprawidlowa rewizja ukladu: %02X", revision);
     return;
   }
 
@@ -194,12 +196,25 @@ void SX1276::restart_rx() {
   this->frame_active_ = false;
   this->rssi_captured_ = false;
   this->last_rssi_dbm_ = -127;
+  this->abort_requested_ = false;
 
   this->spi_write(REG_OP_MODE, (uint8_t) 0b101);  // RX
 }
 
 int8_t SX1276::get_rssi() {
   return this->last_rssi_dbm_;
+}
+
+bool SX1276::consume_rx_abort_request() {
+  const bool abort = this->abort_requested_;
+  this->abort_requested_ = false;
+  return abort;
+}
+
+uint32_t SX1276::take_fifo_overrun_count() {
+  const uint32_t count = this->fifo_overrun_count_;
+  this->fifo_overrun_count_ = 0;
+  return count;
 }
 
 const char *SX1276::get_name() { return TAG; }

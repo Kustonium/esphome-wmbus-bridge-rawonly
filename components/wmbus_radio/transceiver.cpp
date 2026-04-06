@@ -16,6 +16,8 @@ bool RadioTransceiver::read_in_task(uint8_t *buffer, size_t length) {
     auto byte = this->read();
     if (byte.has_value())
       *buffer++ = *byte;
+    else if (this->consume_rx_abort_request())
+      return false;
     else if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1)))
       return false;
     else
@@ -23,6 +25,35 @@ bool RadioTransceiver::read_in_task(uint8_t *buffer, size_t length) {
   }
 
   return true;
+}
+
+bool RadioTransceiver::read_in_task_partial(uint8_t *buffer, size_t max_length,
+                                            size_t &out_read, uint32_t wait_ms,
+                                            uint8_t idle_rounds) {
+  out_read = 0;
+  if (max_length == 0) return true;
+  if (idle_rounds == 0) idle_rounds = 1;
+
+  uint8_t idle_seen = 0;
+  while (out_read < max_length) {
+    auto byte = this->read();
+    if (byte.has_value()) {
+      buffer[out_read++] = *byte;
+      idle_seen = 0;
+      continue;
+    }
+
+    if (this->consume_rx_abort_request()) {
+      break;
+    }
+
+    if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms))) {
+      idle_seen++;
+      if (idle_seen >= idle_rounds) break;
+    }
+  }
+
+  return out_read == max_length;
 }
 
 void RadioTransceiver::set_reset_pin(InternalGPIOPin *reset_pin) {

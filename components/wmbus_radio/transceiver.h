@@ -26,11 +26,23 @@ public:
   virtual int8_t get_rssi() = 0;
   virtual const char *get_name() = 0;
 
+  // Radio-specific recovery hints for the upper RX pipeline.
+  // Default: keep the generic strict path.
+  virtual bool supports_preamble_retry() const { return false; }
+  virtual bool supports_unknown_size_raw_drain() const { return false; }
+
+  // Optional SX1276-style early abort hooks / diagnostics.
+  virtual bool supports_weak_partial_start_abort() const { return false; }
+  virtual bool consume_rx_abort_request() { return false; }
+  virtual uint32_t take_fifo_overrun_count() { return 0; }
+
   // Optional: report SX126x device errors captured during boot clear.
   // Default: not supported.
   virtual bool get_boot_device_errors(uint16_t &before, uint16_t &after) const { return false; }
 
   bool read_in_task(uint8_t *buffer, size_t length);
+  bool read_in_task_partial(uint8_t *buffer, size_t max_length, size_t &out_read,
+                            uint32_t wait_ms = 1, uint8_t idle_rounds = 1);
 
   void set_spi(spi::SPIDelegate *spi);
   void set_reset_pin(InternalGPIOPin *reset_pin);

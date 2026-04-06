@@ -161,6 +161,12 @@ uint8_t *Packet::append_space(size_t len) {
   return this->data_.data() + old;
 }
 
+void Packet::resize(size_t len) {
+  this->data_.resize(len);
+  if (this->expected_size_ > len) this->expected_size_ = 0;
+  if (this->link_mode_ != LinkMode::UNKNOWN && len == 0) this->link_mode_ = LinkMode::UNKNOWN;
+}
+
 // Helpers for DLL size calculation
 static inline size_t blocks_for_l_(uint8_t l_field) {
   // EN13757-3: number of blocks depends on L-field
