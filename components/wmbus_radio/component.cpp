@@ -74,13 +74,29 @@ static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &o
       const char *s = tok.c_str();
       int base = 10;
       if (tok.size() > 2 && tok[0] == '0' && (tok[1] == 'x' || tok[1] == 'X')) {
+        // Explicit hex prefix: 0x417f0666
         s += 2;
         base = 16;
+      } else {
+        // Auto-detect bare hex: if the token contains a-f/A-F it must be hex
+        bool has_hex_digit = false;
+        for (char c : tok) {
+          if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+            has_hex_digit = true;
+            break;
+          }
+        }
+        if (has_hex_digit) {
+          base = 16;
+        }
       }
       char *endp = nullptr;
       unsigned long v = std::strtoul(s, &endp, base);
-      if (endp != s) {
+      if (endp != s && *endp == '\0') {
         out.push_back((uint32_t) v);
+      } else {
+        // Token did not parse cleanly — warn the user
+        ESP_LOGW("wmbus", "highlight_meters: could not parse meter ID '%s' — use decimal (e.g. 12345678) or hex with prefix (e.g. 0x417f0666)", tok.c_str());
       }
     }
     i = j;
