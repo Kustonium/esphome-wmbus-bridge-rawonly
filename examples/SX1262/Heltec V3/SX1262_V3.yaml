@@ -1,0 +1,47 @@
+# Known-working config fragment for Heltec WiFi LoRa 32 V3
+# Confirmed by user in GitHub issue #7.
+# This is not a full config - only the board-specific and relevant parts.
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+# GPIO36 controls Vext power.
+# On Heltec V3 it powers both the OLED and the radio module.
+switch:
+  - platform: gpio
+    pin: GPIO36
+    id: vext
+    internal: true
+    inverted: true
+    restore_mode: ALWAYS_ON
+
+i2c:
+  sda: 17
+  scl: 18
+  scan: true
+
+display:
+  - platform: ssd1306_i2c
+    id: heltec_display
+    model: "SSD1306 128x64"
+    address: 0x3C
+    reset_pin: 21
+
+spi:
+  clk_pin: GPIO9
+  mosi_pin: GPIO10
+  miso_pin: GPIO11
+
+wmbus_radio:
+  radio_type: SX1262
+  cs_pin: GPIO8
+  reset_pin: GPIO12
+  irq_pin: GPIO14
+  busy_pin: GPIO13
+  has_tcxo: true
+  rf_switch: false
+  long_gfsk_packets: true
+  listen_mode: t1
