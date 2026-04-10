@@ -217,7 +217,9 @@ bool Radio::sx1276_busy_ether_severe_now_() const {
 // emitted on state transitions so the user can observe adaptive behaviour via serial/MQTT.
 void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
   if (this->sx1276_busy_ether_mode_ != SX1276BusyEtherMode::ADAPTIVE) return;
+  if (!radio_supports_weak_partial_start_abort_(this->radio)) return;
 
+  const char *chip = (this->radio != nullptr) ? this->radio->get_name() : "unknown";
   const uint32_t fsl = this->current_false_start_like_();
   const uint32_t drop_pct = (this->diag_total_ > 0 && this->diag_total_ > this->diag_ok_)
       ? (((this->diag_total_ - this->diag_ok_) * 100U) / this->diag_total_) : 0U;
@@ -256,10 +258,10 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
         if (mqtt != nullptr && mqtt->is_connected()) {
           char ev[256];
           snprintf(ev, sizeof(ev),
-                   "{\"event\":\"busy_ether_changed\",\"chip\":\"SX1276\","
+                   "{\"event\":\"busy_ether_changed\",\"chip\":\"%s\","
                    "\"state\":\"adaptive_active\","
                    "\"fsl\":%u,\"drop_pct\":%u}",
-                   fsl, drop_pct);
+                   chip, fsl, drop_pct);
           mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), static_cast<uint8_t>(0), false);
         }
       }
@@ -276,10 +278,10 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
       if (mqtt != nullptr && mqtt->is_connected()) {
         char ev[256];
         snprintf(ev, sizeof(ev),
-                 "{\"event\":\"busy_ether_changed\",\"chip\":\"SX1276\","
+                 "{\"event\":\"busy_ether_changed\",\"chip\":\"%s\","
                  "\"state\":\"adaptive_passive\","
                  "\"fsl\":%u,\"drop_pct\":%u}",
-                 fsl, drop_pct);
+                 chip, fsl, drop_pct);
         mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), static_cast<uint8_t>(0), false);
       }
     }
@@ -953,6 +955,87 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
 }
 
 
+void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s, uint32_t now_ms) {
+  if (!this->diag_publish_summary_highlight_meters_) return;
+  if (this->highlight_meter_stats_.empty()) return;
+  if (this->diag_topic_.empty()) return;
+  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  if (mqtt == nullptr || !mqtt->is_connected()) return;
+
+  const char *listen_mode = (this->radio != nullptr)
+                                ? listen_mode_to_string_(this->radio->get_listen_mode())
+                                : "unknown";
+
+  // Build JSON array of all highlight meters in one payload.
+  // Topic: {diag_topic}/meter_snapshot
+  std::string batch = "{";
+  batch += "\"event\":\"meter_snapshot\",";
+  batch += "\"trigger\":\"";
+  batch += trigger;
+  batch += "\",";
+  batch += "\"uptime_ms\":";
+  batch += std::to_string(now_ms);
+  batch += ",\"listen_mode\":\"";
+  batch += listen_mode;
+  batch += "\",\"elapsed_s\":";
+  batch += std::to_string(elapsed_s);
+  batch += ",\"meters\":[";
+
+  bool first = true;
+  for (auto &kv : this->highlight_meter_stats_) {
+    const uint64_t key = kv.first;
+    MeterStats &st = kv.second;
+    const uint32_t meter_id = (uint32_t)(key >> 8);
+    const uint8_t mode_byte = (uint8_t)(key & 0xFF);
+    char id_str[12];
+    snprintf(id_str, sizeof(id_str), "%08" PRIu32, meter_id);
+    const char *mode_str = (mode_byte == (uint8_t) LinkMode::C1) ? "C1" : "T1";
+
+    // Use dedicated 60min counters for summary_60min trigger to avoid
+    // showing only the last 15min of data (count_window_time is reset every 15min).
+    const bool is_60min = (std::strcmp(trigger, "summary_60min") == 0);
+    const uint32_t count_window = is_60min ? st.count_window_60min    : st.count_window_time;
+    const int32_t rssi_sum      = is_60min ? st.rssi_sum_window_60min : st.rssi_sum_window_time;
+    const uint32_t rssi_n       = is_60min ? st.rssi_n_window_60min   : st.rssi_n_window_time;
+    const uint32_t interval_sum_ms = is_60min ? st.interval_sum_window_60min_ms : st.interval_sum_window_time_ms;
+    const uint32_t interval_n      = is_60min ? st.interval_n_window_60min      : st.interval_n_window_time;
+
+    const int32_t win_avg_rssi = (rssi_n > 0) ? (rssi_sum / (int32_t) rssi_n) : 0;
+    const uint32_t avg_interval_s = (st.interval_n > 0) ? (st.interval_sum_ms / st.interval_n) / 1000 : 0;
+    const uint32_t win_avg_interval_s = (interval_n > 0) ? (interval_sum_ms / interval_n) / 1000 : 0;
+
+    char entry[256];
+    snprintf(entry, sizeof(entry),
+             "%s{"
+             "\"id\":\"%s\","
+             "\"mode\":\"%s\","
+             "\"count_window\":%u,"
+             "\"count_total\":%u,"
+             "\"avg_interval_s\":%u,"
+             "\"win_avg_interval_s\":%u,"
+             "\"win_interval_n\":%u,"
+             "\"last_rssi\":%d,"
+             "\"win_avg_rssi\":%d"
+             "}",
+             first ? "" : ",",
+             id_str, mode_str,
+             (unsigned) count_window,
+             (unsigned) st.count,
+             (unsigned) avg_interval_s,
+             (unsigned) win_avg_interval_s,
+             (unsigned) interval_n,
+             (int) st.rssi_last,
+             (int) win_avg_rssi);
+    batch += entry;
+    first = false;
+  }
+  batch += "]}";
+
+  const std::string snapshot_topic = this->diag_topic_ + "/meter_snapshot";
+  mqtt->publish(snapshot_topic, batch, static_cast<uint8_t>(0), false);
+  ESP_LOGI(TAG, "METER SNAPSHOT / snapshot licznikow: trigger=%s meters=%zu", trigger, this->highlight_meter_stats_.size());
+}
+
 void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   if (!this->diag_publish_summary_) return;
   if (!this->diag_publish_summary_15min_) return;
@@ -1291,6 +1374,8 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
                                       st.interval_n_window_time,
                                       false, false);
     }
+    // Publish all highlight meters as a single batch payload for easier log analysis.
+    this->publish_meter_window_batch_("summary_15min", elapsed / 1000U, now_ms);
   }
   this->diag_15m_total_ = 0;
   this->diag_15m_ok_ = 0;
@@ -1649,10 +1734,21 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
       const char *mode_str = (mode_byte == (uint8_t) LinkMode::C1) ? "C1" : "T1";
       const uint32_t st_elapsed_s = elapsed / 1000U;
       this->publish_meter_window_for_("summary_60min", st_elapsed_s, id_str, mode_str, st,
-                                      st.count_window_time, st.rssi_sum_window_time,
-                                      st.rssi_n_window_time, st.interval_sum_window_time_ms,
-                                      st.interval_n_window_time,
+                                      st.count_window_60min, st.rssi_sum_window_60min,
+                                      st.rssi_n_window_60min, st.interval_sum_window_60min_ms,
+                                      st.interval_n_window_60min,
                                       false, false);
+    }
+    // Publish batch BEFORE resetting 60min counters — batch reads the same fields.
+    this->publish_meter_window_batch_("summary_60min", elapsed / 1000U, now_ms);
+    // Reset 60min window after publish — only here, never in 15min summary.
+    for (auto &kv2 : this->highlight_meter_stats_) {
+      MeterStats &st2 = kv2.second;
+      st2.count_window_60min = 0;
+      st2.rssi_sum_window_60min = 0;
+      st2.rssi_n_window_60min = 0;
+      st2.interval_sum_window_60min_ms = 0;
+      st2.interval_n_window_60min = 0;
     }
   }
 
@@ -1840,10 +1936,19 @@ void Radio::setup() {
 
   ASSERT_SETUP(this->packet_queue_ = xQueueCreate(3, sizeof(Packet *)));
 
+  // This component uses its own FreeRTOS receiver task instead of ESPHome's
+  // main loop task. Because of that, ESPHome's loop_task_stack_size YAML option
+  // is not enough here.
+  //
+  // Why this is configurable: some boards with tighter RAM/headroom may need a
+  // larger receiver stack on newer builds with heavier diagnostics, while the
+  // default 3 KB is still fine for existing setups. Making it runtime-configured
+  // avoids board-specific forks and keeps one shared codebase.
   ASSERT_SETUP(xTaskCreate((TaskFunction_t)this->receiver_task, "radio_recv",
-                           3 * 1024, this, 2, &(this->receiver_task_handle_)));
+                           this->receiver_task_stack_size_, this, 2, &(this->receiver_task_handle_)));
 
-  ESP_LOGI(TAG, "Receiver task created / utworzono task odbiornika [%p]", this->receiver_task_handle_);
+  ESP_LOGI(TAG, "Receiver task created / utworzono task odbiornika [%p], stack=%u bytes",
+           this->receiver_task_handle_, (unsigned) this->receiver_task_stack_size_);
 
   this->radio->attach_data_interrupt(Radio::wakeup_receiver_task_from_isr,
                                      &(this->receiver_task_handle_));
@@ -1876,6 +1981,7 @@ void Radio::dump_config() {
   ESP_LOGCONFIG(TAG, "  Radio type: %s", this->radio->get_name());
   ESP_LOGCONFIG(TAG, "  Listen mode: %s",
                 listen_mode_to_string_(this->radio->get_listen_mode()));
+  ESP_LOGCONFIG(TAG, "  Receiver task stack: %u bytes", (unsigned) this->receiver_task_stack_size_);
   const char *busy_mode = (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL) ? "normal"
                            : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE) ? "aggressive"
                            : "adaptive";
@@ -1891,18 +1997,20 @@ void Radio::dump_config() {
 void Radio::loop() {
   const uint32_t loop_now_ms = (uint32_t) esphome::millis();
 
-  if (!this->boot_log_done_ && this->radio != nullptr) {
-    if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
-      ESP_LOGI(TAG, "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s",
-               this->radio->get_name(),
-               listen_mode_to_string_(this->radio->get_listen_mode()));
-      this->boot_log_last_ms_ = loop_now_ms;
-      this->boot_log_count_++;
-      if (this->boot_log_count_ >= 3) {
-        this->boot_log_done_ = true;
-      }
+if (!this->boot_log_done_ && this->radio != nullptr) {
+  if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
+    ESP_LOGI(TAG,
+             "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
+             this->radio->get_name(),
+             listen_mode_to_string_(this->radio->get_listen_mode()),
+             (unsigned) this->receiver_task_stack_size_);
+    this->boot_log_last_ms_ = loop_now_ms;
+    this->boot_log_count_++;
+    if (this->boot_log_count_ >= 3) {
+      this->boot_log_done_ = true;
     }
   }
+}
 
   auto *mqtt = mqtt::global_mqtt_client;
   if (this->radio != nullptr && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
@@ -2227,6 +2335,11 @@ void Radio::loop() {
     stats.rssi_sum_window_time += (int32_t) frame->rssi();
     stats.rssi_n_window_time++;
 
+    // 60min window — reset only at summary_60min, never at summary_15min.
+    stats.count_window_60min++;
+    stats.rssi_sum_window_60min += (int32_t) frame->rssi();
+    stats.rssi_n_window_60min++;
+
     if (stats.count_window_count == 0) {
       stats.count_window_started_ms = now_ms;
     }
@@ -2240,6 +2353,8 @@ void Radio::loop() {
       stats.interval_n++;
       stats.interval_sum_window_time_ms += stats.last_interval_ms;
       stats.interval_n_window_time++;
+      stats.interval_sum_window_60min_ms += stats.last_interval_ms;
+      stats.interval_n_window_60min++;
       if (stats.count_window_count > 1) {
         stats.interval_sum_window_count_ms += stats.last_interval_ms;
         stats.interval_n_window_count++;

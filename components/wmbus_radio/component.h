@@ -61,6 +61,16 @@ public:
   void set_diag_publish_summary_60min(bool enabled) { this->diag_publish_summary_60min_ = enabled; }
   void set_diag_publish_summary_highlight_meters(bool enabled) { this->diag_publish_summary_highlight_meters_ = enabled; }
   void set_sx1276_busy_ether_mode(SX1276BusyEtherMode mode) { this->sx1276_busy_ether_mode_ = mode; }
+  void set_receiver_task_stack_size(uint32_t stack_size) {
+    // This configures the dedicated radio_recv FreeRTOS task created by
+    // wmbus_radio. It does NOT change ESPHome's main loop task stack.
+    //
+    // Why this exists: some boards can run older builds on the default 3 KB
+    // receiver stack, but overflow on newer builds with heavier diagnostics.
+    // Keeping it as a YAML option avoids board-specific branches and lets the
+    // user raise the stack only where needed.
+    this->receiver_task_stack_size_ = stack_size < 2048 ? 2048 : stack_size;
+  }
 
   void setup() override;
   void loop() override;
@@ -76,6 +86,9 @@ protected:
   RadioTransceiver *radio{nullptr};
   TaskHandle_t receiver_task_handle_{nullptr};
   QueueHandle_t packet_queue_{nullptr};
+  // Stack for the dedicated radio_recv task. Default stays at 3 KB so existing
+  // configs behave exactly as before unless the user overrides it in YAML.
+  uint32_t receiver_task_stack_size_{3 * 1024};
 
   std::vector<std::function<void(Frame *)>> handlers_;
 
@@ -103,6 +116,14 @@ protected:
     uint32_t interval_sum_window_count_ms{0};
     uint32_t interval_n_window_count{0};
     uint32_t count_window_started_ms{0};
+
+    // Independent 60-minute window counters — reset only at summary_60min,
+    // NOT at summary_15min. Fixes count_window showing only last 15min of data.
+    uint32_t count_window_60min{0};
+    int32_t  rssi_sum_window_60min{0};
+    uint32_t rssi_n_window_60min{0};
+    uint32_t interval_sum_window_60min_ms{0};
+    uint32_t interval_n_window_60min{0};
   };
   // Key encodes both meter_id and link mode: (meter_id << 8) | (uint8_t)LinkMode.
   // This keeps T1 and C1 statistics separate for dual-mode meters
@@ -309,6 +330,7 @@ protected:
                                    bool reset_time_window,
                                    bool reset_count_window);
   void maybe_publish_meter_windows_(uint32_t now_ms);
+  void publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s, uint32_t now_ms);
 
   // Periodic timer for meter window summaries (default: 15 min)
   uint32_t meter_window_interval_ms_{900000};

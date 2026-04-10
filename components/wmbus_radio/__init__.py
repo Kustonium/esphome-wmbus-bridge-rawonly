@@ -31,6 +31,7 @@ CONF_RADIO_TYPE = "radio_type"
 CONF_MARK_AS_HANDLED = "mark_as_handled"
 CONF_BUSY_PIN = "busy_pin"
 CONF_LISTEN_MODE = "listen_mode"
+CONF_RECEIVER_TASK_STACK_SIZE = "receiver_task_stack_size"
 
 # Optional built-in RAW forwarding (avoids YAML on_frame boilerplate)
 CONF_TELEGRAM_TOPIC = "telegram_topic"
@@ -102,6 +103,16 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
                 "t1", "c1", "both", lower=True
             ),
+            # Stack size for the dedicated radio_recv FreeRTOS task created by this
+            # component. This is intentionally separate from ESPHome's
+            # loop_task_stack_size because that YAML option only affects the main
+            # loop task, while wmbus_radio uses its own receiver task.
+            #
+            # Why this exists: some smaller / different boards (for example XIAO)
+            # can be fine on 1.0.x and then overflow the receiver task stack on a
+            # newer build with heavier diagnostics enabled. Making it configurable
+            # avoids per-board branches and keeps one shared codebase.
+            cv.Optional(CONF_RECEIVER_TASK_STACK_SIZE, default=3072): cv.int_range(min=2048, max=16384),
 
             # SX1262-specific tuning (ignored for other radios)
             cv.Optional(CONF_DIO2_RF_SWITCH, default=True): cv.boolean,
@@ -229,6 +240,7 @@ async def to_code(config):
     cg.add(cg.LineComment("WMBus Component"))
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_radio(radio_var))
+    cg.add(var.set_receiver_task_stack_size(config[CONF_RECEIVER_TASK_STACK_SIZE]))
 
     cg.add(var.set_diag_topic(config.get(CONF_DIAG_TOPIC, "wmbus/diag")))
     cg.add(var.set_telegram_topic(config.get(CONF_TELEGRAM_TOPIC, "")))
