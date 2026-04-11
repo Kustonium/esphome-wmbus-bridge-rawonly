@@ -1,0 +1,123 @@
+substitutions:
+  devicename: xiao-seed-esp-s3
+
+esphome:
+  name: ${devicename}
+  friendly_name: XIAO SEED ESP S3
+  on_boot:
+    priority: 900
+    then:
+      - output.turn_on: lora_rf_sw
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  cpu_frequency: 160MHz
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly-dev@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: INFO
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+api:
+
+ota:
+  - platform: esphome
+
+mdns:
+  disabled: false
+
+time:
+  - platform: homeassistant
+
+button:
+  - platform: restart
+    name: "XIAO SEED ESP S3 restart"
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "WiFi SSID"
+
+output:
+  - platform: gpio
+    id: lora_rf_sw
+    pin: GPIO38        # było GPIO6
+
+spi:
+  clk_pin: GPIO7
+  miso_pin: GPIO8
+  mosi_pin: GPIO9
+
+wmbus_radio:
+  radio_type: SX1262
+  listen_mode: T1
+  long_gfsk_packets: true
+
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: true
+
+  cs_pin: GPIO41
+  reset_pin: GPIO42
+  busy_pin: GPIO40
+  irq_pin:
+    number: GPIO39
+    mode: input
+
+  has_tcxo: true
+  rx_gain: boosted
+  highlight_meters:
+   - "12345678"
+   - "87654321"
+   - "43218765"
+  highlight_tag: "wmbus_user"
+  highlight_prefix: "★ "
+  highlight_ansi: true
+
+  diagnostic_topic: "wmbus/xiaoseed/diag"
+  diagnostic_summary_interval: 120s
+  diagnostic_publish_summary_15min: false
+  diagnostic_publish_summary_60min: false
+  diagnostic_publish_summary_highlight_meters: true
+  diagnostic_verbose: false
+  diagnostic_publish_summary: true
+  diagnostic_publish_drop_events: true
+  diagnostic_publish_rx_path_events: false
+  diagnostic_publish_highlight_only: true
+  diagnostic_publish_raw: false
+
+
+  on_frame:
+    - then:
+        - mqtt.publish:
+            topic: "wmbus_bridge/xiaoseed/telegram"
+            payload: !lambda |-
+              return frame->as_hex();
