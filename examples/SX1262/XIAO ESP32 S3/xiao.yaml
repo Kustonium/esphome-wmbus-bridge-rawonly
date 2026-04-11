@@ -70,7 +70,7 @@ text_sensor:
 output:
   - platform: gpio
     id: lora_rf_sw
-    pin: GPIO38        # było GPIO6
+    pin: GPIO38
 
 spi:
   clk_pin: GPIO7
@@ -80,6 +80,7 @@ spi:
 wmbus_radio:
   radio_type: SX1262
   listen_mode: T1
+  #receiver_task_stack_size: 6144   # <=zwiększenie stosu , domyślnie jest 3072.
   long_gfsk_packets: true
 
   clear_device_errors_on_boot: true
