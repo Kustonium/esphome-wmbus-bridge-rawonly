@@ -71,7 +71,7 @@ external_components:
 wmbus_radio:
   radio_type: SX1262   # or SX1276
   # ... SPI + radio pins ...
-  telegram_topic: "wmbus_bridge/<device>/telegram"  # choose your own MQTT topic
+  telegram_topic: "wmbus_bridge/my_receiver/telegram"  # choose your own MQTT topic
 ```
 
 Use `on_frame` only when you want extra side effects such as LED blink, extra MQTT topics, or custom per-frame logic.
