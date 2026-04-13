@@ -2,28 +2,28 @@
 
 [English version](README.md)
 
-Minimalny mostek **RF → MQTT**, w którym ESP robi tylko za odbiornik radiowy wM-Bus.
+Stabilny mostek **wireless M-Bus RF → MQTT** dla **SX1262** i **SX1276**.
 
-## Założenie projektu
+Ten projekt zostawia ESP tylko jedno zadanie:
+- odbiór ramek wireless M-Bus,
+- złożenie telegramu,
+- publikację RAW HEX do MQTT,
+- pozostawienie dekodowania licznika poza mikrokontrolerem.
 
-Ten komponent:
+To repo celowo **nie dekoduje liczników na ESP**.  
+Nie dobiera driverów, nie liczy wartości i nie próbuje zastępować `wmbusmeters`.
 
-- odbiera ramki wM-Bus z **SX1262** albo **SX1276**,
-- wykrywa **T1 / C1** i format **A / B**,
-- składa telegram i publikuje go jako **HEX** do MQTT,
-- zostawia **całe dekodowanie licznika poza ESP**.
+## Po co ten projekt?
 
-To repo celowo **nie robi dekodowania na ESP**. Nie dobiera driverów, nie liczy wartości i nie próbuje udawać `wmbusmeters`.
+Wiele projektów wM-Bus na ESP próbuje robić wszystko na urządzeniu.
 
-## Dlaczego RAW-only?
+Ten nie.
 
-Ten projekt rozdziela tor radiowy od dekodowania licznika.
-
-Praktyczne korzyści:
-
-- mniejsze obciążenie CPU/RAM po stronie ESP,
-- mniej regresji firmware wynikających z logiki driverów liczników,
+Celem jest prostsza i stabilniejsza architektura:
+- mniejsze obciążenie CPU i RAM po stronie ESP,
+- mniej regresji firmware wynikających z logiki liczników na mikrokontrolerze,
 - łatwiejsza diagnostyka RF,
+- łatwiejsze utrzymanie,
 - końcowe dekodowanie zostaje po stronie **Home Assistant / Linux / wmbusmeters**, gdzie jego miejsce.
 
 ## Architektura
@@ -32,13 +32,11 @@ Praktyczne korzyści:
 licznik -> SX1262/SX1276 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
 ```
 
-## Dla kogo to jest?
+## Dla kogo to jest
 
-Dla osób, które chcą:
-
-- stabilne radio na ESP,
-- prosty RAW pipeline do MQTT,
-- końcowe dekodowanie i wyższą diagnostykę po stronie **Home Assistant / Linux / wmbusmeters**.
+- dla osób, które chcą stabilne radio na ESP,
+- dla osób, które wolą prosty RAW pipeline do MQTT,
+- dla osób, które chcą dekodowanie i wyższą diagnostykę poza ESP.
 
 ## Szybka decyzja
 
@@ -54,14 +52,29 @@ Więcej szczegółów:
 - **[`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)**
 - **[`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)**
 
-## Ważne ostrzeżenie diagnostyczne
+## Dodatek do Home Assistant
 
-Nie traktuj `summary` jako synonimu realnej jakości odbioru.
+To repo dobrze współpracuje z dodatkiem:
 
-- `summary` pokazuje czystość parsera / decode,
-- `meter_window` pokazuje realną skuteczność odbioru konkretnego licznika.
+- `Kustonium/homeassistant-wmbus-mqtt-bridge`
 
-To jest szczególnie ważne dla **SX1276**, gdzie `adaptive` jest realnym algorytmem okienkowym, a nie mglistym auto-trybem. Raz na okno `summary` sprawdza liczniki false-start-like, `drop_pct`, błędy symboli T1 i FIFO overrun; gdy progi wskazują faktycznie zapchane okno, włącza 5-minutowy hold z ostrzejszym filtrowaniem. Wtedy `summary` może wyglądać dobrze, a `meter_window` nadal pokaże realne straty. Zmiany stanu są publikowane jako `diagnostic_topic/busy_ether_changed`, a wskazówki diagnostyczne jako `diagnostic_topic/suggestion`.
+Surowy HEX z MQTT trafia tam do `wmbusmeters` przez `stdin:hex`.
+
+## Szybki start
+
+```yaml
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+wmbus_radio:
+  radio_type: SX1262   # albo SX1276
+  # ... SPI + piny radia ...
+  telegram_topic: "wmbus_bridge/telegram"
+```
+
+`on_frame` używaj tylko wtedy, gdy chcesz dodać efekty uboczne, np. miganie LED, dodatkowe topiki MQTT albo własną logikę dla każdej ramki.
 
 ## Co repo zawiera
 
@@ -81,28 +94,21 @@ To jest szczególnie ważne dla **SX1276**, gdzie `adaptive` jest realnym algory
   - `suggestion` (ograniczane częstotliwościowo wskazówki diagnostyczne)
   - `dev_err_cleared` (SX1262)
 
-## Szybki start
-
-```yaml
-external_components:
-  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
-    components: [wmbus_radio]
-    refresh: 0s
-
-wmbus_radio:
-  radio_type: SX1262   # albo SX1276
-  # ... SPI + piny radia ...
-  telegram_topic: "wmbus_bridge/telegram"   # wbudowana publikacja RAW dla wmbusmeters
-```
-
-`on_frame` używaj tylko wtedy, gdy chcesz dodać efekty uboczne, np. miganie LED, dodatkowe topiki MQTT albo własną logikę dla każdej ramki.
-
 ## Mapa dokumentacji
 
-- **[`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md)** — pola MQTT, opcje YAML, znaczenie eventów, krótkie/długie okna summary i sposób czytania diagnostyki
+- **[`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md)** — pola MQTT, opcje YAML, znaczenie eventów, krótkie i długie okna summary oraz sposób czytania diagnostyki
 - **[`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)** — praktyczny wybór SX1276 vs SX1262
 - **[`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)** — wnioski z benchmarków dla `T1-only` i `both`
 - **[`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md)** — diagnostyka po objawach
+
+## Ważne ostrzeżenie diagnostyczne
+
+Nie traktuj `summary` jako synonimu realnej jakości odbioru.
+
+- `summary` pokazuje czystość parsera / decode,
+- `meter_window` pokazuje realną skuteczność odbioru konkretnego licznika.
+
+To jest szczególnie ważne dla **SX1276**, gdzie `adaptive` jest realnym algorytmem okienkowym, a nie mglistym auto-trybem. Raz na okno `summary` sprawdza liczniki false-start-like, `drop_pct`, błędy symboli T1 i FIFO overruns; gdy progi wskazują faktycznie zapchane okno, włącza 5-minutowy hold z ostrzejszym filtrowaniem. Wtedy `summary` może wyglądać dobrze, a `meter_window` nadal pokaże realne straty. Zmiany stanu są publikowane jako `diagnostic_topic/busy_ether_changed`, a wskazówki diagnostyczne jako `diagnostic_topic/suggestion`.
 
 ## Ważna uwaga o języku logów
 
@@ -122,21 +128,13 @@ Dzięki temu zwykłe logi są czytelniejsze dla polskiego użytkownika, ale nisk
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
 
-## Dodatek do Home Assistant
-
-To repo dobrze współpracuje z dodatkiem:
-
-- `Kustonium/homeassistant-wmbus-mqtt-bridge`
-
-Surowy HEX z MQTT trafia tam do `wmbusmeters` przez `stdin:hex`.
-
 ## Jak powstał ten projekt
 
 Projekt powstał w marcu 2026 w ciągu 26 dni — od zera do działającego release’u z diagnostyką, obsługą dwóch transceiverów i pełną dokumentacją.
 
 Zaczął się od praktycznej potrzeby: istniejące rozwiązania nie działały tak, jak było to potrzebne w realnym użyciu. Projekt rozwijał się iteracyjnie na prawdziwym sprzęcie, z naciskiem na stabilność, dobrą diagnostykę oraz pozostawienie dekodowania liczników poza urządzeniem ESP.
 
-W trakcie prac wykorzystywane były narzędzia AI (Claude i ChatGPT) — do szkicowania kodu, refaktoryzacji, analizowania wariantów implementacji i przyspieszania iteracji. Kierunek projektu, wymagania, weryfikacja, testy na sprzęcie, odrzucanie złych pomysłów i decyzje architektoniczne pozostawały po mojej stronie.
+W trakcie prac wykorzystywane były narzędzia AI, takie jak Claude i ChatGPT — do szkicowania kodu, refaktoryzacji, analizowania wariantów implementacji i przyspieszania iteracji. Kierunek projektu, wymagania, weryfikacja, testy na sprzęcie, odrzucanie złych pomysłów i decyzje architektoniczne pozostawały po mojej stronie.
 
 To jest opisane wprost, bo tak właśnie ten projekt powstawał: nie przez bezrefleksyjne kopiowanie wygenerowanego kodu, tylko przez użycie AI jako narzędzia programistycznego, z ciągłą weryfikacją i dopasowaniem całości do realnych ograniczeń sprzętu i praktyki.
 
