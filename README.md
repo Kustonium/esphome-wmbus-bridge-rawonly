@@ -54,9 +54,9 @@ For more detail see:
 
 ## Home Assistant add-on
 
-This repo works well with:
-
-- `Kustonium/homeassistant-wmbus-mqtt-bridge`
+This repo works well with the
+[`Kustonium/homeassistant-wmbus-mqtt-bridge`](https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge)
+add-on.
 
 Raw HEX from MQTT is fed there into `wmbusmeters` via `stdin:hex`.
 
@@ -75,6 +75,8 @@ wmbus_radio:
 ```
 
 Use `on_frame` only when you want extra side effects such as LED blink, extra MQTT topics, or custom per-frame logic.
+
+Use a separate MQTT topic for each receiver device.
 
 ## Advanced YAML features
 
@@ -183,6 +185,15 @@ AI tools such as Claude and ChatGPT were used during development for drafting co
 
 This is documented openly because that is how the project was actually built: not by blindly accepting generated code, but by using AI as a development tool while testing and shaping the system around real-world constraints.
 
+## Bug reports
+
+For bug reports, please use GitHub Issues and include:
+
+- exact ESPHome version
+- project version / release / commit
+- relevant YAML
+- logs
+- diagnostic output if relevant
 ## License
 
 **GPL-3.0-or-later** — see `LICENSE` and `NOTICE`.

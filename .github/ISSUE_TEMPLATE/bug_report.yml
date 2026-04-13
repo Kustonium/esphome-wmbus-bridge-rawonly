@@ -1,0 +1,116 @@
+name: Bug report / Zgłoszenie błędu
+description: Report a reproducible bug / Zgłoś powtarzalny błąd
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, read:
+        Zanim wyślesz, przeczytaj:
+
+        - README.md / README_PL.md
+        - DIAGNOSTIC.md / DIAGNOSTIC_PL.md
+        - TROUBLESHOOTING.md / TROUBLESHOOTING_PL.md
+
+        Reports without versions, YAML and logs are usually not actionable.
+        Zgłoszenia bez wersji, YAML i logów zwykle nie nadają się do analizy.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist / Lista kontrolna
+      options:
+        - label: I read the documentation / Przeczytałem dokumentację.
+          required: true
+        - label: I included exact versions, YAML and logs / Dodałem dokładne wersje, YAML i logi.
+          required: true
+        - label: I can reproduce the problem / Potrafię odtworzyć problem.
+          required: true
+
+  - type: dropdown
+    id: radio_type
+    attributes:
+      label: Radio type / Typ radia
+      options:
+        - SX1262
+        - SX1276
+        - Not sure / Nie wiem
+    validations:
+      required: true
+
+  - type: input
+    id: board
+    attributes:
+      label: Board / hardware / Płytka / sprzęt
+      placeholder: Heltec V4 / Lilygo T3-S3 / XIAO ESP32 S3
+    validations:
+      required: true
+
+  - type: input
+    id: esphome_version
+    attributes:
+      label: ESPHome version / Wersja ESPHome
+      placeholder: 2026.3.3
+    validations:
+      required: true
+
+  - type: input
+    id: project_version
+    attributes:
+      label: Project version / release / commit / Wersja projektu / release / commit
+      placeholder: 1.1.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: listen_mode
+    attributes:
+      label: Listen mode / Tryb nasłuchu
+      options:
+        - T1 only
+        - C1 only
+        - both
+        - Not sure / Nie wiem
+    validations:
+      required: true
+
+  - type: textarea
+    id: yaml
+    attributes:
+      label: Relevant YAML / Istotny YAML
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Logi
+      description: Paste text logs, not screenshots if possible. / Wklej logi jako tekst, nie screenshoty jeśli nie musisz.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic output / Diagnostyka
+      description: Include summary / meter_window / dropped / rx_path if relevant. / Dodaj summary / meter_window / dropped / rx_path, jeśli mają znaczenie.
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / Oczekiwane zachowanie
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / Rzeczywiste zachowanie
+    validations:
+      required: true
