@@ -216,7 +216,7 @@ Bo może przyciąć prawdziwe, ale słabsze liczniki.
 
 | Klucz | Domyślnie | Znaczenie |
 |---|---|---|
-| `diagnostic_topic` | `wmbus/diag` | Bazowy topic diagnostyki. |
+| `diagnostic_topic` | `wmbus/my_receiver/diag` | Bazowy topic diagnostyki. |
 | `diagnostic_verbose` | `true` | Loguj szczegóły dropów i truncate także do serial/API. |
 | `diagnostic_publish_summary` | `true` | Publikuj okresowy `summary`. |
 | `diagnostic_publish_drop_events` | `true` | Publikuj eventy `dropped` / `truncated`. |
@@ -301,13 +301,12 @@ Przykład:
 
 ```yaml
 wmbus_radio:
-  telegram_topic: "wmbus_bridge/telegram"
-
   on_frame:
-    then:
-      - mqtt.publish:
-          topic: "wmbus_bridge/rtlwmbus"
-          payload: !lambda return frame->as_rtlwmbus();
+    - then:
+        - mqtt.publish:
+            topic: "wmbus_bridge/my_receiver/telegram"
+            payload: !lambda |-
+              return frame->as_hex();
 ```
 
 `telegram_topic` używaj do głównego strumienia RAW. `on_frame` zostaw do dodatków, np. migania LED, osobnego topicu RSSI albo alternatywnego formatu.

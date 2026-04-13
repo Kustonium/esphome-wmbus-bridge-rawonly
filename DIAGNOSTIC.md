@@ -214,7 +214,7 @@ It can cut legitimate but weaker meters.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `diagnostic_topic` | `wmbus/diag` | Base diagnostics topic. |
+| `diagnostic_topic` | `wmbus/my_receiver/diag` | Base diagnostics topic. |
 | `diagnostic_verbose` | `true` | Also log drop/truncate details to serial/API. |
 | `diagnostic_publish_summary` | `true` | Publish periodic `summary`. |
 | `diagnostic_publish_drop_events` | `true` | Publish `dropped` / `truncated` events. |
@@ -299,13 +299,12 @@ Example:
 
 ```yaml
 wmbus_radio:
-  telegram_topic: "wmbus_bridge/telegram"
-
   on_frame:
-    then:
-      - mqtt.publish:
-          topic: "wmbus_bridge/rtlwmbus"
-          payload: !lambda return frame->as_rtlwmbus();
+    - then:
+        - mqtt.publish:
+            topic: "wmbus_bridge/my_receiver/telegram"
+            payload: !lambda |-
+              return frame->as_hex();
 ```
 
 Use `telegram_topic` for the main RAW stream. Keep `on_frame` for optional extras such as LED blink, RSSI topics, or alternate formats.
