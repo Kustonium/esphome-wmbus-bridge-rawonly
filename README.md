@@ -76,13 +76,44 @@ wmbus_radio:
 
 Use `on_frame` only when you want extra side effects such as LED blink, extra MQTT topics, or custom per-frame logic.
 
+## Advanced YAML features
+
+Beyond the minimal setup, the component also supports:
+
+- dedicated receiver task stack sizing with `receiver_task_stack_size`
+- built-in RAW forwarding with `telegram_topic`
+- optional one-meter routing with `target_meter_id` and `target_topic`
+- SX1276 ether filtering modes with `sx1276_busy_ether_mode: normal | aggressive | adaptive`
+- diagnostic filtering for selected meters with `highlight_meters` and `diagnostic_publish_highlight_only`
+- optional log highlighting with `highlight_ansi`, `highlight_tag`, and `highlight_prefix`
+- SX1262 boot-time device error clearing with `clear_device_errors_on_boot`
+- optional publication of cleared SX1262 device errors with `publish_dev_err_after_clear`
+- SX1262 board tuning such as `dio2_rf_switch`, `has_tcxo`, `rx_gain`, `long_gfsk_packets`
+- optional Heltec V4 FEM pin configuration with `fem_ctrl_pin`, `fem_en_pin`, and `fem_pa_pin`
+
+The full field list and event details are documented in [`DIAGNOSTIC.md`](DIAGNOSTIC.md).
+
 ## What the repo contains
 
-- `wmbus_radio` component,
+- single public ESPHome component: `wmbus_radio`
+- internal implementation for:
+  - transceiver handling for `SX1262` and `SX1276`
+  - packet assembly
+  - internal wireless M-Bus helpers
+  - `3of6` decoding
+  - DLL CRC handling
+  - diagnostic / RX-path support
 - examples for:
+  - `SX1262 / Heltec V3`
   - `SX1262 / Heltec V4`
+  - `SX1262 / XIAO ESP32 S3`
+  - `SX1262 / XIAO nRF52840`
   - `SX1276 / Lilygo T3-S3`
   - `SX1276 / Heltec V2`
+- board reference assets included with examples:
+  - pinmap image for `Heltec V4`
+  - board image for `Lilygo T3-S3`
+  - board image and reference PDF for `Heltec V2`
 - MQTT diagnostics:
   - `boot`
   - `summary`
@@ -100,6 +131,8 @@ Use `on_frame` only when you want extra side effects such as LED blink, extra MQ
 - **[`CHIP_SELECTION.md`](CHIP_SELECTION.md)** — practical SX1276 vs SX1262 selection guide
 - **[`BENCHMARKS.md`](BENCHMARKS.md)** — measured benchmark conclusions for `T1-only` and `both`
 - **[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)** — symptom-based diagnostic guide
+- **[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)** — release-level change summary, including adaptive SX1276 behavior, new MQTT diagnostic events, and expanded runtime diagnostics
+- **[`docs/PERMISSION.md`](docs/PERMISSION.md)** — short note documenting explicit upstream permission for fork/publication and GPL publication with attribution
 
 ## Important diagnostic warning
 

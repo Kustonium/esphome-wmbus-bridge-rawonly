@@ -76,13 +76,44 @@ wmbus_radio:
 
 `on_frame` używaj tylko wtedy, gdy chcesz dodać efekty uboczne, np. miganie LED, dodatkowe topiki MQTT albo własną logikę dla każdej ramki.
 
+## Bardziej zaawansowane opcje YAML
+
+Poza minimalną konfiguracją komponent obsługuje także:
+
+- osobny rozmiar stosu taska odbiorczego przez `receiver_task_stack_size`
+- wbudowaną publikację RAW przez `telegram_topic`
+- opcjonalne kierowanie jednego licznika przez `target_meter_id` i `target_topic`
+- tryby filtrowania eteru dla SX1276 przez `sx1276_busy_ether_mode: normal | aggressive | adaptive`
+- filtrowanie diagnostyki dla wybranych liczników przez `highlight_meters` i `diagnostic_publish_highlight_only`
+- opcjonalne wyróżnianie logów przez `highlight_ansi`, `highlight_tag` i `highlight_prefix`
+- czyszczenie błędów urządzenia SX1262 przy starcie przez `clear_device_errors_on_boot`
+- opcjonalną publikację wyczyszczonych błędów SX1262 przez `publish_dev_err_after_clear`
+- strojenie SX1262, takie jak `dio2_rf_switch`, `has_tcxo`, `rx_gain`, `long_gfsk_packets`
+- opcjonalną konfigurację pinów FEM dla Heltec V4 przez `fem_ctrl_pin`, `fem_en_pin` i `fem_pa_pin`
+
+Pełna lista pól i eventów jest opisana w [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md).
+
 ## Co repo zawiera
 
-- komponent `wmbus_radio`,
+- jeden publiczny komponent ESPHome: `wmbus_radio`
+- wewnętrzną implementację dla:
+  - obsługi transceiverów `SX1262` i `SX1276`
+  - składania pakietów
+  - wewnętrznych helperów wireless M-Bus
+  - dekodowania `3of6`
+  - obsługi DLL CRC
+  - diagnostyki i ścieżki RX
 - przykłady dla:
+  - `SX1262 / Heltec V3`
   - `SX1262 / Heltec V4`
+  - `SX1262 / XIAO ESP32 S3`
+  - `SX1262 / XIAO nRF52840`
   - `SX1276 / Lilygo T3-S3`
   - `SX1276 / Heltec V2`
+- pliki referencyjne do płytek dołączone do przykładów:
+  - pinmapa dla `Heltec V4`
+  - obraz płytki dla `Lilygo T3-S3`
+  - obraz płytki i PDF referencyjny dla `Heltec V2`
 - diagnostykę MQTT:
   - `boot`
   - `summary`
@@ -100,6 +131,8 @@ wmbus_radio:
 - **[`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)** — praktyczny wybór SX1276 vs SX1262
 - **[`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)** — wnioski z benchmarków dla `T1-only` i `both`
 - **[`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md)** — diagnostyka po objawach
+- **[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)** — opis zmian release’u, w tym adaptive dla SX1276, nowe eventy diagnostyczne MQTT i rozszerzoną diagnostykę runtime
+- **[`docs/PERMISSION.md`](docs/PERMISSION.md)** — krótka notatka dokumentująca wyraźną zgodę upstreamu na fork/publikację oraz publikację pod GPL z atrybucją
 
 ## Ważne ostrzeżenie diagnostyczne
 
@@ -124,9 +157,21 @@ Dzięki temu zwykłe logi są czytelniejsze dla polskiego użytkownika, ale nisk
 
 ## Przykłady
 
-- `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml`
+### SX1262
+- `examples/SX1262/Heltec V3/SX1262_V3.yaml`
+- `examples/SX1262/Heltec V4/SX1262_full_example_LED.yaml`
+- `examples/SX1262/XIAO ESP32 S3/xiao.yaml`
+- `examples/SX1262/XIAO nRF52840/XIAO nRF52840.yaml`
+
+### SX1276
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
+
+### Pliki referencyjne do płytek
+- `examples/SX1262/Heltec V4/V4_pinmap.png`
+- `examples/SX1276/LilygoT3S3/LilygoT3S3_ver_1_2.png`
+- `examples/SX1276/HeltecV2/HeltecV2.png`
+- `examples/SX1276/HeltecV2/WIFI_LoRa_32_V2.pdf`
 
 ## Jak powstał ten projekt
 
