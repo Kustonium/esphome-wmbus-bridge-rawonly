@@ -157,9 +157,21 @@ This keeps the logs readable for Polish users without making low-level debugging
 
 ## Examples
 
-- `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml`
+### SX1262
+- `examples/SX1262/Heltec V3/SX1262_V3.yaml`
+- `examples/SX1262/Heltec V4/SX1262_full_example_LED.yaml`
+- `examples/SX1262/XIAO ESP32 S3/xiao.yaml`
+- `examples/SX1262/XIAO nRF52840/XIAO nRF52840.yaml`
+
+### SX1276
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
+
+### Board reference files
+- `examples/SX1262/Heltec V4/V4_pinmap.png`
+- `examples/SX1276/LilygoT3S3/LilygoT3S3_ver_1_2.png`
+- `examples/SX1276/HeltecV2/HeltecV2.png`
+- `examples/SX1276/HeltecV2/WIFI_LoRa_32_V2.pdf`
 
 ## How this project was built
 
