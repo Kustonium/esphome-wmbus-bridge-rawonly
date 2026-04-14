@@ -71,6 +71,7 @@ CONF_DIAG_PUBLISH_SUMMARY = "diagnostic_publish_summary"
 CONF_DIAG_PUBLISH_DROP_EVENTS = "diagnostic_publish_drop_events"
 CONF_DIAG_PUBLISH_RX_PATH_EVENTS = "diagnostic_publish_rx_path_events"
 CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY = "diagnostic_publish_highlight_only"
+CONF_DIAG_PUBLISH_SUGGESTION = "diagnostic_publish_suggestion"
 CONF_SX1276_BUSY_ETHER_MODE = "sx1276_busy_ether_mode"
 
 # Heltec V4 FEM pins (SX1262 external front-end)
@@ -160,6 +161,7 @@ CONFIG_SCHEMA = (
             # If true, per-packet MQTT diagnostics are published only for meter ids
             # listed in highlight_meters. Global summary still counts everything.
             cv.Optional(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUGGESTION): cv.boolean,
             cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
             cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_15MIN): cv.boolean,
             cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_60MIN): cv.boolean,
@@ -258,6 +260,7 @@ async def to_code(config):
             "drop": False,
             "rx_path": False,
             "highlight_only": False,
+            "suggestion": False,
             "summary_15min": False,
             "summary_60min": False,
             "summary_highlight": False,
@@ -270,6 +273,7 @@ async def to_code(config):
             "drop": False,
             "rx_path": False,
             "highlight_only": False,
+            "suggestion": False,
             "summary_15min": False,
             "summary_60min": False,
             "summary_highlight": False,
@@ -282,6 +286,7 @@ async def to_code(config):
             "drop": True,
             "rx_path": False,
             "highlight_only": False,
+            "suggestion": True,
             "summary_15min": False,
             "summary_60min": False,
             "summary_highlight": False,
@@ -294,6 +299,7 @@ async def to_code(config):
             "drop": True,
             "rx_path": True,
             "highlight_only": False,
+            "suggestion": True,
             "summary_15min": False,
             "summary_60min": False,
             "summary_highlight": False,
@@ -301,23 +307,15 @@ async def to_code(config):
     }
     diag_preset = preset_map[diag_mode]
 
-    # Published MQTT diagnostics are opt-in. However, if the user explicitly
-    # enables any diagnostic_publish_* option without providing a
-    # diagnostic_topic, fall back to the historical default topic so the
-    # override actually has an effect. This does not affect internal counters
-    # or window logic used by features such as SX1276 adaptive mode.
-    explicit_diag_enabled = any(
-        [
-            config.get(CONF_DIAG_PUBLISH_SUMMARY, False),
-            config.get(CONF_DIAG_PUBLISH_DROP_EVENTS, False),
-            config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, False),
-            config.get(CONF_DIAG_PUBLISH_SUMMARY_15MIN, False),
-            config.get(CONF_DIAG_PUBLISH_SUMMARY_60MIN, False),
-            config.get(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, False),
-            config.get(CONF_DIAG_PUBLISH_RAW, False),
-            config.get(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, False),
-        ]
-    )
+    explicit_diag_enabled = any([
+        config.get(CONF_DIAG_PUBLISH_SUMMARY, False),
+        config.get(CONF_DIAG_PUBLISH_DROP_EVENTS, False),
+        config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, False),
+        config.get(CONF_DIAG_PUBLISH_SUMMARY_15MIN, False),
+        config.get(CONF_DIAG_PUBLISH_SUMMARY_60MIN, False),
+        config.get(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, False),
+        config.get(CONF_DIAG_PUBLISH_SUGGESTION, False),
+    ])
 
     if CONF_DIAG_TOPIC in config:
         diag_topic = config[CONF_DIAG_TOPIC]
@@ -325,7 +323,6 @@ async def to_code(config):
         diag_topic = "wmbus/diag"
     else:
         diag_topic = ""
-
     cg.add(var.set_diag_topic(diag_topic))
     cg.add(var.set_telegram_topic(config.get(CONF_TELEGRAM_TOPIC, "")))
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
@@ -338,6 +335,7 @@ async def to_code(config):
     cg.add(var.set_diag_publish_drop_events(config[CONF_DIAG_PUBLISH_DROP_EVENTS] if CONF_DIAG_PUBLISH_DROP_EVENTS in config else diag_preset["drop"]))
     cg.add(var.set_diag_publish_rx_path_events(config[CONF_DIAG_PUBLISH_RX_PATH_EVENTS] if CONF_DIAG_PUBLISH_RX_PATH_EVENTS in config else diag_preset["rx_path"]))
     cg.add(var.set_diag_publish_highlight_only(config[CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY] if CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY in config else diag_preset["highlight_only"]))
+    cg.add(var.set_diag_publish_suggestion(config[CONF_DIAG_PUBLISH_SUGGESTION] if CONF_DIAG_PUBLISH_SUGGESTION in config else diag_preset["suggestion"]))
     cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
     cg.add(var.set_diag_publish_summary_15min(config[CONF_DIAG_PUBLISH_SUMMARY_15MIN] if CONF_DIAG_PUBLISH_SUMMARY_15MIN in config else diag_preset["summary_15min"]))
     cg.add(var.set_diag_publish_summary_60min(config[CONF_DIAG_PUBLISH_SUMMARY_60MIN] if CONF_DIAG_PUBLISH_SUMMARY_60MIN in config else diag_preset["summary_60min"]))

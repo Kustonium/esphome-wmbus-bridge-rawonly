@@ -501,6 +501,7 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
 }
 
 void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
+  if (!this->diag_publish_suggestion_) return;
   if (this->diag_topic_.empty()) return;
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
@@ -1871,6 +1872,7 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
 }
 
 void Radio::maybe_publish_meter_windows_(uint32_t now_ms) {
+  if (!this->diag_publish_summary_highlight_meters_) return;
   if (this->highlight_meter_stats_.empty()) return;
   if (this->diag_topic_.empty()) return;
 
@@ -2367,7 +2369,8 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     stats.last_seen_ms = now_ms;
 
     // Count-based trigger: publish when the dedicated count-window reaches threshold.
-    if (this->meter_window_count_threshold_ > 0 &&
+    if (this->diag_publish_summary_highlight_meters_ &&
+        this->meter_window_count_threshold_ > 0 &&
         stats.count_window_count >= this->meter_window_count_threshold_) {
       const uint32_t elapsed_s = (stats.count_window_started_ms > 0)
           ? ((uint32_t) esphome::millis() - stats.count_window_started_ms) / 1000 : 0;
