@@ -2005,11 +2005,43 @@ void Radio::loop() {
 
 if (!this->boot_log_done_ && this->radio != nullptr) {
   if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
-    ESP_LOGI(TAG,
-             "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
-             this->radio->get_name(),
-             listen_mode_to_string_(this->radio->get_listen_mode()),
-             (unsigned) this->receiver_task_stack_size_);
+    const char *radio_name = this->radio->get_name();
+
+    if (strcmp(radio_name, "SX1276") == 0) {
+      const char *busy_mode = "unknown";
+      const char *busy_state = "n/a";
+
+      switch (this->sx1276_busy_ether_mode_) {
+        case SX1276BusyEtherMode::NORMAL:
+          busy_mode = "normal";
+          break;
+        case SX1276BusyEtherMode::AGGRESSIVE:
+          busy_mode = "aggressive";
+          break;
+        case SX1276BusyEtherMode::ADAPTIVE:
+          busy_mode = "adaptive";
+          busy_state = this->busy_ether_was_active_ ? "active" : "passive";
+          break;
+        default:
+          busy_mode = "unknown";
+          break;
+      }
+
+      ESP_LOGI(TAG,
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s",
+               radio_name,
+               listen_mode_to_string_(this->radio->get_listen_mode()),
+               (unsigned) this->receiver_task_stack_size_,
+               busy_mode,
+               busy_state);
+    } else {
+      ESP_LOGI(TAG,
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
+               radio_name,
+               listen_mode_to_string_(this->radio->get_listen_mode()),
+               (unsigned) this->receiver_task_stack_size_);
+    }
+
     this->boot_log_last_ms_ = loop_now_ms;
     this->boot_log_count_++;
     if (this->boot_log_count_ >= 3) {
