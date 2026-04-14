@@ -301,7 +301,31 @@ async def to_code(config):
     }
     diag_preset = preset_map[diag_mode]
 
-    diag_topic = config[CONF_DIAG_TOPIC] if CONF_DIAG_TOPIC in config else diag_preset["topic"]
+    # Published MQTT diagnostics are opt-in. However, if the user explicitly
+    # enables any diagnostic_publish_* option without providing a
+    # diagnostic_topic, fall back to the historical default topic so the
+    # override actually has an effect. This does not affect internal counters
+    # or window logic used by features such as SX1276 adaptive mode.
+    explicit_diag_enabled = any(
+        [
+            config.get(CONF_DIAG_PUBLISH_SUMMARY, False),
+            config.get(CONF_DIAG_PUBLISH_DROP_EVENTS, False),
+            config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, False),
+            config.get(CONF_DIAG_PUBLISH_SUMMARY_15MIN, False),
+            config.get(CONF_DIAG_PUBLISH_SUMMARY_60MIN, False),
+            config.get(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, False),
+            config.get(CONF_DIAG_PUBLISH_RAW, False),
+            config.get(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, False),
+        ]
+    )
+
+    if CONF_DIAG_TOPIC in config:
+        diag_topic = config[CONF_DIAG_TOPIC]
+    elif diag_mode != "off" or explicit_diag_enabled:
+        diag_topic = "wmbus/diag"
+    else:
+        diag_topic = ""
+
     cg.add(var.set_diag_topic(diag_topic))
     cg.add(var.set_telegram_topic(config.get(CONF_TELEGRAM_TOPIC, "")))
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))

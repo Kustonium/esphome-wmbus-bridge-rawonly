@@ -214,18 +214,33 @@ Bo może przyciąć prawdziwe, ale słabsze liczniki.
 
 ### 3.6 Diagnostyka
 
+Publikacja diagnostyki jest teraz domyślnie **opt-in**.
+
+`diagnostic_mode` steruje tylko **publikacją diagnostyki MQTT i poziomem gadatliwości**.
+Nie wyłącza wewnętrznych liczników, okien czasowych ani logiki radiowej wymaganej przez funkcje takie jak tryb `adaptive` w SX1276.
+
 | Klucz | Domyślnie | Znaczenie |
 |---|---|---|
-| `diagnostic_topic` | `wmbus/my_receiver/diag` | Bazowy topic diagnostyki. |
-| `diagnostic_verbose` | `true` | Loguj szczegóły dropów i truncate także do serial/API. |
-| `diagnostic_publish_summary` | `true` | Publikuj okresowy `summary`. |
-| `diagnostic_publish_drop_events` | `true` | Publikuj eventy `dropped` / `truncated`. |
-| `diagnostic_publish_rx_path_events` | `true` | Publikuj bieżące eventy `rx_path`. |
-| `diagnostic_publish_highlight_only` | `false` | Ogranicz per-packet diag do ID z `highlight_meters`. |
-| `diagnostic_publish_summary_highlight_meters` | `false` | Po każdym `summary_15min` i `summary_60min` publikuje snapshot `meter_window` dla każdego ID z `highlight_meters`. Tylko do odczytu — nie resetuje liczników per-licznik. |
-| `diagnostic_publish_raw` | `true` | Dołącz `raw(hex)` do eventów `dropped` / `truncated`. |
-| `diagnostic_summary_interval` | `60s` | Co ile publikować krótkie okno `summary`. |
+| `diagnostic_mode` | `off` | Preset diagnostyki MQTT: `off`, `low`, `medium`, `full`. |
+| `diagnostic_topic` | auto | Bazowy topic diagnostyki. W trybie `off` domyślnie pusty; dla presetów innych niż `off` domyślnie `wmbus/diag`. Jeżeli jakiekolwiek `diagnostic_publish_*` zostanie jawnie włączone bez topicu, komponent użyje fallbacku `wmbus/diag`. |
+| `diagnostic_verbose` | zależne od presetu | Loguj szczegóły dropów i truncate także do serial/API. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_publish_summary` | zależne od presetu | Publikuj okresowy `summary`. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_publish_drop_events` | zależne od presetu | Publikuj eventy `dropped` / `truncated`. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_publish_rx_path_events` | zależne od presetu | Publikuj bieżące eventy `rx_path`. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_publish_highlight_only` | zależne od presetu | Ogranicz per-packet diag do ID z `highlight_meters`. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_publish_summary_highlight_meters` | zależne od presetu | Po każdym `summary_15min` i `summary_60min` publikuje snapshot `meter_window` dla każdego ID z `highlight_meters`. Tylko do odczytu — nie resetuje liczników per-licznik. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_publish_raw` | zależne od presetu | Dołącz `raw(hex)` do eventów `dropped` / `truncated`. Jawne opcje YAML nadpisują preset. |
+| `diagnostic_summary_interval` | `60s` | Co ile publikować krótkie okno `summary`, gdy publikacja summary jest włączona. |
 | `diagnostic_publish_summary_15min` / `diagnostic_publish_summary_60min` | wyłączone | Opcjonalne dodatkowe stałe okna `summary`: 15 minut i 60 minut, włączane niezależnie przez booleany. Publikowane w tym samym formacie payloadu plus `interval_s`, `uptime_ms` i `listen_mode`. Topiki są osobne: `/summary`, `/summary_15min` i `/summary_60min` pod `diagnostic_topic`. Uwaga: pole `busy_ether_state` jest tylko w krótkim `/summary`, nie ma go w `/summary_15min` ani `/summary_60min`. |
+
+### Presety diagnostyczne
+
+- `off` — brak diagnostyki MQTT; `highlight_meters` wpływa tylko na lokalne wyróżnienie logów
+- `low` — lekka diagnostyka, oparta głównie na summary
+- `medium` — summary plus najbardziej użyteczne eventy drop/truncate
+- `full` — pełna diagnostyka MQTT, w tym raw i RX-path
+
+Szczegółowe opcje `diagnostic_publish_*` nadal istnieją i nadpisują wybrany preset.
 
 ### Pochodne topiki diagnostyczne bez osobnych kluczy YAML
 
@@ -258,16 +273,22 @@ Bieżąca implementacja może publikować m.in.:
 - `SX1262_SYMBOL_ERRORS` — SX1262 pokazuje błędy symboli T1, więc warto ustawić `cpu_frequency: 160MHz`
 - `QUIET_ETHER_ADAPTIVE_IDLE` — SX1276 w `adaptive` pozostaje spokojny na tyle długo, że warto rozważyć test `normal`
 
-### Sensowny profil do codziennego użycia
+### Proste profile do codziennego użycia
+
+Cichy tryb produkcyjny po sprawdzeniu liczników:
 
 ```yaml
-diagnostic_verbose: false
-diagnostic_publish_summary: true
-diagnostic_publish_drop_events: true
-diagnostic_publish_rx_path_events: false
-diagnostic_publish_highlight_only: true
-diagnostic_publish_raw: false
+diagnostic_mode: off
 ```
+
+Lekka diagnostyka na żądanie:
+
+```yaml
+diagnostic_topic: "wmbus/my_receiver/diag"
+diagnostic_mode: low
+```
+
+W razie potrzeby szczegółowe flagi nadal mogą nadpisywać preset.
 
 ---
 
@@ -280,7 +301,11 @@ diagnostic_publish_raw: false
 | `highlight_tag` | `wmbus_user` | Osobny tag logów dla wyróżnionych liczników. |
 | `highlight_prefix` | `★ ` | Prefiks komunikatu w logu. |
 
-Dla każdego ID z `highlight_meters` komponent publikuje `meter_window`.
+Domyślnie `highlight_meters` wpływa tylko na lokalne wyróżnienie logów.
+
+Samo w sobie **nie** włącza diagnostyki MQTT i **nie** oznacza publikacji `meter_window`.
+
+Snapshoty `meter_window` per licznik są publikowane dopiero wtedy, gdy diagnostyka jest włączona i ustawisz `diagnostic_publish_summary_highlight_meters: true`.
 
 Jeżeli licznik wysyła **T1 i C1 pod tym samym ID**, statystyki pozostają rozdzielone.
 

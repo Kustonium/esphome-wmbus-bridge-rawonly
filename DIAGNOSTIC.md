@@ -212,18 +212,33 @@ It can cut legitimate but weaker meters.
 
 ### 3.6 Diagnostics
 
+Diagnostics publishing is now **opt-in** by default.
+
+`diagnostic_mode` controls **published MQTT diagnostics and verbosity only**.
+It does **not** disable internal counters, time windows, or radio-side logic required by features such as SX1276 `adaptive` mode.
+
 | Key | Default | Meaning |
 |---|---|---|
-| `diagnostic_topic` | `wmbus/my_receiver/diag` | Base diagnostics topic. |
-| `diagnostic_verbose` | `true` | Also log drop/truncate details to serial/API. |
-| `diagnostic_publish_summary` | `true` | Publish periodic `summary`. |
-| `diagnostic_publish_drop_events` | `true` | Publish `dropped` / `truncated` events. |
-| `diagnostic_publish_rx_path_events` | `true` | Publish live `rx_path` events. |
-| `diagnostic_publish_highlight_only` | `false` | Limit per-packet diagnostics to IDs in `highlight_meters`. |
-| `diagnostic_publish_summary_highlight_meters` | `false` | After each `summary_15min` and `summary_60min`, publish a `meter_window` snapshot for every ID in `highlight_meters`. Read-only — does not reset per-meter counters. |
-| `diagnostic_publish_raw` | `true` | Include `raw(hex)` in `dropped` / `truncated` events. |
-| `diagnostic_summary_interval` | `60s` | How often to publish the short-window `summary`. |
+| `diagnostic_mode` | `off` | Preset for MQTT diagnostics: `off`, `low`, `medium`, `full`. |
+| `diagnostic_topic` | auto | Base diagnostics topic. Defaults to empty in `off`; defaults to `wmbus/diag` when a non-`off` preset is used. If any `diagnostic_publish_*` option is explicitly enabled without a topic, the component falls back to `wmbus/diag`. |
+| `diagnostic_verbose` | preset-based | Also log drop/truncate details to serial/API. Detailed YAML values override the preset. |
+| `diagnostic_publish_summary` | preset-based | Publish periodic `summary`. Detailed YAML values override the preset. |
+| `diagnostic_publish_drop_events` | preset-based | Publish `dropped` / `truncated` events. Detailed YAML values override the preset. |
+| `diagnostic_publish_rx_path_events` | preset-based | Publish live `rx_path` events. Detailed YAML values override the preset. |
+| `diagnostic_publish_highlight_only` | preset-based | Limit per-packet diagnostics to IDs in `highlight_meters`. Detailed YAML values override the preset. |
+| `diagnostic_publish_summary_highlight_meters` | preset-based | After each `summary_15min` and `summary_60min`, publish a `meter_window` snapshot for every ID in `highlight_meters`. Read-only — does not reset per-meter counters. Detailed YAML values override the preset. |
+| `diagnostic_publish_raw` | preset-based | Include `raw(hex)` in `dropped` / `truncated` events. Detailed YAML values override the preset. |
+| `diagnostic_summary_interval` | `60s` | How often to publish the short-window `summary` when summary publishing is enabled. |
 | `diagnostic_publish_summary_15min` / `diagnostic_publish_summary_60min` | disabled | Optional fixed extra `summary` windows: 15 minutes and 60 minutes, enabled independently with booleans. Published with the same payload format plus `interval_s`, `uptime_ms`, and `listen_mode`. Topics are separate: `/summary`, `/summary_15min`, and `/summary_60min` under `diagnostic_topic`. Note: `busy_ether_state` is present only in the short `/summary`, not in `/summary_15min` or `/summary_60min`. |
+
+### Diagnostic presets
+
+- `off` — no MQTT diagnostics; `highlight_meters` only affects local highlighted logs
+- `low` — lightweight diagnostics, centered on summary publishing
+- `medium` — summary plus the most useful drop/truncate diagnostics
+- `full` — full MQTT diagnostics, including raw and RX-path events
+
+Detailed `diagnostic_publish_*` options still exist and override the selected preset.
 
 ### Derived diagnostic topics without dedicated YAML keys
 
@@ -256,16 +271,22 @@ The current implementation can publish suggestions such as:
 - `SX1262_SYMBOL_ERRORS` — SX1262 shows T1 symbol errors, suggesting `cpu_frequency: 160MHz`
 - `QUIET_ETHER_ADAPTIVE_IDLE` — SX1276 in `adaptive` has stayed quiet long enough that `normal` may be worth testing
 
-### Sensible daily-use profile
+### Simple daily-use profiles
+
+Quiet production setup after meter validation:
 
 ```yaml
-diagnostic_verbose: false
-diagnostic_publish_summary: true
-diagnostic_publish_drop_events: true
-diagnostic_publish_rx_path_events: false
-diagnostic_publish_highlight_only: true
-diagnostic_publish_raw: false
+diagnostic_mode: off
 ```
+
+Light diagnostics on demand:
+
+```yaml
+diagnostic_topic: "wmbus/my_receiver/diag"
+diagnostic_mode: low
+```
+
+Detailed flags can still override the preset when needed.
 
 ---
 
@@ -278,7 +299,11 @@ diagnostic_publish_raw: false
 | `highlight_tag` | `wmbus_user` | Dedicated log tag for highlighted meters. |
 | `highlight_prefix` | `★ ` | Log prefix. |
 
-For every ID in `highlight_meters`, the component publishes `meter_window`.
+By default, `highlight_meters` only affects local highlighted logs.
+
+It does **not** enable MQTT diagnostics by itself and does **not** imply `meter_window` publishing.
+
+Per-meter `meter_window` snapshots are published only when diagnostics are enabled and `diagnostic_publish_summary_highlight_meters: true` is set.
 
 If a meter sends **both T1 and C1 under the same ID**, stats remain separate.
 
