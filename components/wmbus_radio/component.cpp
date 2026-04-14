@@ -1794,6 +1794,7 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
                                       uint32_t interval_n_window,
                                       bool reset_time_window,
                                       bool reset_count_window) {
+  if (this->diag_topic_.empty()) return;
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
@@ -1987,10 +1988,13 @@ void Radio::dump_config() {
                            : "adaptive";
   ESP_LOGCONFIG(TAG, "  SX1276 busy ether mode: %s", busy_mode);
   if (!this->diag_topic_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Diagnostics MQTT topic: %s", this->diag_topic_.c_str());
     ESP_LOGCONFIG(TAG, "  MQTT boot topic: %s/boot", this->diag_topic_.c_str());
     ESP_LOGCONFIG(TAG, "  Summary interval: %us -> %s", (unsigned) (this->diag_summary_interval_ms_ / 1000), this->diag_summary_topic_().c_str());
     ESP_LOGCONFIG(TAG, "  15min summary: %s -> %s", this->diag_publish_summary_15min_ ? "enabled (900s)" : "disabled", this->diag_summary_15min_topic_().c_str());
     ESP_LOGCONFIG(TAG, "  60min summary: %s -> %s", this->diag_publish_summary_60min_ ? "enabled (3600s)" : "disabled", this->diag_summary_60min_topic_().c_str());
+  } else {
+    ESP_LOGCONFIG(TAG, "  Diagnostics MQTT publishing: disabled (opt-in)");
   }
 }
 
@@ -2391,57 +2395,17 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
              ansi_suf);
 
-    // Log and optionally publish per-meter interval statistics.
+    // Keep highlight_meters lightweight by default: local emphasis plus packet number only.
     const uint64_t stats_key_ro = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
     const auto &stats = this->highlight_meter_stats_[stats_key_ro];
     if (stats.count == 1) {
-      ESP_LOGI(log_tag, "%s[id:%s] first packet seen / pierwszy pakiet (count=1)",
+      ESP_LOGI(log_tag, "%s[id:%s] first packet / pierwszy pakiet (packet #1)",
                this->highlight_prefix_.c_str(), id_str);
     } else {
-      const uint32_t interval_s  = stats.last_interval_ms / 1000;
-      const uint32_t interval_ms = stats.last_interval_ms % 1000;
-      const uint32_t avg_interval_s = (stats.interval_n > 0)
-          ? (stats.interval_sum_ms / stats.interval_n) / 1000 : 0;
-      const int32_t avg_rssi = (stats.rssi_n > 0)
-          ? (stats.rssi_sum / (int32_t) stats.rssi_n) : stats.rssi_last;
-      ESP_LOGI(log_tag, "%s[id:%s] stats / statystyki: count=%u interval=%u.%03us avg_interval=%us avg_rssi=%ddBm",
+      ESP_LOGI(log_tag, "%s[id:%s] packet #%u received / odebrano pakiet nr %u",
                this->highlight_prefix_.c_str(), id_str,
                (unsigned) stats.count,
-               (unsigned) interval_s, (unsigned) interval_ms,
-               (unsigned) avg_interval_s,
-               (int) avg_rssi);
-    }
-
-    // Publish per-meter stats to MQTT if connected.
-    if (!this->diag_topic_.empty()) {
-      auto *mqtt = esphome::mqtt::global_mqtt_client;
-      if (mqtt != nullptr && mqtt->is_connected()) {
-        const uint64_t stats_key_win = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
-        const auto &st = this->highlight_meter_stats_[stats_key_win];
-        const uint32_t avg_interval_s = (st.interval_n > 0)
-            ? (st.interval_sum_ms / st.interval_n) / 1000 : 0;
-        const int32_t avg_rssi = (st.rssi_n > 0)
-            ? (st.rssi_sum / (int32_t) st.rssi_n) : st.rssi_last;
-        char meter_payload[256];
-        snprintf(meter_payload, sizeof(meter_payload),
-                 "{"
-                 "\"event\":\"meter_stats\","
-                 "\"id\":\"%s\","
-                 "\"count\":%u,"
-                 "\"last_interval_s\":%u,"
-                 "\"avg_interval_s\":%u,"
-                 "\"last_rssi\":%d,"
-                 "\"avg_rssi\":%d"
-                 "}",
-                 id_str,
-                 (unsigned) st.count,
-                 (unsigned) (st.last_interval_ms / 1000),
-                 (unsigned) avg_interval_s,
-                 (int) st.rssi_last,
-                 (int) avg_rssi);
-        std::string meter_topic = this->diag_topic_ + "/meter/" + std::string(id_str);
-        mqtt->publish(meter_topic, meter_payload);
-      }
+               (unsigned) stats.count);
     }
   } else {
     ESP_LOGI(TAG, "Have data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",

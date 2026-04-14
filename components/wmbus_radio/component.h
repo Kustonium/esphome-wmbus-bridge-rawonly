@@ -155,13 +155,14 @@ protected:
   // Diagnostics counters (published periodically if diagnostic_topic is set)
   uint32_t diag_summary_interval_ms_{60000};
 
-  // When false, only the periodic summary is published to MQTT (still counts internally)
-  bool diag_verbose_{true};
+  // Diagnostics publishing is opt-in. Internal counters still run because radio-side
+  // logic (for example SX1276 adaptive mode) depends on them even when MQTT output is off.
+  bool diag_verbose_{false};
   // When false, per-packet payloads/logs omit the raw hex (much less spam)
-  bool diag_publish_raw_{true};
-  bool diag_publish_summary_{true};
-  bool diag_publish_drop_events_{true};
-  bool diag_publish_rx_path_events_{true};
+  bool diag_publish_raw_{false};
+  bool diag_publish_summary_{false};
+  bool diag_publish_drop_events_{false};
+  bool diag_publish_rx_path_events_{false};
   // If enabled, publish per-packet MQTT diagnostics only for ids present in
   // highlight_meters. Summary remains global and still counts everything.
   bool diag_publish_highlight_only_{false};
@@ -364,7 +365,7 @@ protected:
   bool diag_publish_summary_15min_{false};
   bool diag_publish_summary_60min_{false};
   bool diag_publish_summary_highlight_meters_{false};
-  std::string diag_topic_{"wmbus/diag"};
+  std::string diag_topic_{};
 };
 } // namespace wmbus_radio
 } // namespace esphome

@@ -60,6 +60,7 @@ CONF_HIGHLIGHT_PREFIX = "highlight_prefix"
 
 # Diagnostics
 CONF_DIAG_TOPIC = "diagnostic_topic"
+CONF_DIAGNOSTIC_MODE = "diagnostic_mode"
 CONF_DIAG_VERBOSE = "diagnostic_verbose"
 CONF_DIAG_PUBLISH_RAW = "diagnostic_publish_raw"
 CONF_DIAG_SUMMARY_INTERVAL = "diagnostic_summary_interval"
@@ -142,22 +143,27 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_TARGET_TOPIC, default=""): cv.string,
             cv.Optional(CONF_TARGET_LOG, default=True): cv.boolean,
 
-            # Publish diagnostics (e.g. truncated frames) to MQTT
-            cv.Optional(CONF_DIAG_TOPIC, default="wmbus/diag"): cv.string,
+            # Diagnostics are opt-in by default. `diagnostic_mode` applies a preset
+            # for MQTT publishing only; explicit detailed flags still override it.
+            cv.Optional(CONF_DIAGNOSTIC_MODE, default="off"): cv.one_of(
+                "off", "low", "medium", "full", lower=True
+            ),
+            cv.Optional(CONF_DIAG_TOPIC): cv.string,
 
-            # Diagnostics verbosity / publication controls
-            cv.Optional(CONF_DIAG_VERBOSE, default=True): cv.boolean,
-            cv.Optional(CONF_DIAG_PUBLISH_RAW, default=True): cv.boolean,
-            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY, default=True): cv.boolean,
-            cv.Optional(CONF_DIAG_PUBLISH_DROP_EVENTS, default=True): cv.boolean,
-            cv.Optional(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, default=True): cv.boolean,
+            # Detailed diagnostics controls (all optional; explicit YAML values override
+            # the preset selected by diagnostic_mode).
+            cv.Optional(CONF_DIAG_VERBOSE): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_RAW): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_DROP_EVENTS): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_RX_PATH_EVENTS): cv.boolean,
             # If true, per-packet MQTT diagnostics are published only for meter ids
             # listed in highlight_meters. Global summary still counts everything.
-            cv.Optional(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, default=False): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY): cv.boolean,
             cv.Optional(CONF_DIAG_SUMMARY_INTERVAL, default="60s"): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_15MIN, default=False): cv.boolean,
-            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_60MIN, default=False): cv.boolean,
-            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, default=False): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_15MIN): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_60MIN): cv.boolean,
+            cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS): cv.boolean,
             cv.Optional(CONF_SX1276_BUSY_ETHER_MODE, default="adaptive"): cv.one_of(
                 "normal", "aggressive", "adaptive", lower=True
             ),
@@ -242,22 +248,76 @@ async def to_code(config):
     cg.add(var.set_radio(radio_var))
     cg.add(var.set_receiver_task_stack_size(config[CONF_RECEIVER_TASK_STACK_SIZE]))
 
-    cg.add(var.set_diag_topic(config.get(CONF_DIAG_TOPIC, "wmbus/diag")))
+    diag_mode = config.get(CONF_DIAGNOSTIC_MODE, "off")
+    preset_map = {
+        "off": {
+            "topic": "",
+            "verbose": False,
+            "raw": False,
+            "summary": False,
+            "drop": False,
+            "rx_path": False,
+            "highlight_only": False,
+            "summary_15min": False,
+            "summary_60min": False,
+            "summary_highlight": False,
+        },
+        "low": {
+            "topic": "wmbus/diag",
+            "verbose": False,
+            "raw": False,
+            "summary": True,
+            "drop": False,
+            "rx_path": False,
+            "highlight_only": False,
+            "summary_15min": False,
+            "summary_60min": False,
+            "summary_highlight": False,
+        },
+        "medium": {
+            "topic": "wmbus/diag",
+            "verbose": False,
+            "raw": False,
+            "summary": True,
+            "drop": True,
+            "rx_path": False,
+            "highlight_only": False,
+            "summary_15min": False,
+            "summary_60min": False,
+            "summary_highlight": False,
+        },
+        "full": {
+            "topic": "wmbus/diag",
+            "verbose": True,
+            "raw": True,
+            "summary": True,
+            "drop": True,
+            "rx_path": True,
+            "highlight_only": False,
+            "summary_15min": False,
+            "summary_60min": False,
+            "summary_highlight": False,
+        },
+    }
+    diag_preset = preset_map[diag_mode]
+
+    diag_topic = config[CONF_DIAG_TOPIC] if CONF_DIAG_TOPIC in config else diag_preset["topic"]
+    cg.add(var.set_diag_topic(diag_topic))
     cg.add(var.set_telegram_topic(config.get(CONF_TELEGRAM_TOPIC, "")))
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
     cg.add(var.set_target_topic(config.get(CONF_TARGET_TOPIC, "")))
     cg.add(var.set_target_log(config.get(CONF_TARGET_LOG, True)))
 
-    cg.add(var.set_diag_verbose(config.get(CONF_DIAG_VERBOSE, True)))
-    cg.add(var.set_diag_publish_raw(config.get(CONF_DIAG_PUBLISH_RAW, True)))
-    cg.add(var.set_diag_publish_summary(config.get(CONF_DIAG_PUBLISH_SUMMARY, True)))
-    cg.add(var.set_diag_publish_drop_events(config.get(CONF_DIAG_PUBLISH_DROP_EVENTS, True)))
-    cg.add(var.set_diag_publish_rx_path_events(config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, True)))
-    cg.add(var.set_diag_publish_highlight_only(config.get(CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY, False)))
+    cg.add(var.set_diag_verbose(config[CONF_DIAG_VERBOSE] if CONF_DIAG_VERBOSE in config else diag_preset["verbose"]))
+    cg.add(var.set_diag_publish_raw(config[CONF_DIAG_PUBLISH_RAW] if CONF_DIAG_PUBLISH_RAW in config else diag_preset["raw"]))
+    cg.add(var.set_diag_publish_summary(config[CONF_DIAG_PUBLISH_SUMMARY] if CONF_DIAG_PUBLISH_SUMMARY in config else diag_preset["summary"]))
+    cg.add(var.set_diag_publish_drop_events(config[CONF_DIAG_PUBLISH_DROP_EVENTS] if CONF_DIAG_PUBLISH_DROP_EVENTS in config else diag_preset["drop"]))
+    cg.add(var.set_diag_publish_rx_path_events(config[CONF_DIAG_PUBLISH_RX_PATH_EVENTS] if CONF_DIAG_PUBLISH_RX_PATH_EVENTS in config else diag_preset["rx_path"]))
+    cg.add(var.set_diag_publish_highlight_only(config[CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY] if CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY in config else diag_preset["highlight_only"]))
     cg.add(var.set_diag_summary_interval_ms(config[CONF_DIAG_SUMMARY_INTERVAL].total_milliseconds))
-    cg.add(var.set_diag_publish_summary_15min(config.get(CONF_DIAG_PUBLISH_SUMMARY_15MIN, False)))
-    cg.add(var.set_diag_publish_summary_60min(config.get(CONF_DIAG_PUBLISH_SUMMARY_60MIN, False)))
-    cg.add(var.set_diag_publish_summary_highlight_meters(config.get(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS, False)))
+    cg.add(var.set_diag_publish_summary_15min(config[CONF_DIAG_PUBLISH_SUMMARY_15MIN] if CONF_DIAG_PUBLISH_SUMMARY_15MIN in config else diag_preset["summary_15min"]))
+    cg.add(var.set_diag_publish_summary_60min(config[CONF_DIAG_PUBLISH_SUMMARY_60MIN] if CONF_DIAG_PUBLISH_SUMMARY_60MIN in config else diag_preset["summary_60min"]))
+    cg.add(var.set_diag_publish_summary_highlight_meters(config[CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS] if CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS in config else diag_preset["summary_highlight"]))
 
     SX1276BusyEtherMode = radio_ns.enum("SX1276BusyEtherMode", is_class=True)
     busy_ether_mode_map = {

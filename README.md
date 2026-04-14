@@ -74,20 +74,41 @@ wmbus_radio:
   telegram_topic: "wmbus_bridge/my_receiver/telegram"  # choose your own MQTT topic
 ```
 
-Use `on_frame` only when you want extra side effects such as LED blink, extra MQTT topics, or custom per-frame logic.
-
 Use a separate MQTT topic for each receiver device.
+
+Use `on_frame` only when you want extra side effects such as LED blink, extra MQTT topics, or custom per-frame logic.
+For standard RAW MQTT publishing, use either `telegram_topic` or a custom `on_frame` publish with `frame->as_hex()`.
+Use `frame->as_rtlwmbus()` only if you intentionally need rtl-wmbus compatible text output.
+
+## Diagnostic presets
+
+The component supports `diagnostic_mode: off | low | medium | full`.
+
+`diagnostic_mode` controls **MQTT diagnostic publishing and verbosity only**.
+It does **not** disable internal counters, time windows, or radio-side logic required by features such as SX1276 `adaptive` mode.
+
+By default, diagnostics are **opt-in**.
+If you do not enable them explicitly, behavior is equivalent to `diagnostic_mode: off`.
+
+- `off` — no MQTT diagnostics; `highlight_meters` only affects local highlighted logs
+- `low` — lightweight diagnostics
+- `medium` — normal diagnostics
+- `full` — full MQTT diagnostics
+
+If detailed `diagnostic_publish_*` options are provided explicitly in YAML, they override the preset.
 
 ## Advanced YAML features
 
 Beyond the minimal setup, the component also supports:
 
+- diagnostic presets with `diagnostic_mode`
 - dedicated receiver task stack sizing with `receiver_task_stack_size`
 - built-in RAW forwarding with `telegram_topic`
 - optional one-meter routing with `target_meter_id` and `target_topic`
 - SX1276 ether filtering modes with `sx1276_busy_ether_mode: normal | aggressive | adaptive`
-- diagnostic filtering for selected meters with `highlight_meters` and `diagnostic_publish_highlight_only`
-- optional log highlighting with `highlight_ansi`, `highlight_tag`, and `highlight_prefix`
+- highlighted local logging for selected meters with `highlight_meters`
+- optional diagnostic filtering with `diagnostic_publish_highlight_only`
+- optional log highlighting controls with `highlight_ansi`, `highlight_tag`, and `highlight_prefix`
 - SX1262 boot-time device error clearing with `clear_device_errors_on_boot`
 - optional publication of cleared SX1262 device errors with `publish_dev_err_after_clear`
 - SX1262 board tuning such as `dio2_rf_switch`, `has_tcxo`, `rx_gain`, `long_gfsk_packets`
@@ -97,25 +118,11 @@ The full field list and event details are documented in [`DIAGNOSTIC.md`](DIAGNO
 
 ## What the repo contains
 
-- single public ESPHome component: `wmbus_radio`
-- internal implementation for:
-  - transceiver handling for `SX1262` and `SX1276`
-  - packet assembly
-  - internal wireless M-Bus helpers
-  - `3of6` decoding
-  - DLL CRC handling
-  - diagnostic / RX-path support
+- `wmbus_radio` component,
 - examples for:
-  - `SX1262 / Heltec V3`
   - `SX1262 / Heltec V4`
-  - `SX1262 / XIAO ESP32 S3`
-  - `SX1262 / XIAO nRF52840`
   - `SX1276 / Lilygo T3-S3`
   - `SX1276 / Heltec V2`
-- board reference assets included with examples:
-  - pinmap image for `Heltec V4`
-  - board image for `Lilygo T3-S3`
-  - board image and reference PDF for `Heltec V2`
 - MQTT diagnostics:
   - `boot`
   - `summary`
@@ -133,8 +140,6 @@ The full field list and event details are documented in [`DIAGNOSTIC.md`](DIAGNO
 - **[`CHIP_SELECTION.md`](CHIP_SELECTION.md)** — practical SX1276 vs SX1262 selection guide
 - **[`BENCHMARKS.md`](BENCHMARKS.md)** — measured benchmark conclusions for `T1-only` and `both`
 - **[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)** — symptom-based diagnostic guide
-- **[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)** — release-level change summary, including adaptive SX1276 behavior, new MQTT diagnostic events, and expanded runtime diagnostics
-- **[`docs/PERMISSION.md`](docs/PERMISSION.md)** — short note documenting explicit upstream permission for fork/publication and GPL publication with attribution
 
 ## Important diagnostic warning
 
@@ -143,7 +148,9 @@ Do **not** treat `summary` as the same thing as real reception quality.
 - `summary` shows parser / decode cleanliness,
 - `meter_window` shows real per-meter reception success.
 
-This matters especially on **SX1276**, where `adaptive` is a real window-based algorithm, not a vague auto mode. Once per summary window it checks false-start-like counters, `drop_pct`, T1 symbol errors, and FIFO overruns; when those thresholds indicate a genuinely noisy window, it enables a 5-minute stronger-filtering hold. That can make `summary` look clean while `meter_window` still shows real losses. State transitions are published as `diagnostic_topic/busy_ether_changed`, and diagnostic hints are published as `diagnostic_topic/suggestion`.
+This matters especially on **SX1276**, where `adaptive` is a real window-based algorithm, not a vague auto mode. Once per summary window it checks false-start-like counters, `drop_pct`, T1 symbol errors, and FIFO overruns; when those thresholds indicate a genuinely noisy window, it enables a 5-minute stronger-filtering hold. That can make `summary` look clean while `meter_window` still shows real losses.
+
+Important: `diagnostic_mode` controls only published diagnostics and verbosity. It does **not** disable the internal counters and window logic used by features such as SX1276 `adaptive` mode.
 
 ## Important note about log language
 
@@ -159,21 +166,9 @@ This keeps the logs readable for Polish users without making low-level debugging
 
 ## Examples
 
-### SX1262
-- `examples/SX1262/Heltec V3/SX1262_V3.yaml`
-- `examples/SX1262/Heltec V4/SX1262_full_example_LED.yaml`
-- `examples/SX1262/XIAO ESP32 S3/xiao.yaml`
-- `examples/SX1262/XIAO nRF52840/XIAO nRF52840.yaml`
-
-### SX1276
+- `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml`
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
-
-### Board reference files
-- `examples/SX1262/Heltec V4/V4_pinmap.png`
-- `examples/SX1276/LilygoT3S3/LilygoT3S3_ver_1_2.png`
-- `examples/SX1276/HeltecV2/HeltecV2.png`
-- `examples/SX1276/HeltecV2/WIFI_LoRa_32_V2.pdf`
 
 ## How this project was built
 
@@ -194,6 +189,7 @@ For bug reports, please use GitHub Issues and include:
 - relevant YAML
 - logs
 - diagnostic output if relevant
+
 ## License
 
 **GPL-3.0-or-later** — see `LICENSE` and `NOTICE`.

@@ -73,19 +73,40 @@ wmbus_radio:
   telegram_topic: "wmbus_bridge/my_receiver/telegram"  # ustaw własny topic MQTT
 ```
 
-`on_frame` używaj tylko wtedy, gdy chcesz dodać efekty uboczne, np. miganie LED, dodatkowe topiki MQTT albo własną logikę dla każdej ramki.
-
 Używaj osobnego topicu MQTT dla każdego odbiornika.
+
+`on_frame` używaj tylko wtedy, gdy chcesz dodać efekty uboczne, np. miganie LED, dodatkowe topiki MQTT albo własną logikę dla każdej ramki.
+Do standardowej publikacji RAW do MQTT używaj albo `telegram_topic`, albo własnego `on_frame` z `frame->as_hex()`.
+`frame->as_rtlwmbus()` stosuj tylko wtedy, gdy celowo potrzebujesz wyjścia zgodnego z rtl-wmbus.
+
+## Presety diagnostyki
+
+Komponent obsługuje `diagnostic_mode: off | low | medium | full`.
+
+`diagnostic_mode` steruje **tylko publikacją diagnostyki MQTT i poziomem gadatliwości**.
+Nie wyłącza wewnętrznych liczników, okien czasowych ani logiki radiowej wymaganej przez funkcje takie jak tryb `adaptive` w SX1276.
+
+Domyślnie diagnostyka jest **opt-in**.
+Jeżeli użytkownik nie włączy jej jawnie, zachowanie jest równoważne `diagnostic_mode: off`.
+
+- `off` — brak diagnostyki MQTT; `highlight_meters` wpływa tylko na lokalne wyróżnienie logów
+- `low` — lekka diagnostyka
+- `medium` — normalna diagnostyka
+- `full` — pełna diagnostyka MQTT
+
+Jeżeli szczegółowe opcje `diagnostic_publish_*` zostaną jawnie wpisane w YAML, mają pierwszeństwo nad presetem.
 
 ## Bardziej zaawansowane opcje YAML
 
 Poza minimalną konfiguracją komponent obsługuje także:
 
+- presety diagnostyki przez `diagnostic_mode`
 - osobny rozmiar stosu taska odbiorczego przez `receiver_task_stack_size`
 - wbudowaną publikację RAW przez `telegram_topic`
 - opcjonalne kierowanie jednego licznika przez `target_meter_id` i `target_topic`
 - tryby filtrowania eteru dla SX1276 przez `sx1276_busy_ether_mode: normal | aggressive | adaptive`
-- filtrowanie diagnostyki dla wybranych liczników przez `highlight_meters` i `diagnostic_publish_highlight_only`
+- lokalne wyróżnianie wybranych liczników przez `highlight_meters`
+- opcjonalne filtrowanie diagnostyki przez `diagnostic_publish_highlight_only`
 - opcjonalne wyróżnianie logów przez `highlight_ansi`, `highlight_tag` i `highlight_prefix`
 - czyszczenie błędów urządzenia SX1262 przy starcie przez `clear_device_errors_on_boot`
 - opcjonalną publikację wyczyszczonych błędów SX1262 przez `publish_dev_err_after_clear`
@@ -96,25 +117,11 @@ Pełna lista pól i eventów jest opisana w [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.m
 
 ## Co repo zawiera
 
-- jeden publiczny komponent ESPHome: `wmbus_radio`
-- wewnętrzną implementację dla:
-  - obsługi transceiverów `SX1262` i `SX1276`
-  - składania pakietów
-  - wewnętrznych helperów wireless M-Bus
-  - dekodowania `3of6`
-  - obsługi DLL CRC
-  - diagnostyki i ścieżki RX
+- komponent `wmbus_radio`,
 - przykłady dla:
-  - `SX1262 / Heltec V3`
   - `SX1262 / Heltec V4`
-  - `SX1262 / XIAO ESP32 S3`
-  - `SX1262 / XIAO nRF52840`
   - `SX1276 / Lilygo T3-S3`
   - `SX1276 / Heltec V2`
-- pliki referencyjne do płytek dołączone do przykładów:
-  - pinmapa dla `Heltec V4`
-  - obraz płytki dla `Lilygo T3-S3`
-  - obraz płytki i PDF referencyjny dla `Heltec V2`
 - diagnostykę MQTT:
   - `boot`
   - `summary`
@@ -132,8 +139,6 @@ Pełna lista pól i eventów jest opisana w [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.m
 - **[`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)** — praktyczny wybór SX1276 vs SX1262
 - **[`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)** — wnioski z benchmarków dla `T1-only` i `both`
 - **[`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md)** — diagnostyka po objawach
-- **[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)** — opis zmian release’u, w tym adaptive dla SX1276, nowe eventy diagnostyczne MQTT i rozszerzoną diagnostykę runtime
-- **[`docs/PERMISSION.md`](docs/PERMISSION.md)** — krótka notatka dokumentująca wyraźną zgodę upstreamu na fork/publikację oraz publikację pod GPL z atrybucją
 
 ## Ważne ostrzeżenie diagnostyczne
 
@@ -142,7 +147,9 @@ Nie traktuj `summary` jako synonimu realnej jakości odbioru.
 - `summary` pokazuje czystość parsera / decode,
 - `meter_window` pokazuje realną skuteczność odbioru konkretnego licznika.
 
-To jest szczególnie ważne dla **SX1276**, gdzie `adaptive` jest realnym algorytmem okienkowym, a nie mglistym auto-trybem. Raz na okno `summary` sprawdza liczniki false-start-like, `drop_pct`, błędy symboli T1 i FIFO overruns; gdy progi wskazują faktycznie zapchane okno, włącza 5-minutowy hold z ostrzejszym filtrowaniem. Wtedy `summary` może wyglądać dobrze, a `meter_window` nadal pokaże realne straty. Zmiany stanu są publikowane jako `diagnostic_topic/busy_ether_changed`, a wskazówki diagnostyczne jako `diagnostic_topic/suggestion`.
+To jest szczególnie ważne dla **SX1276**, gdzie `adaptive` jest realnym algorytmem okienkowym, a nie mglistym auto-trybem. Raz na okno `summary` sprawdza liczniki false-start-like, `drop_pct`, błędy symboli T1 i FIFO overruns; gdy progi wskazują faktycznie zapchane okno, włącza 5-minutowy hold z ostrzejszym filtrowaniem. Wtedy `summary` może wyglądać dobrze, a `meter_window` nadal pokaże realne straty.
+
+Ważne: `diagnostic_mode` steruje tylko publikowaną diagnostyką i poziomem gadatliwości. Nie wyłącza wewnętrznych liczników ani logiki okienkowej używanej przez funkcje takie jak `adaptive` w SX1276.
 
 ## Ważna uwaga o języku logów
 
@@ -158,21 +165,9 @@ Dzięki temu zwykłe logi są czytelniejsze dla polskiego użytkownika, ale nisk
 
 ## Przykłady
 
-### SX1262
-- `examples/SX1262/Heltec V3/SX1262_V3.yaml`
-- `examples/SX1262/Heltec V4/SX1262_full_example_LED.yaml`
-- `examples/SX1262/XIAO ESP32 S3/xiao.yaml`
-- `examples/SX1262/XIAO nRF52840/XIAO nRF52840.yaml`
-
-### SX1276
+- `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml`
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
-
-### Pliki referencyjne do płytek
-- `examples/SX1262/Heltec V4/V4_pinmap.png`
-- `examples/SX1276/LilygoT3S3/LilygoT3S3_ver_1_2.png`
-- `examples/SX1276/HeltecV2/HeltecV2.png`
-- `examples/SX1276/HeltecV2/WIFI_LoRa_32_V2.pdf`
 
 ## Jak powstał ten projekt
 
@@ -193,6 +188,7 @@ Do zgłaszania błędów używaj GitHub Issues i podawaj:
 - istotny fragment YAML
 - logi
 - dane diagnostyczne, jeśli mają znaczenie
+
 ## Licencja
 
 **GPL-3.0-or-later** — patrz `LICENSE` i `NOTICE`.
