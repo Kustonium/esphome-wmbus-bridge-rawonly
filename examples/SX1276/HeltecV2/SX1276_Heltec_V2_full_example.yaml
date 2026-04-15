@@ -90,41 +90,6 @@ mqtt:
 # =============================================================================
 debug:
 
-sensor:
-  - platform: uptime
-    name: "Uptime"
-  - platform: debug
-    free:
-      name: "Heap Free"
-    block:
-      name: "Heap Max Block"
-    min_free:
-      name: "Heap Min Free"
-    loop_time:
-      name: "Loop Time"
-    cpu_frequency:
-      name: "CPU Frequency"
-  - platform: internal_temperature
-    name: "MCU Temperature"
-    update_interval: 60s
-  - platform: wifi_signal
-    name: "WiFi RSSI"
-    update_interval: 60s
-
-text_sensor:
-  - platform: debug
-    device:
-      name: "Device Info"
-    reset_reason:
-      name: "Reset Reason"
-  - platform: wifi_info
-    ip_address:
-      name: "IP Address"
-    ssid:
-      name: "WiFi SSID"
-    bssid:
-      name: "WiFi BSSID"
-
 # ---------------------------------------------------------------------------
 # SPI BUS – Heltec WiFi LoRa 32 (V2)
 #  LoRa_SCK  = GPIO5
