@@ -1,0 +1,88 @@
+#include "decode3of6.h"
+
+#include <map>
+
+#include "esphome/core/helpers.h"
+#include "esphome/core/log.h"
+
+namespace esphome {
+namespace wmbus_radio {
+static const char *TAG = "3of6";
+std::optional<std::vector<uint8_t>>
+decode3of6(std::vector<uint8_t> &coded_data, Decode3of6Stats *stats) {
+
+  static const std::map<uint8_t, uint8_t> lookupTable = {
+      {0b010110, 0x0}, {0b001101, 0x1}, {0b001110, 0x2}, {0b001011, 0x3},
+      {0b011100, 0x4}, {0b011001, 0x5}, {0b011010, 0x6}, {0b010011, 0x7},
+      {0b101100, 0x8}, {0b100101, 0x9}, {0b100110, 0xA}, {0b100011, 0xB},
+      {0b110100, 0xC}, {0b110001, 0xD}, {0b110010, 0xE}, {0b101001, 0xF},
+  };
+
+  // ESP_LOGD(TAG, "Decoding 3of6 data: %s", format_hex(coded_data).c_str());
+
+  std::vector<uint8_t> decodedBytes;
+  // Number of 6-bit symbols that can be extracted from the coded buffer.
+  // NOTE: decoding a symbol can span across byte boundary, so we must guard
+  // against reading past the end of the buffer.
+  auto segments = coded_data.size() * 8 / 6;
+  auto data = coded_data.data();
+
+  uint16_t invalid = 0;
+  if (stats != nullptr) {
+    stats->symbols_total = (uint16_t) segments;
+    stats->symbols_invalid = 0;
+  }
+
+  for (size_t i = 0; i < segments; i++) {
+    auto bit_idx = i * 6;
+    auto byte_idx = bit_idx / 8;
+    auto bit_offset = bit_idx % 8;
+
+    uint8_t code = (data[byte_idx] << bit_offset);
+    if (bit_offset > 0) {
+      // Guard against out-of-bounds for the last symbol.
+      uint8_t next = 0;
+      if ((byte_idx + 1) < coded_data.size())
+        next = data[byte_idx + 1];
+      code |= (next >> (8 - bit_offset));
+    }
+    code >>= 2;
+
+    auto it = lookupTable.find(code);
+    if (it == lookupTable.end()) {
+      // Invalid 6-bit symbol.
+      invalid++;
+      // Keep alignment so we can continue counting and preserve nibble pairing.
+      // We still return nullopt at the end if any invalid symbols were seen.
+      if (i % 2 == 0)
+        decodedBytes.push_back(0x00);
+      else
+        decodedBytes.back() |= 0x00;
+      continue;
+    }
+
+    if (i % 2 == 0)
+      decodedBytes.push_back(it->second << 4);
+    else
+      decodedBytes.back() |= it->second;
+  }
+
+  if (stats != nullptr) {
+    stats->symbols_invalid = invalid;
+  }
+
+  if (invalid > 0) {
+    return {};
+  }
+
+  // ESP_LOGV(TAG, "Successfully decoded %zu bytes", decodedBytes.size());
+  return decodedBytes;
+}
+
+size_t encoded_size(size_t decoded_size) {
+  // Every 2 bytes (4 nibbles by 6 bits = 24b) of decoded data is encoded into 3
+  // bytes of coded data +1 for rounding up
+  return (3 * decoded_size + 1) / 2;
+}
+} // namespace wmbus_radio
+} // namespace esphome
