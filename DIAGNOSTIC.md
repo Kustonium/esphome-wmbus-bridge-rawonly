@@ -46,7 +46,7 @@ This is **not JSON** and has no descriptive fields.
 
 Most commonly you use:
 
-- `telegram_topic` — the preferred built-in RAW MQTT publish path
+- `telegram_topic` — preferred built-in MQTT publish path for validated telegram HEX
 - `frame->as_hex()` — HEX after DLL CRC removal, best for `wmbusmeters` when you need custom `on_frame` logic
 - `frame->as_rtlwmbus()` — rtl-wmbus style text for optional extra topics
 
@@ -97,7 +97,7 @@ The filter works **before** further processing and **before diagnostic counters*
 
 This matters:
 
-- `summary.total` does not count frames rejected by `listen_mode`
+- `summary.total` does not count frames rejected by `listen_mode` and does not count candidates rejected before queueing, such as weak partial starts or unknown-size false starts
 - `dropped_by_stage.link_mode` does not mean “wrong YAML mode”, it means mode-detection issues
 
 ### Which mode to use when
@@ -114,7 +114,7 @@ Note: on **SX1276**, `both` has a real reception cost.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `telegram_topic` | none | Main topic for all RAW telegrams. |
+| `telegram_topic` | none | Main topic for validated telegram HEX (`frame->as_hex()`); failed candidates are not forwarded. |
 | `target_meter_id` | none | Selected meter ID for a dedicated topic. |
 | `target_topic` | none | Dedicated topic for `target_meter_id`. |
 | `target_log` | `true` | Whether to log packets for the selected meter. |
@@ -332,7 +332,7 @@ wmbus_radio:
               return frame->as_hex();
 ```
 
-Use `telegram_topic` for the main RAW stream. Keep `on_frame` for optional extras such as LED blink, RSSI topics, or alternate formats.
+Use `telegram_topic` for the main validated telegram stream. Keep `on_frame` only for optional extras such as LED blink, RSSI topics, or alternate formats.
 
 ---
 
@@ -340,7 +340,7 @@ Use `telegram_topic` for the main RAW stream. Keep `on_frame` for optional extra
 
 ### 5.1 RAW telegram
 
-- `telegram_topic` — preferred for the main RAW stream
+- `telegram_topic` — preferred for the main validated telegram stream
 - a topic published manually from `on_frame` — only when you need custom logic or extra formats
 
 Most common example:

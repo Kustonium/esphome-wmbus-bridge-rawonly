@@ -79,6 +79,21 @@ Używaj osobnego topicu MQTT dla każdego odbiornika.
 Do standardowej publikacji RAW do MQTT używaj albo `telegram_topic`, albo własnego `on_frame` z `frame->as_hex()`.
 `frame->as_rtlwmbus()` stosuj tylko wtedy, gdy celowo potrzebujesz wyjścia zgodnego z rtl-wmbus.
 
+## Co jest publikowane do MQTT
+
+`telegram_topic` publikuje tylko **zweryfikowany HEX telegramu wM-Bus** z `frame->as_hex()`.
+
+To jest RAW-only, bo ESP **nie dekoduje wartości licznika**, nie dobiera driverów i nie tworzy odczytów. Nie oznacza to przepychania każdego dowolnego blobu bajtów z radia.
+
+Przed publikacją komponent już:
+
+- zdekodował T1 z 3-out-of-6, jeśli było to potrzebne,
+- znormalizował C1 przez usunięcie początkowych bajtów C-mode,
+- sprawdził i usunął bajty DLL CRC,
+- odrzucił kandydaty, które nie przeszły kontroli długości, symboli, preambuły albo DLL CRC.
+
+Dokładny tor odbioru jest opisany w **[`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md)**.
+
 ## Presety diagnostyki
 
 Komponent obsługuje `diagnostic_mode: off | low | medium | full`.
@@ -139,6 +154,7 @@ Pełna lista pól i eventów jest opisana w [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.m
 - **[`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)** — praktyczny wybór SX1276 vs SX1262
 - **[`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)** — wnioski z benchmarków dla `T1-only` i `both`
 - **[`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md)** — diagnostyka po objawach
+- **[`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md)** — tor RX i kwalifikacja ramek
 
 ## Ważne ostrzeżenie diagnostyczne
 
@@ -165,7 +181,7 @@ Dzięki temu zwykłe logi są czytelniejsze dla polskiego użytkownika, ale nisk
 
 ## Przykłady
 
-- `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml`
+- `examples/SX1262/Heltec V4/SX1262_full_example_LED.yaml`
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
 

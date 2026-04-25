@@ -1,128 +1,66 @@
-# =============================================================================
-#  ESPHome – wM-Bus Bridge (RAW-only)
-#  Pełny przykład konfiguracji z komentarzami / Full configuration example
-#
-#  Radio: Heltec WiFi LoRa 32 (V2) (ESP32 + SX1276)
-#  Projekt: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly
-# =============================================================================
-
-# ---------------------------------------------------------------------------
-# SUBSTITUTIONS – zmienne globalne / global variables
-# ---------------------------------------------------------------------------
 substitutions:
   devicename: esphome-wmbus-heltec-v2
   friendly_name: "wMBus Bridge Heltec V2"
 
-# ---------------------------------------------------------------------------
-# ESPHOME CORE
-# ---------------------------------------------------------------------------
 esphome:
   name: ${devicename}
   friendly_name: ${friendly_name}
   min_version: 2026.1.3
   name_add_mac_suffix: false
 
-# ---------------------------------------------------------------------------
-# PLATFORMA – ESP32 (Heltec V2)
-# ---------------------------------------------------------------------------
 esp32:
   board: esp32dev
   variant: ESP32
   framework:
     type: esp-idf
 
-# ---------------------------------------------------------------------------
-# ZEWNĘTRZNY KOMPONENT / EXTERNAL COMPONENT
-# Uwaga: dla stabilności produkcyjnej polecam pinować tag zamiast @main.
-# Note: for production stability, pin a tag instead of @main.
-# ---------------------------------------------------------------------------
 external_components:
   - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
     components: [wmbus_radio]
-    # refresh: 1d   # opcjonalnie / optional
+    refresh: 0s
 
-# ---------------------------------------------------------------------------
-# LOGGER
-# ---------------------------------------------------------------------------
 logger:
   level: info
-  # level: debug
   logs:
     mqtt: warn
     component: warn
-    # wmbus: debug
-    # SX1276: debug
 
-# ---------------------------------------------------------------------------
-# SIEĆ / NETWORK
-# ---------------------------------------------------------------------------
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   power_save_mode: none
 
-mdns:
-  disabled: false
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
 
 api:
-
 ota:
   - platform: esphome
-
-improv_serial:
-
+mdns:
+  disabled: false
 time:
   - platform: homeassistant
 
-# ---------------------------------------------------------------------------
-# MQTT BROKER (opcjonalnie, ale zwykle potrzebny do RAW bridge)
-# ---------------------------------------------------------------------------
-mqtt:
-  broker: 192.168.1.10
-  username: !secret mqtt_user
-  password: !secret mqtt_password
-  log_topic:
-    topic: "${devicename}/debug"
-    level: DEBUG
-
-# =============================================================================
-#  ESP DIAGNOSTYKA / ESP DIAGNOSTICS (opcjonalne)
-# =============================================================================
 debug:
 
-# ---------------------------------------------------------------------------
-# SPI BUS – Heltec WiFi LoRa 32 (V2)
-#  LoRa_SCK  = GPIO5
-#  LoRa_MOSI = GPIO27
-#  LoRa_MISO = GPIO19
-#
-# Uwaga: GPIO5/12/15 to piny strapujące przy flashowaniu (patrz pinout).
-# Zwykle działa bez kombinacji, ale jeśli masz problemy z wejściem w bootloader,
-# odłącz zasilanie/antene/urządzenie od zakłóceń i spróbuj ponownie.
-# ---------------------------------------------------------------------------
 spi:
   clk_pin: GPIO5
   mosi_pin: GPIO27
   miso_pin: GPIO19
 
-# =============================================================================
-#  LED STATUSU (opcjonalnie)
-#  Heltec V2 ma diodę na GPIO25 (LED).
-#  Jeśli chcesz ją wykorzystać – odkomentuj bloki output/light/script
-# =============================================================================
-
+# Optional status LED on Heltec V2.
 # output:
 #   - platform: gpio
 #     id: led_output
 #     pin: GPIO25
-
 # light:
 #   - platform: binary
+#     id: status_led
 #     name: "LED"
 #     output: led_output
-#     id: status_led
 #     restore_mode: ALWAYS_OFF
-
 # script:
 #   - id: blink_led
 #     mode: single
@@ -131,87 +69,36 @@ spi:
 #       - delay: 50ms
 #       - light.turn_off: status_led
 
-# =============================================================================
-#  WMBUS RADIO – główna konfiguracja
-# =============================================================================
 wmbus_radio:
-  # -------------------------------------------------------------------------
-  # TYP RADIA / RADIO TYPE
-  # Heltec V2 używa SX1276 (LoRa32 V2).
-  # -------------------------------------------------------------------------
   radio_type: SX1276
-
-  # -------------------------------------------------------------------------
-  # PINY RADIA / RADIO PINS
-  #  LoRa_CS   = GPIO18
-  #  LoRa_RST  = GPIO14
-  #  LoRa_DIO0 = GPIO26   (RxDone – nie używany jako IRQ w tym driverze)
-  #  LoRa_DIO1 = GPIO35   (FifoLevel – używany jako IRQ w tym driverze)
-  #
-  # Uwaga: ten driver używa DIO1 (GPIO35) jako linii IRQ, nie DIO0 (GPIO26).
-  # DIO1 sygnalizuje FifoLevel, co jest wymagane przez implementację odbioru.
-  # Note: this driver uses DIO1 (GPIO35) as the IRQ line, not DIO0 (GPIO26).
-  # DIO1 signals FifoLevel, which is required by the receive implementation.
-  # -------------------------------------------------------------------------
   cs_pin: GPIO18
   reset_pin: GPIO14
-  irq_pin: GPIO35
 
-  # -------------------------------------------------------------------------
-  # PODŚWIETLANIE LOGÓW / LOG HIGHLIGHTING (opcjonalne)
-  #
-  # highlight_meters wyróżnia liczniki w logach serial/API.
-  # Tę samą listę można też wykorzystać jako filtr dla per-packet MQTT diag,
-  # jeśli ustawisz diagnostic_publish_highlight_only: true.
-  #
-  # highlight_meters highlights selected meters in serial/API logs.
-  # The same list can also filter per-packet MQTT diagnostics when
-  # diagnostic_publish_highlight_only: true.
-  # -------------------------------------------------------------------------
-  highlight_meters:
-    - "12345678"             # przykładowy licznik usera / example user meter
-  highlight_ansi: true        # ANSI w terminalu / ANSI color in terminal
-  highlight_tag: "wmbus_user" # osobny tag dla wyróżnionych / dedicated tag
-  highlight_prefix: "★ "      # prefiks w logu / log prefix
+  # SX1276 driver uses DIO1/FifoLevel as IRQ, not DIO0/RxDone.
+  irq_pin:
+    number: GPIO35
+    mode: input
 
-  # -------------------------------------------------------------------------
-  # DIAGNOSTYKA – MQTT / DIAGNOSTICS – MQTT (opcjonalne)
-  #
-  # Na co dzień zwykle wystarczy:
-  # - summary włączone,
-  # - rx_path wyłączone,
-  # - dropped/truncated tylko dla highlight_meters.
-  #
-  # For daily use this is usually enough:
-  # - keep summary enabled,
-  # - disable rx_path spam,
-  # - publish dropped/truncated only for highlight_meters.
-  # -------------------------------------------------------------------------
-  diagnostic_topic: "wmbus/diag"
-  diagnostic_summary_interval: 120s
-  diagnostic_publish_summary_15min: true
-  diagnostic_publish_summary_60min: false
-# summary topics: <diagnostic_topic>/summary, /summary_15min, /summary_60min
-  diagnostic_verbose: false              # ciszej na serial/API / quieter serial/API
-  diagnostic_publish_summary: true       # publikuj summary / publish summary
-  diagnostic_publish_drop_events: true   # dropped/truncated na MQTT / dropped/truncated to MQTT
-  diagnostic_publish_rx_path_events: false # wyłącz RX-path spam / disable RX-path spam
-  diagnostic_publish_highlight_only: true  # tylko dla highlight_meters
-  diagnostic_publish_raw: false          # mniejsze payloady / smaller payloads
+  listen_mode: t1
+  sx1276_busy_ether_mode: adaptive
+  telegram_topic: "wmbus_bridge/heltec_v2/telegram"
 
-  # Główna publikacja RAW do wmbusmeters / Main RAW publish to wmbusmeters
-  telegram_topic: "wmbus_bridge/telegram"
+  diagnostic_mode: low
+  diagnostic_topic: "wmbus/heltec_v2/diag"
+  diagnostic_summary_interval: 60s
 
-  # -------------------------------------------------------------------------
-  # ON_FRAME – opcjonalny callback dla dodatków / optional callback for extras
-  # -------------------------------------------------------------------------
+  # Optional: avoid SX1276 both mode in dense mixed T1/C1 environments.
+  # Use two devices instead: one T1-only and one C1-only.
+
+  # Optional highlighted meter logs and filtered packet diagnostics.
+  # highlight_meters:
+  #   - "12345678"
+  # highlight_ansi: true
+  # highlight_tag: "wmbus_user"
+  # highlight_prefix: "★ "
+  # diagnostic_publish_highlight_only: true
+
+  # Optional LED blink if the LED blocks above are enabled.
   # on_frame:
   #   then:
-  #     # Jeśli włączyłeś LED powyżej – odkomentuj:
-  #     # - script.execute: blink_led
-  #
-  #     # Opcjonalnie: format rtl-wmbus / Optional: rtl-wmbus format
-  #     - mqtt.publish:
-  #         topic: "wmbus_bridge/rtlwmbus"
-  #         payload: !lambda |-
-  #           return frame->as_rtlwmbus();
+  #     - script.execute: blink_led

@@ -80,6 +80,21 @@ Use `on_frame` only when you want extra side effects such as LED blink, extra MQ
 For standard RAW MQTT publishing, use either `telegram_topic` or a custom `on_frame` publish with `frame->as_hex()`.
 Use `frame->as_rtlwmbus()` only if you intentionally need rtl-wmbus compatible text output.
 
+## What is published to MQTT
+
+`telegram_topic` publishes only **validated wM-Bus telegram HEX** from `frame->as_hex()`.
+
+It is RAW-only because the ESP does **not** decode meter values, select drivers, or create readings. It does **not** mean that every arbitrary byte blob from the radio is forwarded.
+
+Before publishing, the component has already:
+
+- decoded T1 3-out-of-6 when needed,
+- normalized C1 by removing the C-mode leading bytes,
+- validated and stripped DLL CRC bytes,
+- rejected candidates that fail length, symbol, preamble, or DLL CRC checks.
+
+For the exact receiver path see **[`docs/RX_PIPELINE.md`](docs/RX_PIPELINE.md)**.
+
 ## Diagnostic presets
 
 The component supports `diagnostic_mode: off | low | medium | full`.
@@ -140,6 +155,7 @@ The full field list and event details are documented in [`DIAGNOSTIC.md`](DIAGNO
 - **[`CHIP_SELECTION.md`](CHIP_SELECTION.md)** — practical SX1276 vs SX1262 selection guide
 - **[`BENCHMARKS.md`](BENCHMARKS.md)** — measured benchmark conclusions for `T1-only` and `both`
 - **[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)** — symptom-based diagnostic guide
+- **[`docs/RX_PIPELINE.md`](docs/RX_PIPELINE.md)** — receiver pipeline and frame qualification
 
 ## Important diagnostic warning
 
@@ -166,7 +182,7 @@ This keeps the logs readable for Polish users without making low-level debugging
 
 ## Examples
 
-- `examples/SX1262/HeltecV4/SX1262_full_example_LED.yaml`
+- `examples/SX1262/Heltec V4/SX1262_full_example_LED.yaml`
 - `examples/SX1276/LilygoT3S3/SX1276_T3S3_full_example.yaml`
 - `examples/SX1276/HeltecV2/SX1276_Heltec_V2_full_example.yaml`
 

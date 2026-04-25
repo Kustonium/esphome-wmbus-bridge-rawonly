@@ -15,6 +15,7 @@ Please read / Najpierw przeczytaj:
 - `TROUBLESHOOTING_PL.md`
 - `CHIP_SELECTION.md`
 - `CHIP_SELECTION_PL.md`
+- `docs/RX_PIPELINE.md` / `docs/RX_PIPELINE_PL.md`
 
 ## Open an issue for / Otwórz issue dla
 
@@ -49,6 +50,7 @@ Please read / Najpierw przeczytaj:
 - relevant YAML
 - logs
 - diagnostic output if relevant
+- for RX problems: `summary` plus at least one `dropped` / `truncated` event if available
 - expected behavior
 - actual behavior
 

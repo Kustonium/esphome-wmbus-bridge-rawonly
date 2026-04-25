@@ -1,256 +1,93 @@
-# =============================================================================
-#  ESPHome – wM-Bus Bridge (RAW-only)
-#  Pełny przykład konfiguracji z komentarzami / Full configuration example
-#
-#  Płytka / Board: LilyGO T3-S3 v1.2  (ESP32-S3 + SX1276)
-#  Projekt: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly
-# =============================================================================
-
-# =============================================================================
-#  ESPHOME CORE
-# =============================================================================
-esphome:
-  name: esphome-wmbus-lilygo
+substitutions:
+  devicename: esphome-wmbus-lilygo-t3s3
   friendly_name: "wMBus Bridge LilyGO T3-S3"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
   min_version: 2026.1.3
   name_add_mac_suffix: false
 
-# =============================================================================
-#  PLATFORMA / PLATFORM – ESP32-S3
-# =============================================================================
 esp32:
   board: esp32-s3-devkitc-1
+  variant: esp32s3
   framework:
     type: esp-idf
 
-# =============================================================================
-#  ZEWNĘTRZNY KOMPONENT / EXTERNAL COMPONENT
-# =============================================================================
 external_components:
   - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
     components: [wmbus_radio]
     refresh: 0s
 
-# =============================================================================
-#  LOGGER
-# =============================================================================
 logger:
   level: info
   logs:
     mqtt: warn
     component: warn
-    # SX1276: debug
-    # wmbus: info
 
-# =============================================================================
-#  DIAGNOSTYKA ESP / ESP DIAGNOSTICS
-# =============================================================================
-debug:
-
-# =============================================================================
-#  mDNS / OTA / API / IMPROV
-# =============================================================================
-mdns:
-  disabled: false
-
-ota:
-  - platform: esphome
-
-api:
-
-improv_serial:
-
-# =============================================================================
-#  CZAS / TIME
-# =============================================================================
-time:
-  - platform: homeassistant
-  # - platform: sntp
-
-# =============================================================================
-#  WI-FI
-# =============================================================================
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   power_save_mode: none
 
-# =============================================================================
-#  MQTT BROKER
-# =============================================================================
 mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_user
   password: !secret mqtt_password
 
-# =============================================================================
-#  SPI BUS – LilyGO T3-S3 v1.2
-#
-#  UWAGA: GPIO03 (MISO) jest strapping pinem ESP32-S3.
-#  W większości układów nie stanowi problemu — SX1276 trzyma go wysoko podczas
-#  bootu, więc ESP32-S3 normalnie się uruchamia.
-#
-#  NOTE: GPIO03 (MISO) is a strapping pin on ESP32-S3.
-#  In most setups not a problem — SX1276 holds it high at boot so ESP32-S3
-#  starts normally.
-# =============================================================================
+api:
+ota:
+  - platform: esphome
+mdns:
+  disabled: false
+improv_serial:
+time:
+  - platform: homeassistant
+
+debug:
+
 spi:
   id: spi_lora
   clk_pin: GPIO05
   mosi_pin: GPIO06
   miso_pin: GPIO03
 
-# =============================================================================
-#  LED STATUSU / STATUS LED – LilyGO T3-S3 v1.2
-#
-#  Miga 50 ms przy każdym odebranym telgramie wMBus.
-#  Blinks 50 ms on every received wMBus telegram.
-#
-#  Żeby wyłączyć / To disable:
-#    1) Usuń cały blok output: / Remove entire output: block
-#    2) Usuń 3 linie w on_frame (turn_on/delay/turn_off)
-#       Remove 3 lines in on_frame (turn_on/delay/turn_off)
-# =============================================================================
 output:
   - platform: gpio
     id: status_led
-    pin:
-      number: GPIO37
-      # inverted: true   # odkomentuj gdy LED aktywne-niskie / uncomment for active-low LED
+    pin: GPIO37
 
-# =============================================================================
-#  WMBUS RADIO – główna konfiguracja / main configuration
-# =============================================================================
 wmbus_radio:
-
-  # ---------------------------------------------------------------------------
-  # TYP RADIA / RADIO TYPE
-  #
-  # SX1276: starszy układ (SX127x). Parametry RF zahardkodowane:
-  #   868.950 MHz, 100 kbps, fdev=50 kHz
-  #   Automatyczne przełączanie Format A/B (3:1 bias na Format B).
-  #
-  # Opcje NIEDOSTĘPNE dla SX1276 (tylko SX1262):
-  #   busy_pin, dio2_rf_switch, has_tcxo, rx_gain, long_gfsk_packets,
-  #   fem_en/ctrl/pa_pin, clear_device_errors_on_boot
-  # ---------------------------------------------------------------------------
   radio_type: SX1276
-
   spi_id: spi_lora
-
-  # ---------------------------------------------------------------------------
-  # PINY RADIA / RADIO PINS
-  # ---------------------------------------------------------------------------
   cs_pin: GPIO07
   reset_pin: GPIO08
 
+  # SX1276 driver uses DIO1/FifoLevel as IRQ.
   irq_pin:
     number: GPIO33
     mode:
       input: true
-      pullup: true            # SX1276 DIO1 aktywne-niskie / active-low
-                               # pull-up zapobiega fałszywym IRQ / prevents spurious IRQs
+      pullup: true
 
-  # Brak busy_pin — SX1276 nie ma pinu BUSY.
-  # No busy_pin — SX1276 has no BUSY pin.
-
-  # ---------------------------------------------------------------------------
-  # TRYB FILTROWANIA W GĘSTYM ETERZE / BUSY-ETHER FILTERING MODE
-  #
-  # adaptive  (domyślnie / default):
-  #   Automatyczna aktywacja gdy eter jest zatłoczony (dużo fałszywych startów,
-  #   wysoki drop_pct). 5-minutowy hold z hysterezą. Po wyciszeniu eteru
-  #   powrót do trybu pasywnego.
-  #   Auto-activates when ether is noisy (many false starts, high drop_pct).
-  #   5-minute hold with hysteresis. Returns to passive mode when ether quiets.
-  #
-  # normal:
-  #   Brak dodatkowego filtrowania. Radio odbiera wszystko co wykryje.
-  #   No extra filtering. Radio receives everything it detects.
-  #
-  # aggressive:
-  #   Stałe agresywne filtrowanie słabych sygnałów.
-  #   Nie zalecane bez dobrego powodu — może ciąć legitymacyjne mierniki.
-  #   Permanently aggressive weak-signal filtering.
-  #   Not recommended without a good reason — may cut legitimate meters.
-  # ---------------------------------------------------------------------------
-  sx1276_busy_ether_mode: adaptive   # domyślnie: adaptive / default: adaptive
-
-  # ---------------------------------------------------------------------------
-  # TRYB NASŁUCHU / LISTEN MODE
-  #
-  # t1   = tylko T1 (najczęstszy w Polsce / most common in Poland)
-  # c1   = tylko C1
-  # both = T1+C1 (3:1 bias na T1)
-  #
-  # UWAGA dla SX1276 + both: koszt przełączania jest bardzo wysoki (40–96%).
-  # Szybkie liczniki (~30s) praktycznie niewidoczne w trybie both na SX1276.
-  # Dla środowisk mieszanych T1/C1 użyj dwóch osobnych urządzeń.
-  #
-  # WARNING for SX1276 + both: switching cost is very high (40–96%).
-  # Fast meters (~30s) are practically invisible in SX1276 both mode.
-  # For mixed T1/C1 environments use two separate devices.
-  # ---------------------------------------------------------------------------
   listen_mode: t1
+  sx1276_busy_ether_mode: adaptive
+  telegram_topic: "wmbus_bridge/lilygo_t3s3/telegram"
 
-  # ---------------------------------------------------------------------------
-  # PODŚWIETLANIE I STATYSTYKI PER-LICZNIK / HIGHLIGHTING AND PER-METER STATS
-  #
-  # Topic: {diagnostic_topic}/meter/{id}/{mode}/window/{trigger}
-  # Przykład / Example: wmbus/lilygo/diag/meter/00089907/T1/window/count
-  # ---------------------------------------------------------------------------
-  highlight_meters:
-    - "00089907"             # przykładowy licznik / example meter
-    - "03534159"
-    - "03528221"
-  highlight_ansi: true
-  highlight_tag: "wmbus_user"
-  highlight_prefix: "★ "
-
-  # ---------------------------------------------------------------------------
-  # DIAGNOSTYKA / DIAGNOSTICS
-  # ---------------------------------------------------------------------------
-  diagnostic_topic: "wmbus/lilygo/diag"
+  diagnostic_mode: low
+  diagnostic_topic: "wmbus/lilygo_t3s3/diag"
   diagnostic_summary_interval: 60s
-  diagnostic_publish_summary_15min: true
-  diagnostic_publish_summary_60min: false
-# summary topics: <diagnostic_topic>/summary, /summary_15min, /summary_60min
-  diagnostic_verbose: false
-  diagnostic_publish_summary: true
-  diagnostic_publish_drop_events: true
-  diagnostic_publish_rx_path_events: false
-  diagnostic_publish_highlight_only: true
-  diagnostic_publish_raw: false
 
-  # Główna publikacja RAW do wmbusmeters / Main RAW publish to wmbusmeters
-  telegram_topic: "wmbus_bridge/lilygo/telegram"
+  # Optional highlighted meter logs and per-meter windows.
+  # highlight_meters:
+  #   - "00089907"
+  # highlight_ansi: true
+  # highlight_tag: "wmbus_user"
+  # highlight_prefix: "★ "
+  # diagnostic_publish_summary_highlight_meters: true
 
-  # ---------------------------------------------------------------------------
-  # ON_FRAME – opcjonalny callback dla dodatków / optional callback for extras
-  #
-  # Dostępne metody / Available methods:
-  #   frame->as_hex()       → HEX po usunięciu CRC (dla własnej logiki)
-  #   frame->as_raw()       → vector<uint8_t> surowych bajtów
-  #   frame->as_rtlwmbus()  → format rtl-wmbus: T1;1;1;timestamp;rssi;hex
-  #   frame->rssi()         → int8_t RSSI w dBm
-  #   frame->link_mode()    → LinkMode (T1 lub C1)
-  #   frame->format()       → std::string ("A" lub "B")
-  # ---------------------------------------------------------------------------
   on_frame:
     then:
-      # Miganie LED / LED blink
       - output.turn_on: status_led
       - delay: 50ms
       - output.turn_off: status_led
-
-      # Opcjonalnie: RSSI / Optional: RSSI
-      # - mqtt.publish:
-      #     topic: "wmbus_bridge/rssi"
-      #     payload: !lambda |-
-      #       return to_string((int) frame->rssi());
-
-      # Opcjonalnie: rtl-wmbus / Optional: rtl-wmbus
-      # - mqtt.publish:
-      #     topic: "wmbus_bridge/rtlwmbus"
-      #     payload: !lambda |-
-      #       return frame->as_rtlwmbus();

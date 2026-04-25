@@ -48,7 +48,7 @@ To **nie jest JSON** i nie ma opisowych pól.
 
 Najczęściej używasz:
 
-- `telegram_topic` — preferowana, wbudowana publikacja RAW po MQTT
+- `telegram_topic` — preferowana wbudowana publikacja zweryfikowanego HEX telegramu po MQTT
 - `frame->as_hex()` — HEX po usunięciu CRC DLL, najlepszy do `wmbusmeters`, gdy potrzebujesz własnej logiki w `on_frame`
 - `frame->as_rtlwmbus()` — tekst w stylu rtl-wmbus do opcjonalnych dodatkowych topiców
 
@@ -99,7 +99,7 @@ Filtr działa **przed** dalszą obróbką i **przed licznikami diagnostycznymi**
 
 To ważne:
 
-- `summary.total` nie liczy ramek odfiltrowanych przez `listen_mode`
+- `summary.total` nie liczy ramek odfiltrowanych przez `listen_mode` ani kandydatów odrzuconych przed kolejką, np. słabych partial-startów albo false-startów bez wyliczonej długości
 - `dropped_by_stage.link_mode` nie oznacza „nie tego trybu z YAML”, tylko problemy z rozpoznaniem trybu
 
 ### Kiedy używać którego trybu
@@ -116,7 +116,7 @@ Uwaga: na **SX1276** tryb `both` ma realny koszt odbioru.
 
 | Klucz | Domyślnie | Znaczenie |
 |---|---|---|
-| `telegram_topic` | brak | Główny topic dla wszystkich telegramów RAW. |
+| `telegram_topic` | brak | Główny topic dla zweryfikowanego HEX telegramu (`frame->as_hex()`); nieudane kandydaty nie są forwardowane. |
 | `target_meter_id` | brak | Wybrane ID licznika do osobnego topicu. |
 | `target_topic` | brak | Osobny topic dla `target_meter_id`. |
 | `target_log` | `true` | Czy logować pakiety wybranego licznika. |
@@ -334,7 +334,7 @@ wmbus_radio:
               return frame->as_hex();
 ```
 
-`telegram_topic` używaj do głównego strumienia RAW. `on_frame` zostaw do dodatków, np. migania LED, osobnego topicu RSSI albo alternatywnego formatu.
+`telegram_topic` używaj do głównego strumienia zweryfikowanych telegramów. `on_frame` zostaw tylko do dodatków, np. migania LED, osobnego topicu RSSI albo alternatywnego formatu.
 
 ---
 
@@ -342,7 +342,7 @@ wmbus_radio:
 
 ### 5.1 RAW telegram
 
-- `telegram_topic` — preferowany dla głównego strumienia RAW
+- `telegram_topic` — preferowany dla głównego strumienia zweryfikowanych telegramów
 - topic publikowany ręcznie z `on_frame` — tylko gdy potrzebujesz własnej logiki albo dodatkowych formatów
 
 Najczęstszy przykład:

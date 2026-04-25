@@ -1,9 +1,11 @@
 substitutions:
   devicename: xiao-seed-esp-s3
+  friendly_name: "wMBus Bridge XIAO ESP32-S3"
 
 esphome:
   name: ${devicename}
-  friendly_name: XIAO SEED ESP S3
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
   on_boot:
     priority: 900
     then:
@@ -17,12 +19,12 @@ esp32:
     type: esp-idf
 
 external_components:
-  - source: github://Kustonium/esphome-wmbus-bridge-rawonly-dev@main
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
     components: [wmbus_radio]
     refresh: 0s
 
 logger:
-  level: INFO
+  level: info
   logs:
     mqtt: warn
     component: warn
@@ -38,24 +40,20 @@ mqtt:
   password: !secret mqtt_password
 
 api:
-
 ota:
   - platform: esphome
-
 mdns:
   disabled: false
-
 time:
   - platform: homeassistant
 
 button:
   - platform: restart
-    name: "XIAO SEED ESP S3 restart"
+    name: "XIAO ESP32-S3 restart"
 
 sensor:
   - platform: uptime
     name: "Uptime"
-
   - platform: wifi_signal
     name: "WiFi RSSI"
     update_interval: 60s
@@ -67,6 +65,7 @@ text_sensor:
     ssid:
       name: "WiFi SSID"
 
+# RF switch power enable used by this XIAO SX1262 build.
 output:
   - platform: gpio
     id: lora_rf_sw
@@ -79,13 +78,6 @@ spi:
 
 wmbus_radio:
   radio_type: SX1262
-  listen_mode: T1
-  #receiver_task_stack_size: 6144   # <=zwiększenie stosu , domyślnie jest 3072.
-  long_gfsk_packets: true
-
-  clear_device_errors_on_boot: true
-  publish_dev_err_after_clear: true
-
   cs_pin: GPIO41
   reset_pin: GPIO42
   busy_pin: GPIO40
@@ -95,30 +87,20 @@ wmbus_radio:
 
   has_tcxo: true
   rx_gain: boosted
-  highlight_meters:
-   - "12345678"
-   - "87654321"
-   - "43218765"
-  highlight_tag: "wmbus_user"
-  highlight_prefix: "★ "
-  highlight_ansi: true
+  long_gfsk_packets: true
+  listen_mode: t1
+  telegram_topic: "wmbus_bridge/xiao_s3/telegram"
 
-  diagnostic_topic: "wmbus/xiaoseed/diag"
-  diagnostic_summary_interval: 120s
-  diagnostic_publish_summary_15min: false
-  diagnostic_publish_summary_60min: false
-  diagnostic_publish_summary_highlight_meters: true
-  diagnostic_verbose: false
-  diagnostic_publish_summary: true
-  diagnostic_publish_drop_events: true
-  diagnostic_publish_rx_path_events: false
-  diagnostic_publish_highlight_only: true
-  diagnostic_publish_raw: false
+  diagnostic_mode: low
+  diagnostic_topic: "wmbus/xiao_s3/diag"
 
+  # Optional: increase only if logs show receiver task stack issues.
+  # receiver_task_stack_size: 6144
 
-  on_frame:
-    - then:
-        - mqtt.publish:
-            topic: "wmbus_bridge/xiaoseed/telegram"
-            payload: !lambda |-
-              return frame->as_hex();
+  # Optional highlighted meter logs.
+  # highlight_meters:
+  #   - "12345678"
+  # highlight_tag: "wmbus_user"
+  # highlight_prefix: "★ "
+  # highlight_ansi: true
+  # diagnostic_publish_summary_highlight_meters: true
