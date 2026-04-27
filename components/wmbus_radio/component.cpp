@@ -2058,18 +2058,20 @@ void Radio::loop() {
         }
 
         ESP_LOGI(TAG,
-                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s",
+                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s | RF: %s",
                  radio_name,
                  listen_mode_to_string_(this->radio->get_listen_mode()),
                  (unsigned) this->receiver_task_stack_size_,
                  busy_mode,
-                 busy_state);
+                 busy_state,
+                 this->radio->get_rf_params_str().c_str());
       } else {
         ESP_LOGI(TAG,
-                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
+                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
                  radio_name,
                  listen_mode_to_string_(this->radio->get_listen_mode()),
-                 (unsigned) this->receiver_task_stack_size_);
+                 (unsigned) this->receiver_task_stack_size_,
+                 this->radio->get_rf_params_str().c_str());
       }
 
       this->boot_log_last_ms_ = loop_now_ms;

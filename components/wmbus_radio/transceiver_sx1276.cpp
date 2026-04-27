@@ -123,10 +123,15 @@ void SX1276::setup() {
 
   // EN 13757-4: T-mode fdev = 50 kHz, C-mode fdev = 45 kHz.
   const uint16_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000 : 50000;
-  ESP_LOGI(TAG, "RF params / parametry RF: bitrate=100kbps fdev=%ukHz RxBW=%s AfcBW=%s",
-           (unsigned)(freq_dev / 1000),
-           (this->listen_mode_ == LISTEN_MODE_C1) ? "167kHz" : "125kHz",
-           (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz");
+  // Store RF params string for boot log in component.cpp.
+  {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "fdev=%ukHz RxBW=%s AfcBW=%s",
+             (unsigned)(freq_dev / 1000),
+             (this->listen_mode_ == LISTEN_MODE_C1) ? "167kHz" : "125kHz",
+             (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz");
+    this->rf_params_str_ = buf;
+  }
   const uint16_t frd = ((uint64_t) freq_dev * (1 << 19)) / F_OSC;
   this->spi_write(0x04, {BYTE(frd, 1), BYTE(frd, 0)});
 

@@ -543,9 +543,14 @@ void SX1262::setup() {
   const uint32_t fdev = ((uint64_t) freq_dev << 25) / XTAL_FREQ;
   const uint8_t rx_bw = (this->listen_mode_ == LISTEN_MODE_C1) ? GFSK_RX_BW_234_3 : GFSK_RX_BW_312_0;
 
-  ESP_LOGI(TAG, "RF params / parametry RF: bitrate=100kbps BT=0.5 fdev=%lukHz RxBW=%s",
-           (unsigned long)(freq_dev / 1000),
-           (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz");
+  // Store RF params string for boot log in component.cpp.
+  {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "fdev=%lukHz BT=0.5 RxBW=%s",
+             (unsigned long)(freq_dev / 1000),
+             (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz");
+    this->rf_params_str_ = buf;
+  }
 
   this->cmd_write_(CMD_SET_MODULATION_PARAMS,
                    {(uint8_t) ((br >> 16) & 0xFF), (uint8_t) ((br >> 8) & 0xFF), (uint8_t) (br & 0xFF),
