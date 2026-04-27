@@ -2454,9 +2454,9 @@ void Radio::loop() {
     if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
     const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
     const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
              ansi_pre, this->highlight_prefix_.c_str(),
-             d.size(), frame->rssi(),
+             d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
@@ -2482,8 +2482,8 @@ void Radio::loop() {
                (unsigned) stats.count);
     }
   } else {
-    ESP_LOGI(TAG, "Have data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-             d.size(), frame->rssi(),
+    ESP_LOGI(TAG, "Have data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+             d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
