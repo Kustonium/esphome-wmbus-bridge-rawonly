@@ -86,7 +86,7 @@ wmbus_radio:
 
   # Optional highlighted meter logs and per-meter windows.
   # highlight_meters:
-  #   - "00089907"
+  #   - "12345678"
   # highlight_ansi: true
   # highlight_tag: "wmbus_user"
   # highlight_prefix: "★ "

@@ -373,7 +373,7 @@ For meter windows the topic is extended to:
 
 Example:
 
-- `wmbus/diag/meter/00089907/T1/window/count`
+- `wmbus/diag/meter/12345678/T1/window/count`
 
 ---
 
@@ -689,7 +689,7 @@ Example:
   "uptime_ms":812000,
   "listen_mode":"T1 only",
   "trigger":"count",
-  "id":"00089907",
+  "id":"12345678",
   "mode":"T1",
   "elapsed_s":312,
   "count_window":10,
@@ -853,7 +853,7 @@ wmbus_radio:
   sx1276_busy_ether_mode: adaptive
 
   highlight_meters:
-    - "00089907"
+    - "12345678"
 
   diagnostic_topic: "wmbus/lilygo/diag"
   diagnostic_summary_interval: 60s

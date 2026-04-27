@@ -21,8 +21,8 @@ They are not synthetic lab benchmarks. They are practical field results.
 Main traffic profile used in the analysis:
 
 - ~29 BMT devices, `77 B`, around `121 s`,
-- `NES 00089907`, `143 B`, around `30 s`,
-- `TCH 90830781`, `56 B`, around `34 s`,
+- `NES 12345678`, `143 B`, around `30 s`,
+- `TCH 23456789`, `56 B`, around `34 s`,
 - 2 additional BMT water meters, `77 B`, around `121 s`.
 
 ## Critical reading rule
@@ -50,16 +50,16 @@ In this apartment-block environment:
 
 | Meter | Size | Interval | SX1276 night | SX1276 day | SX1262 day |
 |---|---:|---:|---:|---:|---:|
-| `00089907` | `143 B` | `~30 s` | `65%` | `~40%` | `~100%` |
-| `90830781` | `56 B` | `~34 s` | `96%` | `~53%` | `~100%` |
-| `03534159` | `77 B` | `~121 s` | — | `~88%` | `~100%` |
-| `03528221` | `77 B` | `~121 s` | — | `~100%` | `~100%` |
+| `12345678` | `143 B` | `~30 s` | `65%` | `~40%` | `~100%` |
+| `23456789` | `56 B` | `~34 s` | `96%` | `~53%` | `~100%` |
+| `34567890` | `77 B` | `~121 s` | — | `~88%` | `~100%` |
+| `45678901` | `77 B` | `~121 s` | — | `~100%` | `~100%` |
 
 ## What the data suggested
 
 ### Loss pattern on `SX1276` was structural, not random
 
-For `00089907`, the observed interval pattern showed repeated losses such as:
+For `12345678`, the observed interval pattern showed repeated losses such as:
 
 `30, 60, 30, 90, 60, 30, 89`
 
@@ -122,12 +122,12 @@ Same lesson again:
 
 | Meter | Size | Interval | SX1276 T1-only | SX1276 both | SX1262 T1-only | SX1262 both |
 |---|---:|---:|---:|---:|---:|---:|
-| `00089907` | `143 B` | `~30 s` | `~40%` | `~13%` | `~100%` | `~63%` |
-| `90830781` T1 | `56 B` | `~35 s` | `~53%` | `~4%` | `~100%` | `~81%` |
-| `03534159` | `77 B` | `~121 s` | `~88%` | `~95%`* | `~100%` | `~100%` |
-| `03528221` | `77 B` | `~121 s` | `~100%` | `~41%` | `~100%` | `~54%` |
+| `12345678` | `143 B` | `~30 s` | `~40%` | `~13%` | `~100%` | `~63%` |
+| `23456789` T1 | `56 B` | `~35 s` | `~53%` | `~4%` | `~100%` | `~81%` |
+| `34567890` | `77 B` | `~121 s` | `~88%` | `~95%`* | `~100%` | `~100%` |
+| `45678901` | `77 B` | `~121 s` | `~100%` | `~41%` | `~100%` | `~54%` |
 
-`*` `03534159` was a special case with unusually strong signal around `-52 dBm`.
+`*` `34567890` was a special case with unusually strong signal around `-52 dBm`.
 
 ## Pure switching cost
 
@@ -142,7 +142,7 @@ That means the degradation came from switching overhead itself, not only from ac
 | Fast meters (`~30–35 s`) | `-60%` to `-96%` | `-19%` to `-37%` |
 | Slower meters (`~121 s`) | roughly `-46%` to `-59%`* | roughly `0%` to `-46%` |
 
-`*` excluding the unusually strong `03534159` case.
+`*` excluding the unusually strong `34567890` case.
 
 ## Practical conclusion for `both`
 
@@ -154,7 +154,7 @@ That means the degradation came from switching overhead itself, not only from ac
 
 ## `summary` vs `meter_window` — practical proof
 
-A direct comparison of the same meter (`00089907`) in the same apartment-block environment, both radios on 160 MHz T1-only, same 900 s window:
+A direct comparison of the same meter (`12345678`) in the same apartment-block environment, both radios on 160 MHz T1-only, same 900 s window:
 
 | | SX1262 (Heltec) | SX1276 (Lilygo) |
 |---|---|---|

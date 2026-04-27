@@ -21,8 +21,8 @@ To nie są syntetyczne benchmarki laboratoryjne. To są praktyczne wyniki z pola
 Główny profil ruchu użyty w analizie:
 
 - ~29 urządzeń BMT, `77 B`, około `121 s`,
-- `NES 00089907`, `143 B`, około `30 s`,
-- `TCH 90830781`, `56 B`, około `34 s`,
+- `NES 12345678`, `143 B`, około `30 s`,
+- `TCH 23456789`, `56 B`, około `34 s`,
 - 2 dodatkowe wodomierze BMT, `77 B`, około `121 s`.
 
 ## Krytyczna zasada czytania danych
@@ -50,16 +50,16 @@ W tym środowisku bloku mieszkalnego:
 
 | Licznik | Rozmiar | Interwał | SX1276 noc | SX1276 dzień | SX1262 dzień |
 |---|---:|---:|---:|---:|---:|
-| `00089907` | `143 B` | `~30 s` | `65%` | `~40%` | `~100%` |
-| `90830781` | `56 B` | `~34 s` | `96%` | `~53%` | `~100%` |
-| `03534159` | `77 B` | `~121 s` | — | `~88%` | `~100%` |
-| `03528221` | `77 B` | `~121 s` | — | `~100%` | `~100%` |
+| `12345678` | `143 B` | `~30 s` | `65%` | `~40%` | `~100%` |
+| `23456789` | `56 B` | `~34 s` | `96%` | `~53%` | `~100%` |
+| `34567890` | `77 B` | `~121 s` | — | `~88%` | `~100%` |
+| `45678901` | `77 B` | `~121 s` | — | `~100%` | `~100%` |
 
 ## Co sugerowały dane
 
 ### Straty na `SX1276` były strukturalne, nie losowe
 
-Dla `00089907` zaobserwowany wzorzec interwałów pokazywał powtarzalne straty, np.:
+Dla `12345678` zaobserwowany wzorzec interwałów pokazywał powtarzalne straty, np.:
 
 `30, 60, 30, 90, 60, 30, 89`
 
@@ -122,12 +122,12 @@ Czyli znowu:
 
 | Licznik | Rozmiar | Interwał | SX1276 T1-only | SX1276 both | SX1262 T1-only | SX1262 both |
 |---|---:|---:|---:|---:|---:|---:|
-| `00089907` | `143 B` | `~30 s` | `~40%` | `~13%` | `~100%` | `~63%` |
-| `90830781` T1 | `56 B` | `~35 s` | `~53%` | `~4%` | `~100%` | `~81%` |
-| `03534159` | `77 B` | `~121 s` | `~88%` | `~95%`* | `~100%` | `~100%` |
-| `03528221` | `77 B` | `~121 s` | `~100%` | `~41%` | `~100%` | `~54%` |
+| `12345678` | `143 B` | `~30 s` | `~40%` | `~13%` | `~100%` | `~63%` |
+| `23456789` T1 | `56 B` | `~35 s` | `~53%` | `~4%` | `~100%` | `~81%` |
+| `34567890` | `77 B` | `~121 s` | `~88%` | `~95%`* | `~100%` | `~100%` |
+| `45678901` | `77 B` | `~121 s` | `~100%` | `~41%` | `~100%` | `~54%` |
 
-`*` `03534159` był przypadkiem specjalnym z wyjątkowo mocnym sygnałem około `-52 dBm`.
+`*` `34567890` był przypadkiem specjalnym z wyjątkowo mocnym sygnałem około `-52 dBm`.
 
 ## Czysty koszt przełączania
 
@@ -142,7 +142,7 @@ To znaczy, że degradacja wynikała z samego overheadu przełączania, a nie tyl
 | Szybkie liczniki (`~30–35 s`) | `-60%` do `-96%` | `-19%` do `-37%` |
 | Wolniejsze liczniki (`~121 s`) | około `-46%` do `-59%`* | około `0%` do `-46%` |
 
-`*` z wyłączeniem wyjątkowo mocnego przypadku `03534159`.
+`*` z wyłączeniem wyjątkowo mocnego przypadku `34567890`.
 
 ## Wniosek praktyczny dla `both`
 
@@ -154,7 +154,7 @@ To znaczy, że degradacja wynikała z samego overheadu przełączania, a nie tyl
 
 ## `summary` vs `meter_window` — dowód praktyczny
 
-Bezpośrednie porównanie tego samego licznika (`00089907`) w tym samym środowisku bloku mieszkalnego, oba układy na 160 MHz T1-only, to samo okno 900 s:
+Bezpośrednie porównanie tego samego licznika (`12345678`) w tym samym środowisku bloku mieszkalnego, oba układy na 160 MHz T1-only, to samo okno 900 s:
 
 | | SX1262 (Heltec) | SX1276 (Lilygo) |
 |---|---|---|

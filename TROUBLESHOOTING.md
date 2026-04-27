@@ -167,7 +167,7 @@ Typical safe profile:
 ```yaml
 listen_mode: t1
 highlight_meters:
-  - "00089907"
+  - "12345678"
 
 diagnostic_verbose: false
 diagnostic_publish_summary: true
