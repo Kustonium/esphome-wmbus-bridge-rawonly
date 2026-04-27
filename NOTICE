@@ -1,11 +1,40 @@
 Attribution / Notice
+====================
 
-This repository repackages selected components from:
-- SzczepanLeon/esphome-components (author: Szczepan Leon)
-- wmbusmeters/wmbusmeters (GPL-3.0)
+EN:
+This project is distributed under GPL-3.0-or-later.
 
-Purpose: provide a lightweight RF->MQTT bridge using only:
-- components/wmbus_radio
-- components/wmbus_common
+The project was originally inspired by ESPHome wireless M-Bus component work
+from SzczepanLeon/esphome-components and by related wmbusmeters code paths.
+The current repository has diverged into an independent RAW-only RF->MQTT
+bridge architecture:
 
-License: GPL-3.0-or-later
+- no meter decoding on the ESP device,
+- no Home Assistant sensor/entity creation on the ESP device,
+- validated Wireless M-Bus telegram forwarding to MQTT,
+- external decoding by wmbusmeters / Home Assistant / Linux,
+- extended RF diagnostics and receive-path counters,
+- SX1262/SX1276-focused receive paths and long-packet handling.
+
+Some source files may retain structural, naming, or code-level ancestry from
+that ecosystem. Those files are marked with SPDX headers and are distributed
+under GPL-3.0-or-later.
+
+PL:
+Ten projekt jest udostępniany na licencji GPL-3.0-or-later.
+
+Projekt powstał pierwotnie z inspiracji pracami nad komponentem ESPHome
+wireless M-Bus z repo SzczepanLeon/esphome-components oraz powiązanymi
+ścieżkami kodu wmbusmeters. Obecne repozytorium rozwinęło się jednak w
+niezależną architekturę mostu RAW-only RF->MQTT:
+
+- brak dekodowania liczników na urządzeniu ESP,
+- brak tworzenia encji/czujników Home Assistant na urządzeniu ESP,
+- przekazywanie zwalidowanych telegramów Wireless M-Bus do MQTT,
+- zewnętrzne dekodowanie przez wmbusmeters / Home Assistant / Linux,
+- rozbudowana diagnostyka RF oraz liczniki ścieżki odbioru,
+- ścieżki odbioru skupione na SX1262/SX1276 oraz obsłudze długich pakietów.
+
+Część plików źródłowych może zachowywać rodowód strukturalny, nazewniczy lub
+kodowy z tego ekosystemu. Pliki te są oznaczone nagłówkami SPDX i są
+udostępniane na licencji GPL-3.0-or-later.

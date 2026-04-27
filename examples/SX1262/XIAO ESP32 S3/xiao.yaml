@@ -1,3 +1,9 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Kustonium
+#
+# EN: Example configuration for esphome-wmbus-bridge-rawonly.
+# PL: Przykładowa konfiguracja dla esphome-wmbus-bridge-rawonly.
+
 substitutions:
   devicename: xiao-seed-esp-s3
   friendly_name: "wMBus Bridge XIAO ESP32-S3"

@@ -52,6 +52,15 @@ Więcej szczegółów:
 - **[`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)**
 - **[`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)**
 
+## Atrybucja i licencja
+
+Projekt jest udostępniany na licencji GPL-3.0-or-later. Powstał z inspiracji
+pracami nad komponentem ESPHome wireless M-Bus z repo
+`SzczepanLeon/esphome-components` oraz powiązanymi ścieżkami `wmbusmeters`, ale
+rozwinął się w architekturę mostu RAW-only RF->MQTT.
+
+Szczegóły: [`NOTICE`](NOTICE) oraz [`docs/ATTRIBUTION.md`](docs/ATTRIBUTION.md).
+
 ## Dodatek do Home Assistant
 
 To repo dobrze współpracuje z dodatkiem

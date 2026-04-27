@@ -52,6 +52,14 @@ For more detail see:
 - **[`CHIP_SELECTION.md`](CHIP_SELECTION.md)**
 - **[`BENCHMARKS.md`](BENCHMARKS.md)**
 
+## Attribution and license
+
+This project is GPL-3.0-or-later. It was inspired by the ESPHome wireless M-Bus
+component work from `SzczepanLeon/esphome-components` and related `wmbusmeters`
+code paths, but it has diverged into a RAW-only RF->MQTT bridge architecture.
+
+For details see [`NOTICE`](NOTICE) and [`docs/ATTRIBUTION.md`](docs/ATTRIBUTION.md).
+
 ## Home Assistant add-on
 
 This repo works well with the
