@@ -536,6 +536,8 @@ void SX1262::setup() {
   // fdev: EN 13757-4 specifies 50 kHz for T-mode, 45 kHz for C-mode.
   // RxBW: 312 kHz for T1/BOTH (wider, more forgiving); 234 kHz for C1-only
   //       (narrower signal → tighter BW → better SNR).
+  // NOTE: both mode uses T1 profile (50 kHz fdev, 312 kHz BW). C1 frames in both mode
+  //       are received on T1 RF settings — this is a known limitation, not a bug.
   const uint32_t bitrate = 100000;
   const uint32_t br = (XTAL_FREQ * 32UL) / bitrate;
 

@@ -112,13 +112,15 @@ void SX1276::setup() {
 
   // RxBW / AfcBW:
   // T1/BOTH: 125 kHz / 125 kHz (0x02 / 0x02) — validated in field, AFC compensates for offset.
-  // C1-only: 167 kHz / 200 kHz (0x11 / 0x09) — C1 fdev is narrower (45 kHz) so tighter BW
-  //          improves SNR; AfcBW wider than RxBW for proper AFC pull-in range.
+  // C1-only: 200 kHz / 250 kHz (0x09 / 0x01) — conservative starting point for first field tests;
+  //          AfcBW wider than RxBW per datasheet recommendation.
   //   0x02 = mantissa=16, exp=2 → BW = 32MHz/(16×16) = 125 kHz
-  //   0x11 = mantissa=24, exp=1 → BW = 32MHz/(24×8)  = 167 kHz
   //   0x09 = mantissa=20, exp=1 → BW = 32MHz/(20×8)  = 200 kHz
-  const uint8_t rxbw_val  = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t)0x11 : (uint8_t)0x02;
-  const uint8_t afcbw_val = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t)0x09 : (uint8_t)0x02;
+  //   0x01 = mantissa=16, exp=1 → BW = 32MHz/(16×8)  = 250 kHz
+  // NOTE: both mode uses T1 profile (50 kHz fdev, 125 kHz BW). C1 frames in both mode
+  //       are received on T1 RF settings — this is a known limitation, not a bug.
+  const uint8_t rxbw_val  = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t)0x09 : (uint8_t)0x02;
+  const uint8_t afcbw_val = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t)0x01 : (uint8_t)0x02;
   this->spi_write(0x12, {rxbw_val, afcbw_val});
 
   // EN 13757-4: T-mode fdev = 50 kHz, C-mode fdev = 45 kHz.
@@ -128,8 +130,8 @@ void SX1276::setup() {
     char buf[64];
     snprintf(buf, sizeof(buf), "fdev=%ukHz RxBW=%s AfcBW=%s",
              (unsigned)(freq_dev / 1000),
-             (this->listen_mode_ == LISTEN_MODE_C1) ? "167kHz" : "125kHz",
-             (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz");
+             (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz",
+             (this->listen_mode_ == LISTEN_MODE_C1) ? "250kHz" : "125kHz");
     this->rf_params_str_ = buf;
   }
   const uint16_t frd = ((uint64_t) freq_dev * (1 << 19)) / F_OSC;

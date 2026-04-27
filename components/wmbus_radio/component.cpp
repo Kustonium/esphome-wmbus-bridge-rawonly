@@ -2463,13 +2463,15 @@ void Radio::loop() {
              ansi_suf);
 
     // Keep highlight_meters lightweight by default: local emphasis plus packet number only.
-    // Use find() rather than operator[] to avoid accidentally inserting a default entry
-    // for a key that should always exist here (it was inserted above via stats[stats_key]).
+    // stats[stats_key] was called above so the key always exists here — use find() for
+    // read-only access to avoid operator[] accidentally inserting a default entry.
     const uint64_t stats_key_ro = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
     const auto stats_it = this->highlight_meter_stats_.find(stats_key_ro);
-    const auto &stats = (stats_it != this->highlight_meter_stats_.end())
-                            ? stats_it->second
-                            : this->highlight_meter_stats_.at(stats_key_ro); // should never happen
+    if (stats_it == this->highlight_meter_stats_.end()) {
+      delete p;
+      return; // invariant broken — skip safely
+    }
+    const auto &stats = stats_it->second;
     if (stats.count == 1) {
       ESP_LOGI(log_tag, "%s[id:%s] first packet / pierwszy pakiet (packet #1)",
                this->highlight_prefix_.c_str(), id_str);
