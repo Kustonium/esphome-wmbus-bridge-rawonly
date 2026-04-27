@@ -748,6 +748,11 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       hint_code = "GOOD";
       hint_en = "RF link looks stable";
       hint_pl = "łącze radiowe wygląda stabilnie";
+    } else if (ok > 0 && drop_pct > 10) {
+      // drop_pct 11-99% with no specific pattern matched.
+      hint_code = "MODERATE_DROPS";
+      hint_en = "reception is working but drop rate is elevated; check antenna placement and nearby interference";
+      hint_pl = "odbiór działa, ale odsetek dropów jest podwyższony; sprawdź ustawienie anteny i pobliskie zakłócenia";
     }
   }
 
@@ -920,9 +925,12 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            // busy_ether_state: reflects state BEFORE evaluating this window.
            // evaluate_busy_ether_adaptive_() runs after publish to access full window counters.
            // Use busy_ether_changed event for precise transition timestamps.
-           (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE)
-               ? (this->busy_ether_was_active_ ? "adaptive_active" : "adaptive_passive")
-               : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE ? "aggressive" : "normal"));
+           // On SX1262 the busy-ether algorithm has no effect (hardware capability missing);
+           // emit "n/a" so the field is not confused with a real adaptive state.
+           !is_sx1276 ? "n/a"
+               : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE)
+                   ? (this->busy_ether_was_active_ ? "adaptive_active" : "adaptive_passive")
+                   : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE ? "aggressive" : "normal"));
 
   const std::string summary_topic = this->diag_summary_topic_();
   mqtt->publish(summary_topic, payload);
@@ -1188,6 +1196,11 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
       hint_code = "GOOD";
       hint_en = "RF link looks stable";
       hint_pl = "łącze radiowe wygląda stabilnie";
+    } else if (ok > 0 && drop_pct > 10) {
+      // drop_pct 11-99% with no specific pattern matched.
+      hint_code = "MODERATE_DROPS";
+      hint_en = "reception is working but drop rate is elevated; check antenna placement and nearby interference";
+      hint_pl = "odbiór działa, ale odsetek dropów jest podwyższony; sprawdź ustawienie anteny i pobliskie zakłócenia";
     }
   }
 
@@ -1553,6 +1566,11 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
       hint_code = "GOOD";
       hint_en = "RF link looks stable";
       hint_pl = "łącze radiowe wygląda stabilnie";
+    } else if (ok > 0 && drop_pct > 10) {
+      // drop_pct 11-99% with no specific pattern matched.
+      hint_code = "MODERATE_DROPS";
+      hint_en = "reception is working but drop rate is elevated; check antenna placement and nearby interference";
+      hint_pl = "odbiór działa, ale odsetek dropów jest podwyższony; sprawdź ustawienie anteny i pobliskie zakłócenia";
     }
   }
 
@@ -2015,52 +2033,52 @@ void Radio::dump_config() {
 void Radio::loop() {
   const uint32_t loop_now_ms = (uint32_t) esphome::millis();
 
-if (!this->boot_log_done_ && this->radio != nullptr) {
-  if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
-    const char *radio_name = this->radio->get_name();
+  if (!this->boot_log_done_ && this->radio != nullptr) {
+    if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
+      const char *radio_name = this->radio->get_name();
 
-    if (strcmp(radio_name, "SX1276") == 0) {
-      const char *busy_mode = "unknown";
-      const char *busy_state = "n/a";
+      if (strcmp(radio_name, "SX1276") == 0) {
+        const char *busy_mode = "unknown";
+        const char *busy_state = "n/a";
 
-      switch (this->sx1276_busy_ether_mode_) {
-        case SX1276BusyEtherMode::NORMAL:
-          busy_mode = "normal";
-          break;
-        case SX1276BusyEtherMode::AGGRESSIVE:
-          busy_mode = "aggressive";
-          break;
-        case SX1276BusyEtherMode::ADAPTIVE:
-          busy_mode = "adaptive";
-          busy_state = this->busy_ether_was_active_ ? "active" : "passive";
-          break;
-        default:
-          busy_mode = "unknown";
-          break;
+        switch (this->sx1276_busy_ether_mode_) {
+          case SX1276BusyEtherMode::NORMAL:
+            busy_mode = "normal";
+            break;
+          case SX1276BusyEtherMode::AGGRESSIVE:
+            busy_mode = "aggressive";
+            break;
+          case SX1276BusyEtherMode::ADAPTIVE:
+            busy_mode = "adaptive";
+            busy_state = this->busy_ether_was_active_ ? "active" : "passive";
+            break;
+          default:
+            busy_mode = "unknown";
+            break;
+        }
+
+        ESP_LOGI(TAG,
+                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s",
+                 radio_name,
+                 listen_mode_to_string_(this->radio->get_listen_mode()),
+                 (unsigned) this->receiver_task_stack_size_,
+                 busy_mode,
+                 busy_state);
+      } else {
+        ESP_LOGI(TAG,
+                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
+                 radio_name,
+                 listen_mode_to_string_(this->radio->get_listen_mode()),
+                 (unsigned) this->receiver_task_stack_size_);
       }
 
-      ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s",
-               radio_name,
-               listen_mode_to_string_(this->radio->get_listen_mode()),
-               (unsigned) this->receiver_task_stack_size_,
-               busy_mode,
-               busy_state);
-    } else {
-      ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
-               radio_name,
-               listen_mode_to_string_(this->radio->get_listen_mode()),
-               (unsigned) this->receiver_task_stack_size_);
-    }
-
-    this->boot_log_last_ms_ = loop_now_ms;
-    this->boot_log_count_++;
-    if (this->boot_log_count_ >= 3) {
-      this->boot_log_done_ = true;
+      this->boot_log_last_ms_ = loop_now_ms;
+      this->boot_log_count_++;
+      if (this->boot_log_count_ >= 3) {
+        this->boot_log_done_ = true;
+      }
     }
   }
-}
 
   auto *mqtt = mqtt::global_mqtt_client;
   if (this->radio != nullptr && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
@@ -2443,8 +2461,13 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              ansi_suf);
 
     // Keep highlight_meters lightweight by default: local emphasis plus packet number only.
+    // Use find() rather than operator[] to avoid accidentally inserting a default entry
+    // for a key that should always exist here (it was inserted above via stats[stats_key]).
     const uint64_t stats_key_ro = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
-    const auto &stats = this->highlight_meter_stats_[stats_key_ro];
+    const auto stats_it = this->highlight_meter_stats_.find(stats_key_ro);
+    const auto &stats = (stats_it != this->highlight_meter_stats_.end())
+                            ? stats_it->second
+                            : this->highlight_meter_stats_.at(stats_key_ro); // should never happen
     if (stats.count == 1) {
       ESP_LOGI(log_tag, "%s[id:%s] first packet / pierwszy pakiet (packet #1)",
                this->highlight_prefix_.c_str(), id_str);

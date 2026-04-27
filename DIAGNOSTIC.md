@@ -148,6 +148,8 @@ Use it when you have longer telegrams or a rough RF environment and the normal m
 |---|---|---|
 | `sx1276_busy_ether_mode` | `adaptive` | `normal`, `aggressive`, `adaptive` |
 
+> **SX1262 note:** this option is accepted in YAML for both radio types (default: `adaptive`) but has **no effect on SX1262** — the busy-ether filtering algorithm requires hardware capabilities only SX1276 provides. On SX1262 the `/summary` JSON will contain `"busy_ether_state":"n/a"` to make this explicit.
+
 ### What `sx1276_busy_ether_mode` does
 
 - `normal`  
@@ -557,13 +559,22 @@ This is an automatic diagnostic hint.
 
 Example codes:
 
-- `GOOD`
-- `NO_DATA`
-- `WEAK_SIGNAL`
-- `T1_SYMBOL_ERRORS`
-- `T1_BITFLIPS`
-- `SX1276_BUSY_ETHER`
-- `C1_OVERLOAD_OR_MULTIPATH`
+| Code | Meaning |
+|---|---|
+| `GOOD` | drop_pct ≤ 10%, at least one valid packet — link looks stable |
+| `OK` | catch-all initial value; should not appear in practice with data present |
+| `MODERATE_DROPS` | drop_pct 11-99%, no specific pattern identified; check antenna and interference |
+| `NO_DATA` | no packets received yet in this window |
+| `WEAK_SIGNAL` | high drops at very low RSSI, valid packets also weak |
+| `T1_SYMBOL_ERRORS` | many invalid 3-of-6 symbols; likely collisions or interference |
+| `T1_BITFLIPS` | T1 decodes but often fails DLL CRC; occasional bit errors |
+| `SX1276_BUSY_ETHER` | SX1276 picks up many weak partial T1 starts while valid packets are strong |
+| `BUSY_ETHER_WEAK_TRASH` | many dropped packets much weaker than valid ones; dense RF environment |
+| `SX1276_RX_NOISY` | SX1276 sees many false or undecodable starts |
+| `C1_WEAK_SIGNAL` | C1 frames fail DLL CRC at very low RSSI |
+| `C1_INTERFERENCE_OR_RX` | C1 CRC fails despite decent RSSI; check interference or RX settings |
+| `C1_OVERLOAD_OR_MULTIPATH` | C1 CRC fails despite strong RSSI; possible overload or multipath |
+| `T1_OVERLOAD_OR_MULTIPATH` | T1 CRC fails despite strong RSSI; possible overload or multipath |
 
 How to read it:
 
