@@ -60,8 +60,9 @@ static constexpr uint8_t PACKET_TYPE_GFSK = 0x00;
 // GFSK modulation / packet parameter constants
 // ---------------------------------------------------------------------------
 static constexpr uint8_t GFSK_PULSE_SHAPE_BT_0_5 = 0x09;
+// GFSK_PULSE_SHAPE_BT_0_3 = 0x08 — not used; EN 13757-4 specifies BT=0.5 for both T and C modes
 static constexpr uint8_t GFSK_RX_BW_312_0 = 0x19;
-static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;  // 234.3 kHz RX bandwidth (legacy, unused)
+static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;  // 234.3 kHz RX bandwidth — used for C1-only mode
 static constexpr uint8_t GFSK_PREAMBLE_DETECT_16 = 0x05;
 static constexpr uint8_t GFSK_ADDRESS_FILT_OFF = 0x00;
 
@@ -531,16 +532,24 @@ void SX1262::setup() {
 
   this->cmd_write_(CMD_SET_BUFFER_BASE_ADDRESS, {0x00, 0x00});
 
-  // Modulation params: 100 kbps, BT=0.5, BW, fdev=50k
+  // Modulation params: 100 kbps, BT=0.5 for both T and C modes (EN 13757-4).
+  // fdev: EN 13757-4 specifies 50 kHz for T-mode, 45 kHz for C-mode.
+  // RxBW: 312 kHz for T1/BOTH (wider, more forgiving); 234 kHz for C1-only
+  //       (narrower signal → tighter BW → better SNR).
   const uint32_t bitrate = 100000;
   const uint32_t br = (XTAL_FREQ * 32UL) / bitrate;
 
-  const uint32_t freq_dev = 50000;
+  const uint32_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000UL : 50000UL;
   const uint32_t fdev = ((uint64_t) freq_dev << 25) / XTAL_FREQ;
+  const uint8_t rx_bw = (this->listen_mode_ == LISTEN_MODE_C1) ? GFSK_RX_BW_234_3 : GFSK_RX_BW_312_0;
+
+  ESP_LOGI(TAG, "RF params / parametry RF: bitrate=100kbps BT=0.5 fdev=%lukHz RxBW=%s",
+           (unsigned long)(freq_dev / 1000),
+           (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz");
 
   this->cmd_write_(CMD_SET_MODULATION_PARAMS,
                    {(uint8_t) ((br >> 16) & 0xFF), (uint8_t) ((br >> 8) & 0xFF), (uint8_t) (br & 0xFF),
-                    GFSK_PULSE_SHAPE_BT_0_5, GFSK_RX_BW_312_0, (uint8_t) ((fdev >> 16) & 0xFF),
+                    GFSK_PULSE_SHAPE_BT_0_5, rx_bw, (uint8_t) ((fdev >> 16) & 0xFF),
                     (uint8_t) ((fdev >> 8) & 0xFF), (uint8_t) (fdev & 0xFF)});
 
   // Packet params
