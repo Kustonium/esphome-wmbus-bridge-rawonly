@@ -90,6 +90,7 @@ CONF_FEM_PA_PIN = "fem_pa_pin"
 CONF_GDO0_PIN = "gdo0_pin"
 CONF_GDO2_PIN = "gdo2_pin"
 CONF_CC1101_ALLOW_EXPERIMENTAL = "cc1101_allow_experimental"
+CONF_FREQUENCY = "frequency"
 
 radio_ns = cg.esphome_ns.namespace("wmbus_radio")
 RadioComponent = radio_ns.class_("Radio", cg.Component)
@@ -141,6 +142,7 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO0_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
+            cv.Optional(CONF_FREQUENCY, default=868.950): cv.float_range(min=300.0, max=928.0),
             cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
                 "t1", "c1", "both", lower=True
             ),
@@ -264,6 +266,8 @@ def _validate_radio_pins(config):
             raise cv.Invalid("gdo0_pin/gdo2_pin are only valid for CC1101. Use irq_pin for SX1262/SX1276.")
         if CONF_CC1101_ALLOW_EXPERIMENTAL in config and config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("cc1101_allow_experimental is only valid for radio_type: CC1101.")
+        if CONF_FREQUENCY in config and float(config.get(CONF_FREQUENCY, 868.950)) != 868.950:
+            raise cv.Invalid("frequency is currently only valid for radio_type: CC1101.")
 
     return config
 
@@ -318,6 +322,7 @@ async def to_code(config):
         gdo2_pin = await cg.gpio_pin_expression(config[CONF_GDO2_PIN])
         cg.add(radio_var.set_gdo0_pin(gdo0_pin))
         cg.add(radio_var.set_gdo2_pin(gdo2_pin))
+        cg.add(radio_var.set_frequency_mhz(config.get(CONF_FREQUENCY, 868.950)))
         # Receiver task wake-up interrupt is the sync-detect line.
         cg.add(radio_var.set_irq_pin(gdo2_pin))
 

@@ -19,6 +19,7 @@ class CC1101 : public RadioTransceiver {
 
   void set_gdo0_pin(InternalGPIOPin *pin) { this->gdo0_pin_ = pin; }
   void set_gdo2_pin(InternalGPIOPin *pin) { this->gdo2_pin_ = pin; }
+  void set_frequency_mhz(float frequency_mhz);
 
   void setup() override;
   void dump_config() override;
@@ -41,6 +42,7 @@ class CC1101 : public RadioTransceiver {
   size_t chunk_idx_{0};
 
   uint8_t sync_cycle_{0};
+  uint32_t configured_frequency_hz_{868950000UL};
   int8_t last_rssi_dbm_{-127};
   bool rssi_captured_{false};
   bool abort_requested_{false};

@@ -1,0 +1,134 @@
+# =============================================================================
+# ESPHome – wM-Bus Bridge RAW-only / CC1101 EXPERIMENTAL
+#
+# Radio: CC1101 / E07-M1101D / Blue Board
+# Tryb: RAW-only bridge
+#
+# Tor danych:
+# radio -> walidacja w komponencie -> MQTT -> wmbusmeters -> JSON/encje HA
+#
+# UWAGA:
+# CC1101 wymaga GDO0 + GDO2.
+# Konfiguracja z jednym IRQ / bez GDO2 jest celowo niedozwolona.
+# =============================================================================
+
+substitutions:
+  devicename: esphome-wmbus-cc1101
+  friendly_name: "wMBus Bridge CC1101"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: DEBUG
+  logs:
+    mqtt: WARN
+    component: WARN
+    wmbus: DEBUG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  fast_connect: true
+
+mdns:
+  disabled: false
+
+api:
+
+ota:
+  - platform: esphome
+
+time:
+  - platform: homeassistant
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+  # Opcjonalne logi ESPHome do MQTT.
+  # Przy pierwszych testach CC1101 lepiej patrzeć w log po USB/API.
+  log_topic:
+    topic: "${devicename}/debug"
+    level: DEBUG
+
+# =============================================================================
+# SPI BUS – przykład dla ESP32-C3 Super Mini / DevKitM
+#
+# CC1101        ESP32-C3
+# ----------------------
+# GND       ->  GND
+# VCC       ->  3V3
+# GDO0      ->  GPIO3
+# CSN       ->  GPIO4
+# SCK       ->  GPIO5
+# MOSI      ->  GPIO6
+# MISO/GDO1 ->  GPIO7
+# GDO2      ->  GPIO2
+# =============================================================================
+spi:
+  clk_pin: GPIO5
+  mosi_pin: GPIO6
+  miso_pin: GPIO7
+
+# =============================================================================
+# WMBUS RADIO – CC1101 EXPERIMENTAL
+# =============================================================================
+wmbus_radio:
+  - radio_type: CC1101
+
+    # Celowa bramka bezpieczeństwa. Bez tego CC1101 nie przejdzie walidacji.
+    # W publicznym przykładzie można to zakomentować, żeby bezmyślne copy/paste dostało bana.
+    # cc1101_allow_experimental: true
+
+    # CC1101 może wymagać ręcznej korekty częstotliwości zależnie od modułu.
+    # Nominalnie W-MBus T/C: 868.950 MHz.
+    frequency: 868.950
+
+    cs_pin: GPIO4
+
+    # CC1101: GDO2 = sync detect / początek telegramu, GDO0 = FIFO threshold / dane w FIFO.
+    # Dla CC1101 nie używamy irq_pin/reset_pin/busy_pin.
+    gdo0_pin:
+      number: GPIO3
+      mode: input
+
+    gdo2_pin:
+      number: GPIO2
+      mode: input
+
+    listen_mode: t1
+    listen_mode_filter_after_parse: false
+
+    # Nowy styl topiców MQTT.
+    # Komponent wygeneruje:
+    # - wmbus/cc1101/telegram
+    # - wmbus/cc1101/diag
+    # - wmbus/cc1101/diag/summary
+    # - wmbus/cc1101/diag/meter_snapshot
+    topic_name: "cc1101"
+
+    # Preset diagnostyczny zamiast ręcznego zestawu starych opcji.
+    diagnostic_mode: normal
+    diagnostic_summary_interval: 60s
+
+    # Opcjonalnie: wyróżnione liczniki do meter_snapshot w trybie normal.
+    # highlight_meters:
+    #   - "12345678"
+    #   - "87654321"

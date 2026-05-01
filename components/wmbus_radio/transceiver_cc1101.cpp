@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 
 namespace esphome {
 namespace wmbus_radio {
@@ -247,6 +248,15 @@ void CC1101::reset_cc1101_() {
   delay(5);
 }
 
+void CC1101::set_frequency_mhz(float frequency_mhz) {
+  if (frequency_mhz < 300.0f || frequency_mhz > 928.0f) {
+    ESP_LOGW(TAG, "CC1101 frequency %.3f MHz out of supported range, falling back to 868.950 MHz", frequency_mhz);
+    this->configured_frequency_hz_ = CC1101_DEFAULT_FREQ_HZ;
+    return;
+  }
+  this->configured_frequency_hz_ = (uint32_t) (frequency_mhz * 1000000.0f + 0.5f);
+}
+
 void CC1101::set_frequency_(uint32_t frequency_hz) {
   const uint32_t freq = (uint32_t) (((uint64_t) frequency_hz << 16) / CC1101_FOSC_HZ);
   this->write_reg_(REG_FREQ2, (uint8_t) ((freq >> 16) & 0xFF));
@@ -273,7 +283,7 @@ void CC1101::apply_radio_profile_() {
   // FIFO threshold: 0x07 means RX FIFO threshold around 32 bytes.
   this->write_reg_(REG_FIFOTHR, 0x07);
 
-  this->set_frequency_(CC1101_DEFAULT_FREQ_HZ);
+  this->set_frequency_(this->configured_frequency_hz_);
   this->write_reg_(REG_SYNC1, 0x54);
   this->write_reg_(REG_SYNC0, 0x3D);
   this->write_reg_(REG_PKTLEN, 0xFF);
@@ -620,7 +630,11 @@ void CC1101::setup() {
   ESP_LOGI(TAG, "CC1101 VERSION=0x%02X", version);
 
   this->apply_radio_profile_();
-  this->rf_params_str_ = "CC1101 compat: 868.950MHz DR=100kbps fdev~47kHz RxBW~325kHz infinite-packet";
+  char rf_buf[112];
+  snprintf(rf_buf, sizeof(rf_buf),
+           "CC1101 compat: freq=%.3fMHz DR=100kbps fdev~47kHz RxBW~325kHz infinite-packet",
+           this->configured_frequency_hz_ / 1000000.0f);
+  this->rf_params_str_ = rf_buf;
   if (!this->validate_startup_config_()) {
     this->dump_debug_status("startup_config_error");
     this->mark_failed();
@@ -634,7 +648,7 @@ void CC1101::dump_config() {
   ESP_LOGCONFIG(TAG, "Transceiver: %s", this->get_name());
   LOG_PIN("  GDO0/FIFO Pin: ", this->gdo0_pin_);
   LOG_PIN("  GDO2/SYNC Pin: ", this->gdo2_pin_);
-  ESP_LOGCONFIG(TAG, "  Frequency: 868.950 MHz");
+  ESP_LOGCONFIG(TAG, "  Frequency: %.3f MHz", this->configured_frequency_hz_ / 1000000.0f);
   ESP_LOGCONFIG(TAG, "  SPI/RX: experimental CC1101, requires GDO0+GDO2");
   ESP_LOGCONFIG(TAG, "  RF profile: compatibility modem profile, infinite packet mode");
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
