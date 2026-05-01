@@ -54,6 +54,8 @@ public:
   void set_diag_publish_drop_events(bool enabled) { this->diag_publish_drop_events_ = enabled; }
   void set_diag_publish_rx_path_events(bool enabled) { this->diag_publish_rx_path_events_ = enabled; }
   void set_diag_publish_highlight_only(bool enabled) { this->diag_publish_highlight_only_ = enabled; }
+  void set_diag_meter_stats_all(bool enabled) { this->diag_meter_stats_all_ = enabled; }
+  void add_config_warning(const std::string &warning) { this->config_warnings_.push_back(warning); }
   void set_diag_publish_suggestion(bool enabled) { this->diag_publish_suggestion_ = enabled; }
   void set_diag_summary_interval_ms(uint32_t interval_ms) {
     // Keep it sane: minimum 5s
@@ -176,6 +178,8 @@ protected:
   // If enabled, publish per-packet MQTT diagnostics only for ids present in
   // highlight_meters. Summary remains global and still counts everything.
   bool diag_publish_highlight_only_{false};
+  bool diag_meter_stats_all_{false};
+  std::vector<std::string> config_warnings_{};
   bool diag_publish_suggestion_{false};
 
   enum DropBucket : uint8_t {

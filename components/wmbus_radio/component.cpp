@@ -934,9 +934,10 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            // busy_ether_state: reflects state BEFORE evaluating this window.
            // evaluate_busy_ether_adaptive_() runs after publish to access full window counters.
            // Use busy_ether_changed event for precise transition timestamps.
-           (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE)
-               ? (this->busy_ether_was_active_ ? "adaptive_active" : "adaptive_passive")
-               : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE ? "aggressive" : "normal"));
+           !is_sx1276 ? "n/a"
+               : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE)
+                   ? (this->busy_ether_was_active_ ? "adaptive_active" : "adaptive_passive")
+                   : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE ? "aggressive" : "normal"));
 
   const std::string summary_topic = this->diag_summary_topic_();
   mqtt->publish(summary_topic, payload);
@@ -1930,6 +1931,9 @@ void Radio::maybe_publish_meter_windows_(uint32_t now_ms) {
 }
 
 void Radio::setup() {
+  for (const auto &warning : this->config_warnings_) {
+    ESP_LOGW(TAG, "Config warning / ostrzezenie konfiguracji: %s", warning.c_str());
+  }
   // Parse optional highlight meter list (CSV provided by python/YAML).
   parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_);
   if (!this->target_meter_id_str_.empty()) {
@@ -2020,7 +2024,11 @@ void Radio::dump_config() {
   const char *busy_mode = (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL) ? "normal"
                            : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE) ? "aggressive"
                            : "adaptive";
-  ESP_LOGCONFIG(TAG, "  SX1276 busy ether mode: %s", busy_mode);
+  if (std::strcmp(this->radio->get_name(), "SX1276") == 0) {
+    ESP_LOGCONFIG(TAG, "  SX1276 busy ether mode: %s", busy_mode);
+  } else {
+    ESP_LOGCONFIG(TAG, "  Busy ether mode: n/a (SX1276 only)");
+  }
   if (!this->diag_topic_.empty()) {
     ESP_LOGCONFIG(TAG, "  Diagnostics MQTT topic: %s", this->diag_topic_.c_str());
     ESP_LOGCONFIG(TAG, "  MQTT boot topic: %s/boot", this->diag_topic_.c_str());
@@ -2060,18 +2068,20 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       }
 
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s",
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
                busy_mode,
-               busy_state);
+               busy_state,
+               this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
     } else {
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
-               (unsigned) this->receiver_task_stack_size_);
+               (unsigned) this->receiver_task_stack_size_,
+               this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
     }
 
     this->boot_log_last_ms_ = loop_now_ms;
@@ -2411,8 +2421,8 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
   }
 
-  // Update per-meter statistics for highlighted meters.
-  if (highlight) {
+  // Update per-meter statistics for highlighted meters, or for all meters in diagnostic_meter_stats: all.
+  if (id_val != 0 && (highlight || this->diag_meter_stats_all_)) {
     uint32_t now_ms = (uint32_t) esphome::millis();
     // Composite key keeps T1 and C1 streams separate for dual-mode meters.
     const uint64_t stats_key = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
@@ -2475,9 +2485,9 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
     const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
     const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
              ansi_pre, this->highlight_prefix_.c_str(),
-             d.size(), frame->rssi(),
+             d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
@@ -2496,8 +2506,8 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                (unsigned) stats.count);
     }
   } else {
-    ESP_LOGI(TAG, "Have data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-             d.size(), frame->rssi(),
+    ESP_LOGI(TAG, "Have data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+             d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);

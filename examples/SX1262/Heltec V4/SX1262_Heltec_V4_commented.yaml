@@ -1,5 +1,6 @@
-# EN: Example configuration for esphome-wmbus-bridge-rawonly.
-# PL: Przykładowa konfiguracja dla esphome-wmbus-bridge-rawonly.
+# ESPHome wM-Bus Bridge RAW-only — Heltec WiFi LoRa 32 V4 / SX1262
+# EN: Commented example with optional LED blink and Heltec V4 FEM pins.
+# PL: Przykład z komentarzami, opcjonalnym LED i pinami FEM Heltec V4.
 
 substitutions:
   devicename: esphome-wmbus-heltec-v4
@@ -51,6 +52,7 @@ improv_serial:
 time:
   - platform: homeassistant
 
+# Optional basic ESP diagnostics.
 debug:
 
 spi:
@@ -85,10 +87,10 @@ wmbus_radio:
   radio_type: SX1262
   cs_pin: GPIO8
   reset_pin: GPIO12
+  busy_pin: GPIO13
   irq_pin:
     number: GPIO14
     mode: input
-  busy_pin: GPIO13
 
   # Heltec V4 external FEM/LNA pins.
   fem_en_pin: GPIO2
@@ -99,35 +101,37 @@ wmbus_radio:
   has_tcxo: true
   rx_gain: boosted
   long_gfsk_packets: true
+
   listen_mode: t1
+  listen_mode_filter_after_parse: false
 
-  # Main validated telegram HEX stream for wmbusmeters / HA add-on.
-  telegram_topic: "wmbus_bridge/heltec_v4/telegram"
+  # MQTT topics are generated automatically.
+  # topic_name is optional; if omitted, esphome.name is used.
+  # Generated topics:
+  #   wmbus/<topic_name>/telegram
+  #   wmbus/<topic_name>/diag/...
+  # topic_name: "${devicename}"
 
-  # Lightweight MQTT diagnostics. Use `medium` or `full` only while debugging.
-  diagnostic_mode: low
-  diagnostic_topic: "wmbus/heltec_v4/diag"
+
+  diagnostic_mode: normal
   diagnostic_summary_interval: 60s
 
   # Optional SX1262 boot diagnostics.
   # clear_device_errors_on_boot: true
   # publish_dev_err_after_clear: true
 
-  # Optional highlighted meter logs and per-meter windows.
+  # Optional 15-minute per-meter statistics for selected IDs.
   # highlight_meters:
-  #   - "12345678"
+  #   - "00089907"
+  #   - "03534159"
   # highlight_ansi: true
   # highlight_tag: "wmbus_user"
   # highlight_prefix: "★ "
-  # diagnostic_publish_summary_highlight_meters: true
-
-  # Optional extra windows and packet-level diagnostics.
   # diagnostic_publish_summary_15min: true
-  # diagnostic_publish_summary_60min: true
-  # diagnostic_publish_drop_events: true
-  # diagnostic_publish_rx_path_events: false
-  # diagnostic_publish_highlight_only: true
-  # diagnostic_publish_raw: false
+
+  # Optional experimental/aggressive parser-side filter.
+  # Use only for A/B tests and compare meter_snapshot.
+  # listen_mode_filter_after_parse: true
 
   on_frame:
     then:

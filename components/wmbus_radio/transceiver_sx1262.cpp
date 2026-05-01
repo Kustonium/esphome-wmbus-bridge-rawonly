@@ -523,12 +523,21 @@ void SX1262::setup() {
   const uint32_t bitrate = 100000;
   const uint32_t br = (XTAL_FREQ * 32UL) / bitrate;
 
-  const uint32_t freq_dev = 50000;
+  const uint32_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000UL : 50000UL;
   const uint32_t fdev = ((uint64_t) freq_dev << 25) / XTAL_FREQ;
+  const uint8_t rx_bw = (this->listen_mode_ == LISTEN_MODE_C1) ? GFSK_RX_BW_234_3 : GFSK_RX_BW_312_0;
+
+  {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "fdev=%lukHz BT=0.5 RxBW=%s",
+             (unsigned long) (freq_dev / 1000UL),
+             (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz");
+    this->rf_params_str_ = buf;
+  }
 
   this->cmd_write_(CMD_SET_MODULATION_PARAMS,
                    {(uint8_t) ((br >> 16) & 0xFF), (uint8_t) ((br >> 8) & 0xFF), (uint8_t) (br & 0xFF),
-                    GFSK_PULSE_SHAPE_BT_0_5, GFSK_RX_BW_312_0, (uint8_t) ((fdev >> 16) & 0xFF),
+                    GFSK_PULSE_SHAPE_BT_0_5, rx_bw, (uint8_t) ((fdev >> 16) & 0xFF),
                     (uint8_t) ((fdev >> 8) & 0xFF), (uint8_t) (fdev & 0xFF)});
 
   // Packet params

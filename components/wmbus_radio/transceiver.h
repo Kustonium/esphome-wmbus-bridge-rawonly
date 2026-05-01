@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdint>
+#include <string>
 
 #define BYTE(x, n) ((uint8_t)(x >> (n * 8)))
 
@@ -53,6 +54,7 @@ public:
   void set_busy_pin(InternalGPIOPin *busy_pin);
   void set_listen_mode(ListenMode mode) { this->listen_mode_ = mode; }
   ListenMode get_listen_mode() const { return this->listen_mode_; }
+  const std::string &get_rf_params_str() const { return this->rf_params_str_; }
 
 protected:
   InternalGPIOPin *reset_pin_{nullptr};
@@ -64,6 +66,7 @@ protected:
   gpio::InterruptType irq_edge_{gpio::INTERRUPT_FALLING_EDGE};
 
   ListenMode listen_mode_{LISTEN_MODE_BOTH};
+  std::string rf_params_str_{};
 
   virtual optional<uint8_t> read() = 0;
 

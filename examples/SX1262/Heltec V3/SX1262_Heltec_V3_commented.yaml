@@ -1,0 +1,93 @@
+# ESPHome wM-Bus Bridge RAW-only — Heltec WiFi LoRa 32 V3 / SX1262
+# EN: Commented example. Vext must stay enabled because it powers the radio.
+# PL: Przykład z komentarzami. Vext musi być włączony, bo zasila radio.
+
+substitutions:
+  devicename: esphome-wmbus-heltec-v3
+  friendly_name: "wMBus Bridge Heltec V3"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  cpu_frequency: 160MHz
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+api:
+ota:
+  - platform: esphome
+time:
+  - platform: homeassistant
+
+# Heltec V3 Vext power switch. Active-low, keep always ON.
+switch:
+  - platform: gpio
+    id: vext
+    pin: GPIO36
+    internal: true
+    inverted: true
+    restore_mode: ALWAYS_ON
+
+spi:
+  clk_pin: GPIO9
+  mosi_pin: GPIO10
+  miso_pin: GPIO11
+
+wmbus_radio:
+  radio_type: SX1262
+  cs_pin: GPIO8
+  reset_pin: GPIO12
+  busy_pin: GPIO13
+  irq_pin:
+    number: GPIO14
+    mode: input
+
+  has_tcxo: true
+  dio2_rf_switch: false
+  rx_gain: boosted
+  long_gfsk_packets: true
+
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+
+  # MQTT topics are generated automatically.
+  # topic_name is optional; if omitted, esphome.name is used.
+  # Generated topics:
+  #   wmbus/<topic_name>/telegram
+  #   wmbus/<topic_name>/diag/...
+  # topic_name: "${devicename}"
+
+
+  diagnostic_mode: normal
+
+  # Optional per-meter stats.
+  # In diagnostic_mode: normal, meter_snapshot is published automatically
+  # for IDs listed in highlight_meters.
+  # highlight_meters:
+  #   - "12345678"

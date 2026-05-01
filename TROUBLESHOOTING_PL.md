@@ -166,15 +166,14 @@ Typowy bezpieczny profil:
 
 ```yaml
 listen_mode: t1
+diagnostic_mode: normal
 highlight_meters:
   - "12345678"
 
-diagnostic_verbose: false
-diagnostic_publish_summary: true
-diagnostic_publish_drop_events: true
-diagnostic_publish_rx_path_events: false
-diagnostic_publish_highlight_only: true
-diagnostic_publish_raw: false
+# Opcjonalnie, tylko jeśli chcesz ograniczyć szczegółowe eventy do highlight_meters:
+# diagnostic_events_highlight_only: true
+
+# Tylko SX1276:
 sx1276_busy_ether_mode: adaptive
 ```
 

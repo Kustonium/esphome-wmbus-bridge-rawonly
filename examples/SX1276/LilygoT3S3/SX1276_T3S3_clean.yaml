@@ -1,9 +1,3 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Kustonium
-#
-# EN: Example configuration for esphome-wmbus-bridge-rawonly.
-# PL: Przykładowa konfiguracja dla esphome-wmbus-bridge-rawonly.
-
 substitutions:
   devicename: esphome-wmbus-lilygo-t3s3
   friendly_name: "wMBus Bridge LilyGO T3-S3"
@@ -17,6 +11,7 @@ esphome:
 esp32:
   board: esp32-s3-devkitc-1
   variant: esp32s3
+  cpu_frequency: 160MHz
   framework:
     type: esp-idf
 
@@ -44,13 +39,6 @@ mqtt:
 api:
 ota:
   - platform: esphome
-mdns:
-  disabled: false
-improv_serial:
-time:
-  - platform: homeassistant
-
-debug:
 
 spi:
   id: spi_lora
@@ -58,42 +46,17 @@ spi:
   mosi_pin: GPIO06
   miso_pin: GPIO03
 
-output:
-  - platform: gpio
-    id: status_led
-    pin: GPIO37
-
 wmbus_radio:
   radio_type: SX1276
   spi_id: spi_lora
   cs_pin: GPIO07
   reset_pin: GPIO08
-
-  # SX1276 driver uses DIO1/FifoLevel as IRQ.
   irq_pin:
     number: GPIO33
     mode:
       input: true
       pullup: true
-
   listen_mode: t1
+  listen_mode_filter_after_parse: false
   sx1276_busy_ether_mode: adaptive
-  telegram_topic: "wmbus_bridge/lilygo_t3s3/telegram"
-
-  diagnostic_mode: low
-  diagnostic_topic: "wmbus/lilygo_t3s3/diag"
-  diagnostic_summary_interval: 60s
-
-  # Optional highlighted meter logs and per-meter windows.
-  # highlight_meters:
-  #   - "12345678"
-  # highlight_ansi: true
-  # highlight_tag: "wmbus_user"
-  # highlight_prefix: "★ "
-  # diagnostic_publish_summary_highlight_meters: true
-
-  on_frame:
-    then:
-      - output.turn_on: status_led
-      - delay: 50ms
-      - output.turn_off: status_led
+  diagnostic_mode: normal

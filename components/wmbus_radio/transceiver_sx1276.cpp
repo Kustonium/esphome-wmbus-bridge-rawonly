@@ -98,9 +98,21 @@ void SX1276::setup() {
   const uint32_t frf = ((uint64_t) frequency * (1 << 19)) / F_OSC;
   this->spi_write(0x06, {BYTE(frf, 2), BYTE(frf, 1), BYTE(frf, 0)});
 
-  this->spi_write(0x12, {2, 2});
+  // RegRxBw / RegAfcBw:
+  // 0x02 = ~125 kHz (T1/default), 0x09 = ~200 kHz (C1), 0x01 = ~250 kHz AFC BW.
+  const uint8_t rxbw_val = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t) 0x09 : (uint8_t) 0x02;
+  const uint8_t afcbw_val = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t) 0x01 : (uint8_t) 0x02;
+  this->spi_write(0x12, {rxbw_val, afcbw_val});
 
-  const uint16_t freq_dev = 50000;
+  const uint16_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000 : 50000;
+  {
+    char buf[80];
+    snprintf(buf, sizeof(buf), "fdev=%ukHz RxBW=%s AfcBW=%s",
+             (unsigned) (freq_dev / 1000),
+             (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz",
+             (this->listen_mode_ == LISTEN_MODE_C1) ? "250kHz" : "125kHz");
+    this->rf_params_str_ = buf;
+  }
   const uint16_t frd = ((uint64_t) freq_dev * (1 << 19)) / F_OSC;
   this->spi_write(0x04, {BYTE(frd, 1), BYTE(frd, 0)});
 

@@ -1,0 +1,57 @@
+substitutions:
+  devicename: esphome-wmbus-heltec-v2
+  friendly_name: "wMBus Bridge Heltec V2"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32dev
+  variant: ESP32
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+api:
+ota:
+  - platform: esphome
+
+spi:
+  clk_pin: GPIO5
+  mosi_pin: GPIO27
+  miso_pin: GPIO19
+
+wmbus_radio:
+  radio_type: SX1276
+  cs_pin: GPIO18
+  reset_pin: GPIO14
+  irq_pin:
+    number: GPIO35
+    mode: input
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+  sx1276_busy_ether_mode: adaptive
+  diagnostic_mode: normal

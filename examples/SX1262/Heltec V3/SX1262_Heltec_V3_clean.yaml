@@ -1,9 +1,3 @@
-# EN: Example configuration for esphome-wmbus-bridge-rawonly.
-# PL: Przykładowa konfiguracja dla esphome-wmbus-bridge-rawonly.
-
-# Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262) board-specific example.
-# Vext must stay enabled because it powers the radio module on this board.
-
 substitutions:
   devicename: esphome-wmbus-heltec-v3
   friendly_name: "wMBus Bridge Heltec V3"
@@ -16,6 +10,7 @@ esphome:
 esp32:
   board: esp32-s3-devkitc-1
   variant: esp32s3
+  cpu_frequency: 160MHz
   framework:
     type: esp-idf
 
@@ -23,6 +18,12 @@ external_components:
   - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
     components: [wmbus_radio]
     refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
 
 wifi:
   ssid: !secret wifi_ssid
@@ -34,8 +35,6 @@ mqtt:
   username: !secret mqtt_user
   password: !secret mqtt_password
 
-logger:
-  level: info
 api:
 ota:
   - platform: esphome
@@ -57,16 +56,14 @@ wmbus_radio:
   radio_type: SX1262
   cs_pin: GPIO8
   reset_pin: GPIO12
+  busy_pin: GPIO13
   irq_pin:
     number: GPIO14
     mode: input
-  busy_pin: GPIO13
   has_tcxo: true
   dio2_rf_switch: false
   rx_gain: boosted
   long_gfsk_packets: true
   listen_mode: t1
-  telegram_topic: "wmbus_bridge/heltec_v3/telegram"
-
-  diagnostic_mode: low
-  diagnostic_topic: "wmbus/heltec_v3/diag"
+  listen_mode_filter_after_parse: false
+  diagnostic_mode: normal
