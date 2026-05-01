@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_cc1101.h"
 
 #include "esphome/core/log.h"

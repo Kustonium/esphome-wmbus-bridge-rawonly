@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "esphome/components/spi/spi.h"
 #include "esphome/core/optional.h"
