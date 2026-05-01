@@ -1,15 +1,3 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Kustonium
-#
-# EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-#     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-#     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-#     Some structure or naming may retain ancestry from that ecosystem.
-# PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-#     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-#     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-#     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 from contextlib import suppress
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -43,6 +31,7 @@ CONF_RADIO_TYPE = "radio_type"
 CONF_MARK_AS_HANDLED = "mark_as_handled"
 CONF_BUSY_PIN = "busy_pin"
 CONF_LISTEN_MODE = "listen_mode"
+CONF_LISTEN_MODE_FILTER_AFTER_PARSE = "listen_mode_filter_after_parse"
 CONF_RECEIVER_TASK_STACK_SIZE = "receiver_task_stack_size"
 
 # Optional built-in RAW forwarding (avoids YAML on_frame boilerplate)
@@ -50,6 +39,7 @@ CONF_TELEGRAM_TOPIC = "telegram_topic"
 CONF_TARGET_METER_ID = "target_meter_id"
 CONF_TARGET_TOPIC = "target_topic"
 CONF_TARGET_LOG = "target_log"
+CONF_PUBLISH_RADIO_RAW = "publish_radio_raw"
 
 # SX1262 board helpers
 CONF_DIO2_RF_SWITCH = "dio2_rf_switch"
@@ -91,6 +81,11 @@ CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
 CONF_FEM_EN_PIN = "fem_en_pin"
 CONF_FEM_PA_PIN = "fem_pa_pin"
 
+# CC1101 pins / safety gate (experimental, advanced users only)
+CONF_GDO0_PIN = "gdo0_pin"
+CONF_GDO2_PIN = "gdo2_pin"
+CONF_CC1101_ALLOW_EXPERIMENTAL = "cc1101_allow_experimental"
+
 radio_ns = cg.esphome_ns.namespace("wmbus_radio")
 RadioComponent = radio_ns.class_("Radio", cg.Component)
 RadioTransceiver = radio_ns.class_("RadioTransceiver", spi.SPIDevice, cg.Component)
@@ -105,18 +100,27 @@ TRANSCEIVER_NAMES = {
     if r.is_file()
 }
 
-CONFIG_SCHEMA = (
+BASE_CONFIG_SCHEMA = (
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(RadioComponent),
             cv.GenerateID(CONF_RADIO_ID): cv.declare_id(RadioTransceiver),
             cv.Required(CONF_RADIO_TYPE): cv.one_of(*TRANSCEIVER_NAMES, upper=True),
-            cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_schema,
-            cv.Required(CONF_IRQ_PIN): pins.internal_gpio_input_pin_schema,
+            # SX1262/SX1276 use reset_pin + irq_pin.
+            # CC1101 intentionally uses gdo0_pin + gdo2_pin instead.
+            cv.Optional(CONF_RESET_PIN): pins.internal_gpio_output_pin_schema,
+            cv.Optional(CONF_IRQ_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_BUSY_PIN): pins.internal_gpio_input_pin_schema,
+            cv.Optional(CONF_GDO0_PIN): pins.internal_gpio_input_pin_schema,
+            cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
+            cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
             cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
                 "t1", "c1", "both", lower=True
             ),
+            # Advanced/experimental. Default false keeps the legacy behavior:
+            # filter listen_mode by preliminary raw packet mode before parsing.
+            # True tries parser/CRC-selected mode first, then filters afterwards.
+            cv.Optional(CONF_LISTEN_MODE_FILTER_AFTER_PARSE, default=False): cv.boolean,
             # Stack size for the dedicated radio_recv FreeRTOS task created by this
             # component. This is intentionally separate from ESPHome's
             # loop_task_stack_size because that YAML option only affects the main
@@ -155,6 +159,8 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_TARGET_METER_ID, default=""): cv.string,
             cv.Optional(CONF_TARGET_TOPIC, default=""): cv.string,
             cv.Optional(CONF_TARGET_LOG, default=True): cv.boolean,
+            # Internal/dev-only raw packet tap. Fixed MQTT topic: wmbus_bridge/raw.
+            cv.Optional(CONF_PUBLISH_RADIO_RAW, default=False): cv.boolean,
 
             # Diagnostics are opt-in by default. `diagnostic_mode` applies a preset
             # for MQTT publishing only; explicit detailed flags still override it.
@@ -198,6 +204,41 @@ CONFIG_SCHEMA = (
 )
 
 
+def _validate_radio_pins(config):
+    radio_type = config[CONF_RADIO_TYPE].upper()
+
+    if radio_type == "CC1101":
+        if not config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
+            raise cv.Invalid(
+                "CC1101 support is experimental. Set cc1101_allow_experimental: true after reading the documentation. "
+                "CC1101 requires validated wiring and both GDO0+GDO2 pins."
+            )
+        if CONF_GDO0_PIN not in config:
+            raise cv.Invalid("CC1101 requires gdo0_pin (FIFO/data event).")
+        if CONF_GDO2_PIN not in config:
+            raise cv.Invalid("CC1101 requires gdo2_pin (sync detection). Single-IRQ CC1101 wiring is not supported.")
+        if CONF_IRQ_PIN in config:
+            raise cv.Invalid("For CC1101 use gdo0_pin and gdo2_pin, not irq_pin.")
+        if CONF_RESET_PIN in config:
+            raise cv.Invalid("CC1101 does not use reset_pin in this component. Remove reset_pin.")
+        if CONF_BUSY_PIN in config:
+            raise cv.Invalid("CC1101 does not use busy_pin. Remove busy_pin.")
+    else:
+        if CONF_RESET_PIN not in config:
+            raise cv.Invalid(f"{radio_type} requires reset_pin.")
+        if CONF_IRQ_PIN not in config:
+            raise cv.Invalid(f"{radio_type} requires irq_pin.")
+        if CONF_GDO0_PIN in config or CONF_GDO2_PIN in config:
+            raise cv.Invalid("gdo0_pin/gdo2_pin are only valid for CC1101. Use irq_pin for SX1262/SX1276.")
+        if CONF_CC1101_ALLOW_EXPERIMENTAL in config and config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
+            raise cv.Invalid("cc1101_allow_experimental is only valid for radio_type: CC1101.")
+
+    return config
+
+
+CONFIG_SCHEMA = cv.All(BASE_CONFIG_SCHEMA, _validate_radio_pins)
+
+
 async def to_code(config):
     cg.add(cg.LineComment("WMBus RadioTransceiver"))
 
@@ -236,8 +277,17 @@ async def to_code(config):
             p = await cg.gpio_pin_expression(config[CONF_FEM_PA_PIN])
             cg.add(radio_var.set_fem_pa_pin(p))
 
-    reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
-    cg.add(radio_var.set_reset_pin(reset_pin))
+    if config[CONF_RADIO_TYPE] != "CC1101":
+        reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
+        cg.add(radio_var.set_reset_pin(reset_pin))
+
+    if config[CONF_RADIO_TYPE] == "CC1101":
+        gdo0_pin = await cg.gpio_pin_expression(config[CONF_GDO0_PIN])
+        gdo2_pin = await cg.gpio_pin_expression(config[CONF_GDO2_PIN])
+        cg.add(radio_var.set_gdo0_pin(gdo0_pin))
+        cg.add(radio_var.set_gdo2_pin(gdo2_pin))
+        # Receiver task wake-up interrupt is the sync-detect line.
+        cg.add(radio_var.set_irq_pin(gdo2_pin))
 
     ListenMode = radio_ns.enum("ListenMode", is_class=False)
     listen_mode_map = {
@@ -247,12 +297,13 @@ async def to_code(config):
     }
     cg.add(radio_var.set_listen_mode(listen_mode_map[config[CONF_LISTEN_MODE]]))
 
-    irq_pin = await cg.gpio_pin_expression(config[CONF_IRQ_PIN])
-    cg.add(radio_var.set_irq_pin(irq_pin))
+    if config[CONF_RADIO_TYPE] != "CC1101":
+        irq_pin = await cg.gpio_pin_expression(config[CONF_IRQ_PIN])
+        cg.add(radio_var.set_irq_pin(irq_pin))
 
-    if CONF_BUSY_PIN in config:
-        busy_pin = await cg.gpio_pin_expression(config[CONF_BUSY_PIN])
-        cg.add(radio_var.set_busy_pin(busy_pin))
+        if CONF_BUSY_PIN in config:
+            busy_pin = await cg.gpio_pin_expression(config[CONF_BUSY_PIN])
+            cg.add(radio_var.set_busy_pin(busy_pin))
 
     await spi.register_spi_device(radio_var, config)
     await cg.register_component(radio_var, config)
@@ -261,6 +312,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_radio(radio_var))
     cg.add(var.set_receiver_task_stack_size(config[CONF_RECEIVER_TASK_STACK_SIZE]))
+    cg.add(var.set_listen_mode_filter_after_parse(config[CONF_LISTEN_MODE_FILTER_AFTER_PARSE]))
 
     diag_mode = config.get(CONF_DIAGNOSTIC_MODE, "off")
     preset_map = {
@@ -340,6 +392,7 @@ async def to_code(config):
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
     cg.add(var.set_target_topic(config.get(CONF_TARGET_TOPIC, "")))
     cg.add(var.set_target_log(config.get(CONF_TARGET_LOG, True)))
+    cg.add(var.set_publish_radio_raw(config.get(CONF_PUBLISH_RADIO_RAW, False)))
 
     cg.add(var.set_diag_verbose(config[CONF_DIAG_VERBOSE] if CONF_DIAG_VERBOSE in config else diag_preset["verbose"]))
     cg.add(var.set_diag_publish_raw(config[CONF_DIAG_PUBLISH_RAW] if CONF_DIAG_PUBLISH_RAW in config else diag_preset["raw"]))

@@ -1,22 +1,9 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Kustonium
-//
-// EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-//     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-//     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-//     Some structure or naming may retain ancestry from that ecosystem.
-// PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-//     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-//     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-//     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 #pragma once
 #include "esphome/components/spi/spi.h"
 #include "esphome/core/optional.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdint>
-#include <string>
 
 #define BYTE(x, n) ((uint8_t)(x >> (n * 8)))
 
@@ -49,6 +36,9 @@ public:
   virtual bool consume_rx_abort_request() { return false; }
   virtual uint32_t take_fifo_overrun_count() { return 0; }
 
+  // Optional radio-specific debug dump. Used when RX waits time out.
+  virtual void dump_debug_status(const char *reason) {}
+
   // Optional: report SX126x device errors captured during boot clear.
   // Default: not supported.
   virtual bool get_boot_device_errors(uint16_t &before, uint16_t &after) const { return false; }
@@ -63,12 +53,10 @@ public:
   void set_busy_pin(InternalGPIOPin *busy_pin);
   void set_listen_mode(ListenMode mode) { this->listen_mode_ = mode; }
   ListenMode get_listen_mode() const { return this->listen_mode_; }
-  // RF parameter summary set during setup(), used in boot log.
-  const std::string &get_rf_params_str() const { return this->rf_params_str_; }
 
 protected:
-  InternalGPIOPin *reset_pin_;
-  InternalGPIOPin *irq_pin_;
+  InternalGPIOPin *reset_pin_{nullptr};
+  InternalGPIOPin *irq_pin_{nullptr};
   InternalGPIOPin *busy_pin_{nullptr};
 
   // SX127x DIO for FIFO level is typically active-low (falling edge).
@@ -76,7 +64,6 @@ protected:
   gpio::InterruptType irq_edge_{gpio::INTERRUPT_FALLING_EDGE};
 
   ListenMode listen_mode_{LISTEN_MODE_BOTH};
-  std::string rf_params_str_;  // filled by chip setup(), shown in Radio active log
 
   virtual optional<uint8_t> read() = 0;
 

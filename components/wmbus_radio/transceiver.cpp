@@ -1,15 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Kustonium
-//
-// EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-//     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-//     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-//     Some structure or naming may retain ancestry from that ecosystem.
-// PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-//     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-//     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-//     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 #include "transceiver.h"
 
 #include "esphome/core/log.h"
@@ -81,6 +69,7 @@ void RadioTransceiver::set_busy_pin(InternalGPIOPin *busy_pin) {
 }
 
 void RadioTransceiver::reset() {
+  if (this->reset_pin_ == nullptr) return;
   this->reset_pin_->digital_write(0);
   delay(5);
   this->reset_pin_->digital_write(1);
@@ -88,8 +77,10 @@ void RadioTransceiver::reset() {
 }
 
 void RadioTransceiver::common_setup() {
-  this->reset_pin_->setup();
-  this->irq_pin_->setup();
+  if (this->reset_pin_ != nullptr)
+    this->reset_pin_->setup();
+  if (this->irq_pin_ != nullptr)
+    this->irq_pin_->setup();
   if (this->busy_pin_ != nullptr)
     this->busy_pin_->setup();
   this->spi_setup();
@@ -120,8 +111,10 @@ void RadioTransceiver::spi_write(uint8_t address, uint8_t data) {
 
 void RadioTransceiver::dump_config() {
   ESP_LOGCONFIG(TAG, "Transceiver: %s", this->get_name());
-  LOG_PIN("  Reset Pin: ", this->reset_pin_);
-  LOG_PIN("  IRQ Pin: ", this->irq_pin_);
+  if (this->reset_pin_ != nullptr)
+    LOG_PIN("  Reset Pin: ", this->reset_pin_);
+  if (this->irq_pin_ != nullptr)
+    LOG_PIN("  IRQ Pin: ", this->irq_pin_);
   if (this->busy_pin_ != nullptr)
     LOG_PIN("  Busy Pin: ", this->busy_pin_);
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"

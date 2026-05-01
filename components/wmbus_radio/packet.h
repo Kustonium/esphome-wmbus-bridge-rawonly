@@ -1,15 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Kustonium
-//
-// EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-//     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-//     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-//     Some structure or naming may retain ancestry from that ecosystem.
-// PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-//     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-//     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-//     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +56,7 @@ public:
   // Raw packet bytes (hex) captured at the beginning of convert_to_frame().
   // Intended for diagnostics; may be truncated to keep MQTT/log payloads small.
   const std::string &raw_hex() const { return this->raw_hex_; }
+  std::string packet_hex() const;
 
   // Best-effort meter id extraction from the current packet buffer.
   // Works after successful decode and for some late-stage failures.

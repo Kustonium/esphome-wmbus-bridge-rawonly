@@ -1,15 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Kustonium
-//
-// EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-//     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-//     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-//     Some structure or naming may retain ancestry from that ecosystem.
-// PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-//     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-//     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-//     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 #include "transceiver_sx1276.h"
 
 #include "esphome/core/log.h"
@@ -110,30 +98,9 @@ void SX1276::setup() {
   const uint32_t frf = ((uint64_t) frequency * (1 << 19)) / F_OSC;
   this->spi_write(0x06, {BYTE(frf, 2), BYTE(frf, 1), BYTE(frf, 0)});
 
-  // RxBW / AfcBW:
-  // T1/BOTH: 125 kHz / 125 kHz (0x02 / 0x02) — validated in field, AFC compensates for offset.
-  // C1-only: 200 kHz / 250 kHz (0x09 / 0x01) — conservative starting point for first field tests;
-  //          AfcBW wider than RxBW per datasheet recommendation.
-  //   0x02 = mantissa=16, exp=2 → BW = 32MHz/(16×16) = 125 kHz
-  //   0x09 = mantissa=20, exp=1 → BW = 32MHz/(20×8)  = 200 kHz
-  //   0x01 = mantissa=16, exp=1 → BW = 32MHz/(16×8)  = 250 kHz
-  // NOTE: both mode uses T1 profile (50 kHz fdev, 125 kHz BW). C1 frames in both mode
-  //       are received on T1 RF settings — this is a known limitation, not a bug.
-  const uint8_t rxbw_val  = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t)0x09 : (uint8_t)0x02;
-  const uint8_t afcbw_val = (this->listen_mode_ == LISTEN_MODE_C1) ? (uint8_t)0x01 : (uint8_t)0x02;
-  this->spi_write(0x12, {rxbw_val, afcbw_val});
+  this->spi_write(0x12, {2, 2});
 
-  // EN 13757-4: T-mode fdev = 50 kHz, C-mode fdev = 45 kHz.
-  const uint16_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000 : 50000;
-  // Store RF params string for boot log in component.cpp.
-  {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "fdev=%ukHz RxBW=%s AfcBW=%s",
-             (unsigned)(freq_dev / 1000),
-             (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz",
-             (this->listen_mode_ == LISTEN_MODE_C1) ? "250kHz" : "125kHz");
-    this->rf_params_str_ = buf;
-  }
+  const uint16_t freq_dev = 50000;
   const uint16_t frd = ((uint64_t) freq_dev * (1 << 19)) / F_OSC;
   this->spi_write(0x04, {BYTE(frd, 1), BYTE(frd, 0)});
 

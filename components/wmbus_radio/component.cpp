@@ -1,15 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Kustonium
-//
-// EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-//     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-//     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-//     Some structure or naming may retain ancestry from that ecosystem.
-// PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-//     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-//     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-//     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 #include "component.h"
 
 #include "freertos/queue.h"
@@ -389,6 +377,32 @@ std::string Radio::derived_target_topic_() const {
   return {};
 }
 
+
+void Radio::maybe_publish_radio_raw_(Packet *packet, uint32_t now_ms) {
+  if (!this->publish_radio_raw_ || packet == nullptr) return;
+
+  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  if (mqtt == nullptr || !mqtt->is_connected()) return;
+
+  const std::string raw = packet->packet_hex();
+  const char *chip = (this->radio != nullptr) ? this->radio->get_name() : "unknown";
+  const char *listen_mode = (this->radio != nullptr) ? listen_mode_to_string_(this->radio->get_listen_mode()) : "unknown";
+  const char *mode = link_mode_name(packet->get_link_mode());
+
+  std::string payload = str_sprintf(
+      "{\"event\":\"radio_raw\",\"uptime_ms\":%lu,\"chip\":\"%s\",\"listen_mode\":\"%s\",\"mode\":\"%s\",\"rssi\":%d,\"raw_len\":%u,\"hex_len\":%u,\"raw\":\"%s\"}",
+      (unsigned long) now_ms,
+      chip,
+      listen_mode,
+      mode,
+      (int) packet->get_rssi(),
+      (unsigned) packet->size(),
+      (unsigned) raw.size(),
+      raw.c_str());
+
+  mqtt->publish("wmbus_bridge/raw", payload, static_cast<uint8_t>(0), false);
+}
+
 void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, const char *id_str, const char *log_tag) {
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
@@ -748,11 +762,6 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
       hint_code = "GOOD";
       hint_en = "RF link looks stable";
       hint_pl = "łącze radiowe wygląda stabilnie";
-    } else if (ok > 0 && drop_pct > 10) {
-      // drop_pct 11-99% with no specific pattern matched.
-      hint_code = "MODERATE_DROPS";
-      hint_en = "reception is working but drop rate is elevated; check antenna placement and nearby interference";
-      hint_pl = "odbiór działa, ale odsetek dropów jest podwyższony; sprawdź ustawienie anteny i pobliskie zakłócenia";
     }
   }
 
@@ -925,12 +934,9 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            // busy_ether_state: reflects state BEFORE evaluating this window.
            // evaluate_busy_ether_adaptive_() runs after publish to access full window counters.
            // Use busy_ether_changed event for precise transition timestamps.
-           // On SX1262 the busy-ether algorithm has no effect (hardware capability missing);
-           // emit "n/a" so the field is not confused with a real adaptive state.
-           !is_sx1276 ? "n/a"
-               : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE)
-                   ? (this->busy_ether_was_active_ ? "adaptive_active" : "adaptive_passive")
-                   : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE ? "aggressive" : "normal"));
+           (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE)
+               ? (this->busy_ether_was_active_ ? "adaptive_active" : "adaptive_passive")
+               : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE ? "aggressive" : "normal"));
 
   const std::string summary_topic = this->diag_summary_topic_();
   mqtt->publish(summary_topic, payload);
@@ -1196,11 +1202,6 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
       hint_code = "GOOD";
       hint_en = "RF link looks stable";
       hint_pl = "łącze radiowe wygląda stabilnie";
-    } else if (ok > 0 && drop_pct > 10) {
-      // drop_pct 11-99% with no specific pattern matched.
-      hint_code = "MODERATE_DROPS";
-      hint_en = "reception is working but drop rate is elevated; check antenna placement and nearby interference";
-      hint_pl = "odbiór działa, ale odsetek dropów jest podwyższony; sprawdź ustawienie anteny i pobliskie zakłócenia";
     }
   }
 
@@ -1566,11 +1567,6 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
       hint_code = "GOOD";
       hint_en = "RF link looks stable";
       hint_pl = "łącze radiowe wygląda stabilnie";
-    } else if (ok > 0 && drop_pct > 10) {
-      // drop_pct 11-99% with no specific pattern matched.
-      hint_code = "MODERATE_DROPS";
-      hint_en = "reception is working but drop rate is elevated; check antenna placement and nearby interference";
-      hint_pl = "odbiór działa, ale odsetek dropów jest podwyższony; sprawdź ustawienie anteny i pobliskie zakłócenia";
     }
   }
 
@@ -1956,6 +1952,10 @@ void Radio::setup() {
     ESP_LOGI(TAG, "Frame RAW forwarding topic / topic publikacji RAW: %s", this->telegram_topic_.c_str());
   }
 
+  if (this->publish_radio_raw_) {
+    ESP_LOGI(TAG, "Internal radio RAW tap enabled / wlaczono wewnetrzny RAW tap: wmbus_bridge/raw");
+  }
+
   if (!this->highlight_meter_ids_.empty()) {
     // meter_window_interval_ms_ defaults to 15 min; cap it at diag_summary_interval_ms_ minimum
     if (this->meter_window_interval_ms_ < this->diag_summary_interval_ms_)
@@ -2014,6 +2014,8 @@ void Radio::dump_config() {
   ESP_LOGCONFIG(TAG, "  Radio type: %s", this->radio->get_name());
   ESP_LOGCONFIG(TAG, "  Listen mode: %s",
                 listen_mode_to_string_(this->radio->get_listen_mode()));
+  ESP_LOGCONFIG(TAG, "  Listen mode filter: %s",
+                this->listen_mode_filter_after_parse_ ? "after parse (experimental)" : "before parse (legacy)");
   ESP_LOGCONFIG(TAG, "  Receiver task stack: %u bytes", (unsigned) this->receiver_task_stack_size_);
   const char *busy_mode = (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL) ? "normal"
                            : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE) ? "aggressive"
@@ -2033,54 +2035,52 @@ void Radio::dump_config() {
 void Radio::loop() {
   const uint32_t loop_now_ms = (uint32_t) esphome::millis();
 
-  if (!this->boot_log_done_ && this->radio != nullptr) {
-    if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
-      const char *radio_name = this->radio->get_name();
+if (!this->boot_log_done_ && this->radio != nullptr) {
+  if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
+    const char *radio_name = this->radio->get_name();
 
-      if (strcmp(radio_name, "SX1276") == 0) {
-        const char *busy_mode = "unknown";
-        const char *busy_state = "n/a";
+    if (strcmp(radio_name, "SX1276") == 0) {
+      const char *busy_mode = "unknown";
+      const char *busy_state = "n/a";
 
-        switch (this->sx1276_busy_ether_mode_) {
-          case SX1276BusyEtherMode::NORMAL:
-            busy_mode = "normal";
-            break;
-          case SX1276BusyEtherMode::AGGRESSIVE:
-            busy_mode = "aggressive";
-            break;
-          case SX1276BusyEtherMode::ADAPTIVE:
-            busy_mode = "adaptive";
-            busy_state = this->busy_ether_was_active_ ? "active" : "passive";
-            break;
-          default:
-            busy_mode = "unknown";
-            break;
-        }
-
-        ESP_LOGI(TAG,
-                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s | RF: %s",
-                 radio_name,
-                 listen_mode_to_string_(this->radio->get_listen_mode()),
-                 (unsigned) this->receiver_task_stack_size_,
-                 busy_mode,
-                 busy_state,
-                 this->radio->get_rf_params_str().c_str());
-      } else {
-        ESP_LOGI(TAG,
-                 "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
-                 radio_name,
-                 listen_mode_to_string_(this->radio->get_listen_mode()),
-                 (unsigned) this->receiver_task_stack_size_,
-                 this->radio->get_rf_params_str().c_str());
+      switch (this->sx1276_busy_ether_mode_) {
+        case SX1276BusyEtherMode::NORMAL:
+          busy_mode = "normal";
+          break;
+        case SX1276BusyEtherMode::AGGRESSIVE:
+          busy_mode = "aggressive";
+          break;
+        case SX1276BusyEtherMode::ADAPTIVE:
+          busy_mode = "adaptive";
+          busy_state = this->busy_ether_was_active_ ? "active" : "passive";
+          break;
+        default:
+          busy_mode = "unknown";
+          break;
       }
 
-      this->boot_log_last_ms_ = loop_now_ms;
-      this->boot_log_count_++;
-      if (this->boot_log_count_ >= 3) {
-        this->boot_log_done_ = true;
-      }
+      ESP_LOGI(TAG,
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s",
+               radio_name,
+               listen_mode_to_string_(this->radio->get_listen_mode()),
+               (unsigned) this->receiver_task_stack_size_,
+               busy_mode,
+               busy_state);
+    } else {
+      ESP_LOGI(TAG,
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes",
+               radio_name,
+               listen_mode_to_string_(this->radio->get_listen_mode()),
+               (unsigned) this->receiver_task_stack_size_);
+    }
+
+    this->boot_log_last_ms_ = loop_now_ms;
+    this->boot_log_count_++;
+    if (this->boot_log_count_ >= 3) {
+      this->boot_log_done_ = true;
     }
   }
+}
 
   auto *mqtt = mqtt::global_mqtt_client;
   if (this->radio != nullptr && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
@@ -2123,19 +2123,21 @@ void Radio::loop() {
   if (xQueueReceive(this->packet_queue_, &p, 0) != pdPASS)
     return;
 
-  const uint8_t mode_idx = (uint8_t) p->get_link_mode();
+  this->maybe_publish_radio_raw_(p, loop_now_ms);
 
-  // Filter by listen_mode BEFORE convert_to_frame() and before any counters.
-  // Use packet's raw link mode (detected from preamble) — valid even if frame
-  // conversion later fails (e.g. T1 3-of-6 decode error).
-  if (this->radio != nullptr) {
+  // listen_mode filtering has two modes:
+  // - default/legacy: filter by preliminary raw packet mode before parsing;
+  // - experimental: parse first, then filter by parser/CRC-selected final mode.
+  uint8_t mode_idx = (uint8_t) p->get_link_mode();
+
+  if (!this->listen_mode_filter_after_parse_ && this->radio != nullptr) {
     const auto want = this->radio->get_listen_mode();
     const LinkMode got = p->get_link_mode();
     const bool reject =
         (want == LISTEN_MODE_C1 && got != LinkMode::C1) ||
         (want == LISTEN_MODE_T1 && got != LinkMode::T1);
     if (reject) {
-      ESP_LOGD(TAG, "Filtered by listen_mode: want=%s got=%s RSSI=%ddBm",
+      ESP_LOGD(TAG, "Filtered by listen_mode before parse: want=%s got=%s RSSI=%ddBm",
                (want == LISTEN_MODE_C1) ? "C1" : "T1",
                link_mode_name(got),
                (int) p->get_rssi());
@@ -2144,15 +2146,34 @@ void Radio::loop() {
     }
   }
 
-  // Count only frames that pass the listen_mode filter
+  auto frame = p->convert_to_frame();
+
+  if (this->listen_mode_filter_after_parse_) {
+    mode_idx = (uint8_t) p->get_link_mode();
+    if (this->radio != nullptr) {
+      const auto want = this->radio->get_listen_mode();
+      const LinkMode got = p->get_link_mode();
+      const bool reject =
+          (want == LISTEN_MODE_C1 && got != LinkMode::C1) ||
+          (want == LISTEN_MODE_T1 && got != LinkMode::T1);
+      if (reject) {
+        ESP_LOGD(TAG, "Filtered by listen_mode after parse: want=%s got=%s RSSI=%ddBm",
+                 (want == LISTEN_MODE_C1) ? "C1" : "T1",
+                 link_mode_name(got),
+                 (int) p->get_rssi());
+        delete p;
+        return;
+      }
+    }
+  }
+
+  // Count only packets that pass the listen_mode filter.
   this->diag_total_++;
   this->diag_15m_total_++;
   this->diag_60min_total_++;
   if (mode_idx < this->diag_mode_total_.size()) this->diag_mode_total_[mode_idx]++;
   if (mode_idx < this->diag_15m_mode_total_.size()) this->diag_15m_mode_total_[mode_idx]++;
   if (mode_idx < this->diag_60min_mode_total_.size()) this->diag_60min_mode_total_[mode_idx]++;
-
-  auto frame = p->convert_to_frame();
 
   if (mode_idx == (uint8_t) LinkMode::T1) {
     this->diag_t1_symbols_total_ += (uint32_t) p->t1_symbols_total();
@@ -2454,24 +2475,17 @@ void Radio::loop() {
     if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
     const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
     const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
              ansi_pre, this->highlight_prefix_.c_str(),
-             d.size(), p->raw_got_len(), frame->rssi(),
+             d.size(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
              ansi_suf);
 
     // Keep highlight_meters lightweight by default: local emphasis plus packet number only.
-    // stats[stats_key] was called above so the key always exists here — use find() for
-    // read-only access to avoid operator[] accidentally inserting a default entry.
     const uint64_t stats_key_ro = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
-    const auto stats_it = this->highlight_meter_stats_.find(stats_key_ro);
-    if (stats_it == this->highlight_meter_stats_.end()) {
-      delete p;
-      return; // invariant broken — skip safely
-    }
-    const auto &stats = stats_it->second;
+    const auto &stats = this->highlight_meter_stats_[stats_key_ro];
     if (stats.count == 1) {
       ESP_LOGI(log_tag, "%s[id:%s] first packet / pierwszy pakiet (packet #1)",
                this->highlight_prefix_.c_str(), id_str);
@@ -2482,8 +2496,8 @@ void Radio::loop() {
                (unsigned) stats.count);
     }
   } else {
-    ESP_LOGI(TAG, "Have data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
-             d.size(), p->raw_got_len(), frame->rssi(),
+    ESP_LOGI(TAG, "Have data / odebrano dane (%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+             d.size(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
@@ -2527,6 +2541,9 @@ void Radio::receive_frame() {
     this->diag_60min_rx_path_.irq_timeout++;
     this->collect_radio_rx_diag_();
     this->publish_rx_path_event_("rx_path", "receive_wait", "interrupt_timeout");
+    if (this->diag_verbose_) {
+      this->radio->dump_debug_status("interrupt_timeout");
+    }
     ESP_LOGD(TAG, "Radio interrupt timeout");
     return;
   }

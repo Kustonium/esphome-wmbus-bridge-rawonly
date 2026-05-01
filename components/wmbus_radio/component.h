@@ -1,15 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Kustonium
-//
-// EN: Part of esphome-wmbus-bridge-rawonly. This project was built as a
-//     RAW-only RF->MQTT bridge inspired by ESPHome wM-Bus component work
-//     from SzczepanLeon/esphome-components and related wmbusmeters code paths.
-//     Some structure or naming may retain ancestry from that ecosystem.
-// PL: Część projektu esphome-wmbus-bridge-rawonly. Projekt powstał jako
-//     most RAW-only RF->MQTT inspirowany pracami ESPHome wM-Bus z repo
-//     SzczepanLeon/esphome-components oraz powiązanymi ścieżkami wmbusmeters.
-//     Część struktury lub nazewnictwa może zachowywać ten rodowód.
-
 #pragma once
 
 #include <array>
@@ -47,6 +35,7 @@ public:
   void set_target_meter_id_str(const std::string &meter_id) { this->target_meter_id_str_ = meter_id; }
   void set_target_topic(const std::string &topic) { this->target_topic_ = topic; }
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
+  void set_publish_radio_raw(bool enabled) { this->publish_radio_raw_ = enabled; }
 
   // Optional log highlighting for selected meter IDs (configured from YAML).
   // Meters are provided as a CSV string in YAML (list is joined in python).
@@ -74,6 +63,8 @@ public:
   void set_diag_publish_summary_60min(bool enabled) { this->diag_publish_summary_60min_ = enabled; }
   void set_diag_publish_summary_highlight_meters(bool enabled) { this->diag_publish_summary_highlight_meters_ = enabled; }
   void set_sx1276_busy_ether_mode(SX1276BusyEtherMode mode) { this->sx1276_busy_ether_mode_ = mode; }
+  void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
+
   void set_receiver_task_stack_size(uint32_t stack_size) {
     // This configures the dedicated radio_recv FreeRTOS task created by
     // wmbus_radio. It does NOT change ESPHome's main loop task stack.
@@ -102,6 +93,11 @@ protected:
   // Stack for the dedicated radio_recv task. Default stays at 3 KB so existing
   // configs behave exactly as before unless the user overrides it in YAML.
   uint32_t receiver_task_stack_size_{3 * 1024};
+
+  // Default false = legacy/stable behavior: filter listen_mode by preliminary
+  // raw packet mode before running the full parser. True = experimental behavior:
+  // parse first, then filter by parser/CRC-selected final mode.
+  bool listen_mode_filter_after_parse_{false};
 
   std::vector<std::function<void(Frame *)>> handlers_;
 
@@ -150,6 +146,7 @@ protected:
   bool target_meter_enabled_{false};
   std::string target_topic_{};
   bool target_log_{true};
+  bool publish_radio_raw_{false};
 
   // Highlight configuration
   std::string highlight_meters_csv_{};
@@ -328,6 +325,7 @@ protected:
   bool should_attempt_raw_drain_(int rssi_dbm, size_t bytes_read, bool is_c_mode) const;
   std::string derived_target_topic_() const;
   void maybe_forward_frame_(Frame &frame, uint32_t meter_id, const char *id_str, const char *log_tag);
+  void maybe_publish_radio_raw_(Packet *packet, uint32_t now_ms);
   bool should_publish_packet_event_(const Packet *packet) const;
   void maybe_publish_diag_summary_(uint32_t now_ms);
   void maybe_publish_diag_15min_summary_(uint32_t now_ms);
