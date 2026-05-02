@@ -94,7 +94,6 @@ wmbus_radio:
   - radio_type: CC1101
 
     # Celowa bramka bezpieczeństwa. Bez tego CC1101 nie przejdzie walidacji.
-    # W publicznym przykładzie można to zakomentować, żeby bezmyślne copy/paste dostało bana.
     # cc1101_allow_experimental: true
 
     # CC1101 może wymagać ręcznej korekty częstotliwości zależnie od modułu.
