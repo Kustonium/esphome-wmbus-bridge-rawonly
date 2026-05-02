@@ -516,7 +516,7 @@ void SX1262::setup() {
   this->cmd_write_(CMD_CALIBRATE_IMAGE, {0xD7, 0xDB});
 
   this->cmd_write_(CMD_SET_PACKET_TYPE, {PACKET_TYPE_GFSK});
-  this->set_rf_frequency_(868950000UL);
+  this->set_rf_frequency_(this->configured_frequency_hz_);
 
   this->cmd_write_(CMD_SET_BUFFER_BASE_ADDRESS, {0x00, 0x00});
 
@@ -529,8 +529,9 @@ void SX1262::setup() {
   const uint8_t rx_bw = (this->listen_mode_ == LISTEN_MODE_C1) ? GFSK_RX_BW_234_3 : GFSK_RX_BW_312_0;
 
   {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "fdev=%lukHz BT=0.5 RxBW=%s",
+    char buf[96];
+    snprintf(buf, sizeof(buf), "freq=%.3fMHz fdev=%lukHz BT=0.5 RxBW=%s",
+             this->configured_frequency_hz_ / 1000000.0f,
              (unsigned long) (freq_dev / 1000UL),
              (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz");
     this->rf_params_str_ = buf;

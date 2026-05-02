@@ -95,8 +95,7 @@ void SX1276::setup() {
     return;
   }
 
-  const uint32_t frequency = 868950000;
-  const uint32_t frf = ((uint64_t) frequency * (1 << 19)) / F_OSC;
+  const uint32_t frf = ((uint64_t) this->configured_frequency_hz_ * (1 << 19)) / F_OSC;
   this->spi_write(0x06, {BYTE(frf, 2), BYTE(frf, 1), BYTE(frf, 0)});
 
   // RegRxBw / RegAfcBw:
@@ -107,8 +106,9 @@ void SX1276::setup() {
 
   const uint16_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000 : 50000;
   {
-    char buf[80];
-    snprintf(buf, sizeof(buf), "fdev=%ukHz RxBW=%s AfcBW=%s",
+    char buf[112];
+    snprintf(buf, sizeof(buf), "freq=%.3fMHz fdev=%ukHz RxBW=%s AfcBW=%s",
+             this->configured_frequency_hz_ / 1000000.0f,
              (unsigned) (freq_dev / 1000),
              (this->listen_mode_ == LISTEN_MODE_C1) ? "200kHz" : "125kHz",
              (this->listen_mode_ == LISTEN_MODE_C1) ? "250kHz" : "125kHz");

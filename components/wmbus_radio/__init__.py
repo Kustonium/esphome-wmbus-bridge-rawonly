@@ -267,8 +267,6 @@ def _validate_radio_pins(config):
             raise cv.Invalid("gdo0_pin/gdo2_pin are only valid for CC1101. Use irq_pin for SX1262/SX1276.")
         if CONF_CC1101_ALLOW_EXPERIMENTAL in config and config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("cc1101_allow_experimental is only valid for radio_type: CC1101.")
-        if CONF_FREQUENCY in config and float(config.get(CONF_FREQUENCY, 868.950)) != 868.950:
-            raise cv.Invalid("frequency is currently only valid for radio_type: CC1101.")
 
     return config
 
@@ -326,6 +324,10 @@ async def to_code(config):
         cg.add(radio_var.set_frequency_mhz(config.get(CONF_FREQUENCY, 868.950)))
         # Receiver task wake-up interrupt is the sync-detect line.
         cg.add(radio_var.set_irq_pin(gdo2_pin))
+    else:
+        # SX1262/SX1276: keep the same default (868.950 MHz), allow YAML override
+        # only when the user explicitly sets a different frequency value.
+        cg.add(radio_var.set_frequency_mhz(config.get(CONF_FREQUENCY, 868.950)))
 
     ListenMode = radio_ns.enum("ListenMode", is_class=False)
     listen_mode_map = {

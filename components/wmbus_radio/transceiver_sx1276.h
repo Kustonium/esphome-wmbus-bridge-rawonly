@@ -18,6 +18,9 @@ static constexpr uint32_t SX1276_TAIL_GAP_US = 1000;
 
 class SX1276 : public RadioTransceiver {
  public:
+  void set_frequency_mhz(float frequency_mhz) {
+    this->configured_frequency_hz_ = (uint32_t) (frequency_mhz * 1000000.0f + 0.5f);
+  }
   void setup() override;
   optional<uint8_t> read() override;
   void restart_rx() override;
@@ -30,6 +33,7 @@ class SX1276 : public RadioTransceiver {
   uint32_t take_fifo_overrun_count() override;
 
  protected:
+  uint32_t configured_frequency_hz_{868950000UL};
   uint8_t sync_cycle_{0};
 
   // Burst chunk buffered in ESP32 RAM and served byte-by-byte to upper layer.
