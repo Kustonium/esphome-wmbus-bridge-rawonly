@@ -4,7 +4,7 @@
 
 Public examples are provided only for SX1262 and SX1276 boards.
 
-CC1101 support exists in the component, but it is still experimental and intentionally not documented here as a normal user path.
+CC1101 support is available, but still experimental. It requires explicit YAML opt-in and proper GDO0/GDO2 wiring. This example is provided for advanced/testing use, not as the recommended user path.
 
 ## Topic model
 
