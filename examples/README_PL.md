@@ -2,9 +2,9 @@
 
 [English version](README.md)
 
-Publiczne przykłady są tylko dla płytek SX1262 i SX1276.
+Publiczne przykłady są tylko dla płytek SX1262,SX1276,CC1101.
 
-Obsługa CC1101 jest w komponencie, ale nadal jest eksperymentalna i celowo nie jest tutaj dokumentowana jako normalna ścieżka użytkownika.
+Obsługa CC1101 jest dostępna, ale nadal eksperymentalna. Wymaga jawnego włączenia w YAML oraz poprawnego podłączenia GDO0/GDO2. Ten przykład jest przeznaczony do zastosowań zaawansowanych/testowych, a nie jako rekomendowana ścieżka dla zwykłych użytkowników.
 
 ## Model topiców
 
