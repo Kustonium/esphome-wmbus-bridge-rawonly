@@ -203,7 +203,7 @@ Porównuj tę opcję po `meter_snapshot` dla ważnych liczników, a nie po samym
 
 ## CC1101
 
-Obsługa CC1101 jest w komponencie, ale nadal jest eksperymentalna. Wymaga jawnego włączenia w YAML i poprawnego podłączenia GDO0/GDO2.
+Obsługa CC1101 jest dostępna w komponencie, ale nadal ma status eksperymentalny. Wymaga jawnego włączenia w YAML oraz poprawnego podłączenia linii GDO0/GDO2.
 
 ## Dokumentacja
 
