@@ -203,7 +203,7 @@ Compare this option using `meter_snapshot` for the meters that matter, not only 
 
 ## CC1101
 
-CC1101 support exists in the component but is still experimental and intentionally not shown in the public examples. It requires explicit opt-in in YAML and validated GDO0/GDO2 wiring.
+CC1101 support is available in the component, but it is still experimental. It requires explicit YAML opt-in and proper GDO0/GDO2 wiring.
 
 ## Documentation
 
