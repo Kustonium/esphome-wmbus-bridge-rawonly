@@ -67,6 +67,13 @@ public:
   void set_diag_publish_summary_highlight_meters(bool enabled) { this->diag_publish_summary_highlight_meters_ = enabled; }
   void set_sx1276_busy_ether_mode(SX1276BusyEtherMode mode) { this->sx1276_busy_ether_mode_ = mode; }
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
+  void set_tx_test_config(bool enabled, ListenMode mode, uint16_t frame_length, uint32_t interval_ms, uint8_t tx_data_gpio) {
+    this->tx_test_enabled_ = enabled;
+    this->tx_test_mode_ = mode;
+    this->tx_test_frame_length_ = frame_length;
+    this->tx_test_interval_ms_ = interval_ms < 1000 ? 1000 : interval_ms;
+    this->tx_test_data_gpio_ = tx_data_gpio;
+  }
 
   void set_receiver_task_stack_size(uint32_t stack_size) {
     // This configures the dedicated radio_recv FreeRTOS task created by
@@ -101,6 +108,13 @@ protected:
   // raw packet mode before running the full parser. True = experimental behavior:
   // parse first, then filter by parser/CRC-selected final mode.
   bool listen_mode_filter_after_parse_{false};
+
+  bool tx_test_enabled_{false};
+  ListenMode tx_test_mode_{LISTEN_MODE_T1};
+  uint16_t tx_test_frame_length_{40};
+  uint32_t tx_test_interval_ms_{30000};
+  uint32_t tx_test_last_ms_{0};
+  uint8_t tx_test_data_gpio_{34};
 
   std::vector<std::function<void(Frame *)>> handlers_;
 
@@ -250,14 +264,14 @@ protected:
   uint32_t diag_rssi_drop_n_{0};
 
   // Per-mode window stats (index: (uint8_t)LinkMode)
-  std::array<uint32_t, 3> diag_mode_total_{};
-  std::array<uint32_t, 3> diag_mode_ok_{};
-  std::array<uint32_t, 3> diag_mode_dropped_{};
-  std::array<uint32_t, 3> diag_mode_crc_failed_{};
-  std::array<int32_t, 3> diag_mode_rssi_ok_sum_{};
-  std::array<uint32_t, 3> diag_mode_rssi_ok_n_{};
-  std::array<int32_t, 3> diag_mode_rssi_drop_sum_{};
-  std::array<uint32_t, 3> diag_mode_rssi_drop_n_{};
+  std::array<uint32_t, 4> diag_mode_total_{};
+  std::array<uint32_t, 4> diag_mode_ok_{};
+  std::array<uint32_t, 4> diag_mode_dropped_{};
+  std::array<uint32_t, 4> diag_mode_crc_failed_{};
+  std::array<int32_t, 4> diag_mode_rssi_ok_sum_{};
+  std::array<uint32_t, 4> diag_mode_rssi_ok_n_{};
+  std::array<int32_t, 4> diag_mode_rssi_drop_sum_{};
+  std::array<uint32_t, 4> diag_mode_rssi_drop_n_{};
 
   std::array<uint32_t, DB_COUNT> diag_dropped_by_bucket_{};
   std::array<uint32_t, SB_COUNT> diag_dropped_by_stage_{};
@@ -272,14 +286,14 @@ protected:
   uint32_t diag_15m_rssi_ok_n_{0};
   int32_t diag_15m_rssi_drop_sum_{0};
   uint32_t diag_15m_rssi_drop_n_{0};
-  std::array<uint32_t, 3> diag_15m_mode_total_{};
-  std::array<uint32_t, 3> diag_15m_mode_ok_{};
-  std::array<uint32_t, 3> diag_15m_mode_dropped_{};
-  std::array<uint32_t, 3> diag_15m_mode_crc_failed_{};
-  std::array<int32_t, 3> diag_15m_mode_rssi_ok_sum_{};
-  std::array<uint32_t, 3> diag_15m_mode_rssi_ok_n_{};
-  std::array<int32_t, 3> diag_15m_mode_rssi_drop_sum_{};
-  std::array<uint32_t, 3> diag_15m_mode_rssi_drop_n_{};
+  std::array<uint32_t, 4> diag_15m_mode_total_{};
+  std::array<uint32_t, 4> diag_15m_mode_ok_{};
+  std::array<uint32_t, 4> diag_15m_mode_dropped_{};
+  std::array<uint32_t, 4> diag_15m_mode_crc_failed_{};
+  std::array<int32_t, 4> diag_15m_mode_rssi_ok_sum_{};
+  std::array<uint32_t, 4> diag_15m_mode_rssi_ok_n_{};
+  std::array<int32_t, 4> diag_15m_mode_rssi_drop_sum_{};
+  std::array<uint32_t, 4> diag_15m_mode_rssi_drop_n_{};
   std::array<uint32_t, DB_COUNT> diag_15m_dropped_by_bucket_{};
   std::array<uint32_t, SB_COUNT> diag_15m_dropped_by_stage_{};
   RxPathCounters diag_15m_rx_path_{};
@@ -293,14 +307,14 @@ protected:
   uint32_t diag_60min_rssi_ok_n_{0};
   int32_t diag_60min_rssi_drop_sum_{0};
   uint32_t diag_60min_rssi_drop_n_{0};
-  std::array<uint32_t, 3> diag_60min_mode_total_{};
-  std::array<uint32_t, 3> diag_60min_mode_ok_{};
-  std::array<uint32_t, 3> diag_60min_mode_dropped_{};
-  std::array<uint32_t, 3> diag_60min_mode_crc_failed_{};
-  std::array<int32_t, 3> diag_60min_mode_rssi_ok_sum_{};
-  std::array<uint32_t, 3> diag_60min_mode_rssi_ok_n_{};
-  std::array<int32_t, 3> diag_60min_mode_rssi_drop_sum_{};
-  std::array<uint32_t, 3> diag_60min_mode_rssi_drop_n_{};
+  std::array<uint32_t, 4> diag_60min_mode_total_{};
+  std::array<uint32_t, 4> diag_60min_mode_ok_{};
+  std::array<uint32_t, 4> diag_60min_mode_dropped_{};
+  std::array<uint32_t, 4> diag_60min_mode_crc_failed_{};
+  std::array<int32_t, 4> diag_60min_mode_rssi_ok_sum_{};
+  std::array<uint32_t, 4> diag_60min_mode_rssi_ok_n_{};
+  std::array<int32_t, 4> diag_60min_mode_rssi_drop_sum_{};
+  std::array<uint32_t, 4> diag_60min_mode_rssi_drop_n_{};
   std::array<uint32_t, DB_COUNT> diag_60min_dropped_by_bucket_{};
   std::array<uint32_t, SB_COUNT> diag_60min_dropped_by_stage_{};
   RxPathCounters diag_60min_rx_path_{};

@@ -34,6 +34,7 @@ public:
   size_t expected_size();
 
   void set_rssi(int8_t rssi);
+  void set_forced_link_mode(LinkMode mode);
 
   std::optional<Frame> convert_to_frame();
 

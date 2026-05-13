@@ -654,12 +654,28 @@ void CC1101::dump_config() {
   ESP_LOGCONFIG(TAG, "  RF profile: compatibility modem profile, infinite packet mode");
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                        : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
+                       : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only (experimental sync only)"
                        : "T1+C1 (both, 3:1 sync-cycle bias)";
   ESP_LOGCONFIG(TAG, "  Listen mode: %s", mode_str);
 }
 
 void CC1101::restart_rx() {
   uint8_t sync2;
+  if (this->listen_mode_ == LISTEN_MODE_S1) {
+    // CC1101 has only the existing 2-byte sync path here; use the last 16 bits
+    // of S-mode sync as an experimental raw sniffer. SX1262/SX1276 are preferred for S1.
+    sync2 = 0x96;
+    this->flush_rx_();
+    this->write_reg_(REG_SYNC1, 0x76);
+    this->write_reg_(REG_SYNC0, sync2);
+    this->chunk_len_ = 0;
+    this->chunk_idx_ = 0;
+    this->rssi_captured_ = false;
+    this->last_rssi_dbm_ = -127;
+    this->abort_requested_ = false;
+    this->strobe_(CC1101_SRX);
+    return;
+  }
   if (this->listen_mode_ == LISTEN_MODE_T1) {
     sync2 = 0x3D;
   } else if (this->listen_mode_ == LISTEN_MODE_C1) {

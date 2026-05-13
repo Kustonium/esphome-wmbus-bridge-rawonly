@@ -244,6 +244,12 @@ void SX1262::set_sync_word_(uint8_t sync2) {
   this->write_register_(REG_SYNC_WORD_0, {0x54, sync2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
 }
 
+void SX1262::set_s1_sync_word_() {
+  // S-mode sync is 18 bits (0x7696) preceded here by 3 x "01" preamble bits,
+  // commonly programmed as 0x54 0x76 0x96 in packet radios.
+  this->write_register_(REG_SYNC_WORD_0, {0x54, 0x76, 0x96, 0x00, 0x00, 0x00, 0x00, 0x00});
+}
+
 bool SX1262::has_rx_done_() {
   uint8_t irq[2]{};
   this->cmd_read_(CMD_GET_IRQ_STATUS, {}, irq, sizeof(irq));
@@ -472,6 +478,7 @@ void SX1262::setup() {
   {
     const char *lm = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
+                   : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only"
                    : "T1+C1 (both, 3:1 bias)";
     ESP_LOGI(TAG, "Listen mode / tryb nasluchu: %s", lm);
   }
@@ -520,8 +527,8 @@ void SX1262::setup() {
 
   this->cmd_write_(CMD_SET_BUFFER_BASE_ADDRESS, {0x00, 0x00});
 
-  // Modulation params: 100 kbps, BT=0.5, BW, fdev=50k
-  const uint32_t bitrate = 100000;
+  // Modulation params. T1/C1 use 100 kbps; S1 uses 32.768 kcps Manchester.
+  const uint32_t bitrate = (this->listen_mode_ == LISTEN_MODE_S1) ? 32768UL : 100000UL;
   const uint32_t br = (XTAL_FREQ * 32UL) / bitrate;
 
   const uint32_t freq_dev = (this->listen_mode_ == LISTEN_MODE_C1) ? 45000UL : 50000UL;
@@ -530,10 +537,12 @@ void SX1262::setup() {
 
   {
     char buf[96];
-    snprintf(buf, sizeof(buf), "freq=%.3fMHz fdev=%lukHz BT=0.5 RxBW=%s",
+    snprintf(buf, sizeof(buf), "freq=%.3fMHz bitrate=%lukbps fdev=%lukHz BT=0.5 RxBW=%s%s",
              this->configured_frequency_hz_ / 1000000.0f,
+             (unsigned long) (bitrate / 1000UL),
              (unsigned long) (freq_dev / 1000UL),
-             (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz");
+             (rx_bw == GFSK_RX_BW_234_3) ? "234kHz" : "312kHz",
+             (this->listen_mode_ == LISTEN_MODE_S1) ? " Manchester/S-mode" : "");
     this->rf_params_str_ = buf;
   }
 
@@ -551,14 +560,15 @@ void SX1262::setup() {
   const uint8_t pkt_len_mode = GFSK_PACKET_FIX_LEN;
   this->cmd_write_(CMD_SET_PACKET_PARAMS,
                    {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_16,
-                    0x10,  // 16 bits sync
+                    static_cast<uint8_t>((this->listen_mode_ == LISTEN_MODE_S1) ? 0x18 : 0x10),  // 24 bits sync for S1, 16 bits for T1/C1
                     GFSK_ADDRESS_FILT_OFF, pkt_len_mode,
                     0xFF,  // max payload
                     GFSK_CRC_OFF, GFSK_WHITENING_OFF});
 
   // IRQ routing -> DIO1
-  const uint16_t mask = this->long_gfsk_packets_ ? (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT)
-                                      : (IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
+  const bool stream_on_sync = this->long_gfsk_packets_ || (this->listen_mode_ == LISTEN_MODE_S1);
+  const uint16_t mask = stream_on_sync ? (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT)
+                                       : (IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
   const uint8_t mask_msb = (uint8_t) ((mask >> 8) & 0xFF);
   const uint8_t mask_lsb = (uint8_t) (mask & 0xFF);
 
@@ -589,6 +599,17 @@ void SX1262::restart_rx() {
   // Bug: previous code hardcoded 0xCD (Format B only) in C1-only mode.
   // Fix: apply the same 3:1 (A:B) cycling used in `both` mode.
   // NOTE: do NOT revert C1-only to a fixed 0xCD; that breaks Format A.
+  if (this->listen_mode_ == LISTEN_MODE_S1) {
+    this->set_s1_sync_word_();
+    this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
+    this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
+    this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
+    this->rx_loaded_ = false;
+    this->rx_idx_ = 0;
+    this->rx_len_ = 0;
+    return;
+  }
+
   uint8_t sync2;
   if (this->listen_mode_ == LISTEN_MODE_T1) {
     sync2 = 0x3D;
@@ -622,7 +643,7 @@ void SX1262::restart_rx() {
 // ---------------------------------------------------------------------------
 optional<uint8_t> SX1262::read() {
   if (!this->rx_loaded_) {
-    if (this->long_gfsk_packets_) {
+    if (this->long_gfsk_packets_ || this->listen_mode_ == LISTEN_MODE_S1) {
       // Don't start a long capture unless an IRQ is latched (SyncWordValid / RxDone / Timeout / CRCError).
       // Otherwise we'd stop RX periodically and miss frames.
       const uint16_t irq = this->get_irq_status_();

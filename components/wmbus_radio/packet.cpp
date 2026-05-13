@@ -110,6 +110,7 @@ LinkMode Packet::link_mode() {
 }
 
 void Packet::set_rssi(int8_t rssi) { this->rssi_ = rssi; }
+void Packet::set_forced_link_mode(LinkMode mode) { this->link_mode_ = mode; }
 
 // Get value of L-field (best-effort; for RAW-only we avoid depending on this early)
 uint8_t Packet::l_field() {
@@ -126,6 +127,12 @@ uint8_t Packet::l_field() {
       if (decoded && !decoded->empty()) return (*decoded)[0];
       break;
     }
+
+    case LinkMode::S1:
+      // S-mode is Manchester-coded. The receiver task uses raw-drain for S1,
+      // so early expected_size is intentionally unknown here. Full decode is
+      // attempted in convert_to_frame().
+      return 0;
 
     default:
       break;
@@ -404,6 +411,134 @@ static ParseAttemptResult try_parse_c1_(const std::vector<uint8_t> &raw) {
   return out;
 }
 
+static inline uint8_t bit_at_msb_(const std::vector<uint8_t> &raw, size_t bit_index) {
+  const uint8_t b = raw[bit_index >> 3];
+  return (uint8_t) ((b >> (7 - (bit_index & 7))) & 0x01);
+}
+
+// S-mode/S1 uses Manchester coding at 32.768 kcps. Try both common polarities:
+// polarity=false: 01 -> 0, 10 -> 1
+// polarity=true : 01 -> 1, 10 -> 0
+static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool polarity,
+                                      std::vector<uint8_t> &decoded,
+                                      uint16_t &symbols_total, uint16_t &symbols_invalid) {
+  decoded.clear();
+  symbols_total = 0;
+  symbols_invalid = 0;
+  const size_t pairs = (raw.size() * 8U) / 2U;
+  if (pairs < 16) return false;
+
+  decoded.reserve((pairs + 7U) / 8U);
+  uint8_t out_byte = 0;
+  uint8_t out_bits = 0;
+
+  for (size_t i = 0; i < pairs; i++) {
+    const uint8_t a = bit_at_msb_(raw, i * 2U);
+    const uint8_t b = bit_at_msb_(raw, i * 2U + 1U);
+    symbols_total++;
+
+    uint8_t bit;
+    if (a == 0 && b == 1) {
+      bit = polarity ? 1 : 0;
+    } else if (a == 1 && b == 0) {
+      bit = polarity ? 0 : 1;
+    } else {
+      symbols_invalid++;
+      bit = 0;
+    }
+
+    out_byte = (uint8_t) ((out_byte << 1) | bit);
+    out_bits++;
+    if (out_bits == 8) {
+      decoded.push_back(out_byte);
+      out_byte = 0;
+      out_bits = 0;
+    }
+  }
+
+  // Ignore incomplete trailing byte; radio tail may stop mid-byte in raw-drain diagnostics.
+  return !decoded.empty();
+}
+
+static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
+  ParseAttemptResult best;
+  best.mode = LinkMode::S1;
+  best.frame_format = "A";
+  best.raw_got_len = raw.size();
+
+  if (raw.size() < 6) {
+    set_attempt_drop_(best, "s1_precheck", "too_short",
+                      "mode=S1 raw_len=" + std::to_string((unsigned) raw.size()) + " min=6");
+    return best;
+  }
+
+  ParseAttemptResult attempts[2];
+  for (int pol = 0; pol < 2; pol++) {
+    auto &out = attempts[pol];
+    out.mode = LinkMode::S1;
+    out.frame_format = "A";
+    out.raw_got_len = raw.size();
+
+    std::vector<uint8_t> decoded;
+    uint16_t total = 0, invalid = 0;
+    if (!manchester_decode_s_mode_(raw, pol != 0, decoded, total, invalid) || decoded.size() < 2) {
+      char detail[160];
+      snprintf(detail, sizeof(detail), "polarity=%d symbols_total=%u symbols_invalid=%u raw_len=%u",
+               pol, (unsigned) total, (unsigned) invalid, (unsigned) raw.size());
+      set_attempt_drop_(out, "s1_manchester", "decode_failed", detail);
+      out.t1_symbols_total = total;
+      out.t1_symbols_invalid = invalid;
+      continue;
+    }
+
+    out.data = std::move(decoded);
+    out.decoded_len = out.data.size();
+    out.t1_symbols_total = total;      // reused as generic symbol counters for S1 diagnostics
+    out.t1_symbols_invalid = invalid;
+
+    const uint8_t l = out.data[0];
+    const size_t want = (size_t) l + 1;
+    const size_t need_total = total_len_format_a_with_crc_(l);
+    out.want_len = need_total;
+    out.got_len = out.data.size();
+
+    if (want < 12 || want > 260) {
+      char detail[160];
+      snprintf(detail, sizeof(detail), "polarity=%d l_field=%u decoded_len=%u want=%u need_total=%u symbols_invalid=%u",
+               pol, (unsigned) l, (unsigned) out.decoded_len, (unsigned) want,
+               (unsigned) need_total, (unsigned) invalid);
+      set_attempt_drop_(out, "s1_l_field", "l_field_invalid", detail);
+      continue;
+    }
+
+    if (out.data.size() < need_total) {
+      out.truncated = true;
+      char detail[160];
+      snprintf(detail, sizeof(detail), "polarity=%d decoded_len=%u need_total=%u l_field=%u symbols_invalid=%u",
+               pol, (unsigned) out.data.size(), (unsigned) need_total, (unsigned) l, (unsigned) invalid);
+      set_attempt_drop_(out, "s1_length_check", "truncated", detail);
+      continue;
+    }
+
+    if (out.data.size() > need_total) out.data.resize(need_total);
+
+    wmbus_common::DLLCRCResult crc_diag;
+    if (!wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
+      std::string detail = dll_crc_detail_(crc_diag) + " polarity=" + std::to_string(pol) +
+                           " symbols_invalid=" + std::to_string((unsigned) invalid);
+      set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", detail);
+      continue;
+    }
+
+    out.dll_crc_removed = crc_diag.removed_bytes;
+    out.final_len = out.data.size();
+    out.ok = true;
+    return out;
+  }
+
+  return pick_better_failure_(attempts[0], attempts[1]);
+}
+
 }  // namespace
 
 std::optional<Frame> Packet::convert_to_frame() {
@@ -428,7 +563,30 @@ std::optional<Frame> Packet::convert_to_frame() {
   this->raw_hex_ = hex_prefix_(this->data_, 256);
 
   const std::vector<uint8_t> raw = this->data_;
+  const bool forced_s1 = (this->link_mode_ == LinkMode::S1);
   const bool looks_c1 = !raw.empty() && raw[0] == WMBUS_MODE_C_PREAMBLE;
+
+  if (forced_s1) {
+    const ParseAttemptResult s1 = try_parse_s1_(raw);
+    this->data_ = s1.data;
+    this->link_mode_ = LinkMode::S1;
+    this->frame_format_ = s1.frame_format;
+    this->truncated_ = s1.truncated;
+    this->want_len_ = s1.want_len;
+    this->got_len_ = s1.got_len;
+    this->decoded_len_ = s1.decoded_len;
+    this->final_len_ = s1.final_len;
+    this->dll_crc_removed_ = s1.dll_crc_removed;
+    this->suffix_ignored_ = s1.suffix_ignored;
+    this->drop_reason_ = s1.drop_reason;
+    this->drop_stage_ = s1.drop_stage;
+    this->drop_detail_ = s1.drop_detail;
+    this->t1_symbols_total_ = s1.t1_symbols_total;
+    this->t1_symbols_invalid_ = s1.t1_symbols_invalid;
+    if (!s1.ok) return {};
+    frame.emplace(this);
+    return frame;
+  }
 
   // Preferred path is based on the first byte, but we always keep a fallback.
   // This avoids a hard one-shot decision where a borderline packet gets pushed

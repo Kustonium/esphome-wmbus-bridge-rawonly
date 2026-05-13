@@ -72,6 +72,7 @@ class SX1262 : public RadioTransceiver {
 
   void set_rf_frequency_(uint32_t freq_hz);
   void set_sync_word_(uint8_t sync2);
+  void set_s1_sync_word_();
 
   bool has_rx_done_();
   bool load_rx_buffer_();

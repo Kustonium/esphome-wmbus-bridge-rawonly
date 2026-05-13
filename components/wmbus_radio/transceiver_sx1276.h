@@ -31,6 +31,7 @@ class SX1276 : public RadioTransceiver {
   bool supports_weak_partial_start_abort() const override { return true; }
   bool consume_rx_abort_request() override;
   uint32_t take_fifo_overrun_count() override;
+  bool transmit_test_frame(ListenMode mode, uint16_t frame_length, uint8_t tx_data_gpio) override;
 
  protected:
   uint32_t configured_frequency_hz_{868950000UL};

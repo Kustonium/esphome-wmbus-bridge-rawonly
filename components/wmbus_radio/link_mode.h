@@ -9,6 +9,7 @@ enum class LinkMode : uint8_t {
   UNKNOWN = 0,
   T1 = 1,
   C1 = 2,
+  S1 = 3,
 };
 
 inline const char *link_mode_name(LinkMode m) {
@@ -17,6 +18,8 @@ inline const char *link_mode_name(LinkMode m) {
       return "T1";
     case LinkMode::C1:
       return "C1";
+    case LinkMode::S1:
+      return "S1";
     default:
       return "??";
   }
