@@ -10,6 +10,10 @@ The ESP receives and validates wM-Bus telegrams, then publishes validated RAW HE
 meter -> SX1262/SX1276 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
 ```
 
+## Start here
+
+New user? Start with [`START_HERE.md`](START_HERE.md). It gives the recommended reading order and explains which file to open first.
+
 ## Design rule
 
 The ESP is a radio bridge, not a meter decoder.
@@ -207,6 +211,7 @@ CC1101 support is available in the component, but it is still experimental. It r
 
 ## Documentation
 
+- [`START_HERE.md`](START_HERE.md)
 - [`DIAGNOSTIC.md`](DIAGNOSTIC.md)
 - [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
 - [`CHIP_SELECTION.md`](CHIP_SELECTION.md)

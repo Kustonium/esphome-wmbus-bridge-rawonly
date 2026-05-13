@@ -10,6 +10,10 @@ ESP odbiera i waliduje telegramy wM-Bus, a następnie publikuje zweryfikowany RA
 licznik -> SX1262/SX1276 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
 ```
 
+## Zacznij tutaj
+
+Nowy użytkownik? Zacznij od [`START_HERE_PL.md`](START_HERE_PL.md). Ten plik prowadzi po repozytorium i pokazuje, co czytać po kolei.
+
 ## Zasada projektu
 
 ESP jest mostem radiowym, nie dekoderem liczników.
@@ -207,6 +211,7 @@ Obsługa CC1101 jest dostępna w komponencie, ale nadal ma status eksperymentaln
 
 ## Dokumentacja
 
+- [`START_HERE_PL.md`](START_HERE_PL.md)
 - [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md)
 - [`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md)
 - [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)
