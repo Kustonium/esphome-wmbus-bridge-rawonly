@@ -25,6 +25,36 @@ wmbus/+/telegram
 
 Nie kopiuj starych `telegram_topic` / `diagnostic_topic`, chyba że celowo potrzebujesz legacy/manual override.
 
+
+## Tryby nasłuchu i częstotliwość
+
+Przykłady startują od:
+
+```yaml
+listen_mode: t1
+```
+
+Dostępne tryby odbioru:
+
+```text
+t1    -> tylko T1, domyślnie 868.950 MHz
+c1    -> tylko C1, domyślnie 868.950 MHz
+both  -> tylko T1/C1, domyślnie 868.950 MHz
+s1    -> tylko S1, domyślnie 868.300 MHz
+```
+
+`both` oznacza tylko T1/C1. S1 jest osobnym trybem odbioru i musi być wybrany jawnie przez `listen_mode: s1`.
+
+`frequency:` jest opcjonalne. Używaj tego tylko wtedy, gdy celowo chcesz nadpisać domyślną częstotliwość trybu, np. do testów kompatybilności:
+
+```yaml
+wmbus_radio:
+  listen_mode: s1
+  frequency: 868.36
+```
+
+Jeżeli poprawny telegram S1 zostanie odebrany, komponent opublikuje surowy telegram do MQTT tak samo jak T1/C1. Dekodowanie wartości licznika nadal zależy od backendu, drivera i klucza szyfrowania.
+
 ## Model diagnostyki
 
 Przykłady używają:

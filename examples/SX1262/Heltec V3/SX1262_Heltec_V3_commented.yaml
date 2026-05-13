@@ -73,6 +73,16 @@ wmbus_radio:
   rx_gain: boosted
   long_gfsk_packets: true
 
+  # EN: Receive mode. Available values: t1, c1, both, s1.
+  #     both means T1/C1 only. S1 is separate and cannot be combined with T1/C1.
+  #     Default frequency: T1/C1/both = 868.950 MHz, S1 = 868.300 MHz.
+  #     Optional frequency override example for S1 compatibility tests:
+  #       frequency: 868.36
+  # PL: Tryb odbioru. Dostępne wartości: t1, c1, both, s1.
+  #     both oznacza tylko T1/C1. S1 jest osobny i nie łączy się z T1/C1.
+  #     Domyślna częstotliwość: T1/C1/both = 868.950 MHz, S1 = 868.300 MHz.
+  #     Przykład opcjonalnego nadpisania częstotliwości dla testów S1:
+  #       frequency: 868.36
   listen_mode: t1
   listen_mode_filter_after_parse: false
 

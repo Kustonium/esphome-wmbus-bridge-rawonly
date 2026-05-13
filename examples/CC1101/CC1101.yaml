@@ -98,6 +98,8 @@ wmbus_radio:
 
     # CC1101 może wymagać ręcznej korekty częstotliwości zależnie od modułu.
     # Nominalnie W-MBus T/C: 868.950 MHz.
+    # S1 jest osobnym trybem i domyślnie używa 868.300 MHz,
+    # ale frequency można jawnie nadpisać do testów kompatybilności.
     frequency: 868.950
 
     cs_pin: GPIO4
@@ -112,6 +114,8 @@ wmbus_radio:
       number: GPIO2
       mode: input
 
+    # listen_mode: t1/c1/both/s1
+    # both = tylko T1/C1; S1 = osobny tryb odbioru
     listen_mode: t1
     listen_mode_filter_after_parse: false
 
