@@ -151,7 +151,7 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO0_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
-            cv.Optional(CONF_FREQUENCY, default=868.950): cv.float_range(min=300.0, max=928.0),
+            cv.Optional(CONF_FREQUENCY): cv.float_range(min=300.0, max=928.0),
             cv.Optional(CONF_OPERATION, default="rx"): cv.one_of("rx", "tx_test", lower=True),
             cv.Optional(CONF_MODE): cv.one_of("t1", "c1", "s1", lower=True),
             cv.Optional(CONF_TX_MODE): cv.one_of("t1", "c1", "s1", lower=True),
@@ -335,19 +335,6 @@ async def to_code(config):
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(radio_var.set_reset_pin(reset_pin))
 
-    if config[CONF_RADIO_TYPE] == "CC1101":
-        gdo0_pin = await cg.gpio_pin_expression(config[CONF_GDO0_PIN])
-        gdo2_pin = await cg.gpio_pin_expression(config[CONF_GDO2_PIN])
-        cg.add(radio_var.set_gdo0_pin(gdo0_pin))
-        cg.add(radio_var.set_gdo2_pin(gdo2_pin))
-        cg.add(radio_var.set_frequency_mhz(config.get(CONF_FREQUENCY, 868.950)))
-        # Receiver task wake-up interrupt is the sync-detect line.
-        cg.add(radio_var.set_irq_pin(gdo2_pin))
-    else:
-        # SX1262/SX1276: keep the same default (868.950 MHz), allow YAML override
-        # only when the user explicitly sets a different frequency value.
-        cg.add(radio_var.set_frequency_mhz(config.get(CONF_FREQUENCY, 868.950)))
-
     ListenMode = radio_ns.enum("ListenMode", is_class=False)
     listen_mode_map = {
         "t1": ListenMode.LISTEN_MODE_T1,
@@ -358,7 +345,27 @@ async def to_code(config):
     tx_mode_str = config.get(CONF_TX_MODE) or config.get(CONF_MODE) or config[CONF_LISTEN_MODE]
     if tx_mode_str == "both":
         tx_mode_str = "t1"
-    effective_listen_mode = tx_mode_str if config.get(CONF_OPERATION, "rx") == "tx_test" else config[CONF_LISTEN_MODE]
+    operation = config.get(CONF_OPERATION, "rx")
+    effective_listen_mode = tx_mode_str if operation == "tx_test" else config[CONF_LISTEN_MODE]
+
+    # Mode-aware frequency defaults:
+    # - T1/C1/both keep the legacy 868.950 MHz default.
+    # - S1 defaults to 868.300 MHz.
+    # An explicit `frequency:` value in YAML always overrides the mode default.
+    default_frequency_mhz = 868.300 if effective_listen_mode == "s1" else 868.950
+    frequency_mhz = config[CONF_FREQUENCY] if CONF_FREQUENCY in config else default_frequency_mhz
+
+    if config[CONF_RADIO_TYPE] == "CC1101":
+        gdo0_pin = await cg.gpio_pin_expression(config[CONF_GDO0_PIN])
+        gdo2_pin = await cg.gpio_pin_expression(config[CONF_GDO2_PIN])
+        cg.add(radio_var.set_gdo0_pin(gdo0_pin))
+        cg.add(radio_var.set_gdo2_pin(gdo2_pin))
+        cg.add(radio_var.set_frequency_mhz(frequency_mhz))
+        # Receiver task wake-up interrupt is the sync-detect line.
+        cg.add(radio_var.set_irq_pin(gdo2_pin))
+    else:
+        cg.add(radio_var.set_frequency_mhz(frequency_mhz))
+
     cg.add(radio_var.set_listen_mode(listen_mode_map[effective_listen_mode]))
 
     if config[CONF_RADIO_TYPE] != "CC1101":
