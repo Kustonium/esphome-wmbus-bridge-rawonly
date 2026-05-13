@@ -6,11 +6,31 @@
 |---|---:|---|---|
 | `radio_type` | wymagane | public | `SX1262`, `SX1276`, `CC1101` |
 | `topic_name` | `esphome.name` | public | nazwa bazowa topiców: `wmbus/<topic_name>/...`; bez `/`, spacji, `+`, `#` |
-| `listen_mode` | `both` | public | `t1`, `c1`, `both` |
+| `listen_mode` | `both` | public | `t1`, `c1`, `both` = T1/C1 only, `s1` = experimental S1 only |
+| `frequency` | mode default | public | optional override; T1/C1/both default `868.950 MHz`, S1 default `868.300 MHz` |
 | `diagnostic_mode` | `off` | public | `off`, `low`, `normal`, `debug`, `dev` |
 | `highlight_meters` | puste | public | ID liczników do wyróżnienia i statystyk w `normal/debug` |
 | `receiver_task_stack_size` | `3072` | advanced | stos osobnego taska RX, zakres `2048..16384` |
 | `listen_mode_filter_after_parse` | `false` | experimental | agresywniejsze filtrowanie po parserze; testować po licznikach, nie po samym globalnym drop% |
+
+## Listen modes and frequency / tryby nasłuchu i częstotliwość
+
+| Tryb | Znaczenie | Domyślna częstotliwość | Uwagi |
+|---|---|---:|---|
+| `t1` | T1 only / tylko T1 | `868.950 MHz` | standardowy tryb dla wielu liczników |
+| `c1` | C1 only / tylko C1 | `868.950 MHz` | osobny odbiór C1 |
+| `both` | T1/C1 only / tylko T1/C1 | `868.950 MHz` | nie obejmuje S1 |
+| `s1` | S1 only / tylko S1 | `868.300 MHz` | eksperymentalny tryb diagnostyczny/kompatybilności |
+
+`frequency:` jest opcjonalnym override. Jeśli go nie podasz, komponent wybiera default na podstawie trybu. Przykład override dla testów S1:
+
+```yaml
+wmbus_radio:
+  listen_mode: s1
+  frequency: 868.36
+```
+
+Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo jak poprawne telegramy T1/C1. To nie oznacza dekodowania wartości licznika na ESP; tym nadal zajmuje się backend, np. `wmbusmeters`.
 
 ## MQTT topics / topiki MQTT
 

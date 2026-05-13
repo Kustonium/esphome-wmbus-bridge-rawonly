@@ -177,7 +177,33 @@ highlight_meters:
 sx1276_busy_ether_mode: adaptive
 ```
 
-## 10. The shortest decision path
+## 10. S1 mode receives nothing
+
+First check the expectation: `listen_mode: s1` is a dedicated S1-only RF profile. It is not part of `both`.
+
+Default frequencies:
+
+- `t1`, `c1`, `both` -> `868.950 MHz`
+- `s1` -> `868.300 MHz`
+
+If you are testing devices that may use a shifted S-mode frequency, override it explicitly:
+
+```yaml
+listen_mode: s1
+frequency: 868.36
+```
+
+If valid S1 telegrams are received, they are forwarded to MQTT like T1/C1 telegrams. If nothing appears at all, likely causes are:
+
+- the device is not standard passive S1,
+- the device uses a proprietary or polling-based system,
+- the actual frequency is different,
+- the device transmits very rarely,
+- the antenna/location is poor.
+
+Do not debug meter drivers or AES keys until the ESP publishes valid telegrams to MQTT.
+
+## 11. The shortest decision path
 
 - use `SX1262` if reliability matters,
 - use `SX1276` only when the environment is easier or the traffic is slower,

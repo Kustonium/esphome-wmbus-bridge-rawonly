@@ -25,7 +25,7 @@ ESP nie robi:
 
 ESP robi:
 
-- odbiór ramek T1/C1,
+- odbiór ramek T1/C1 oraz eksperymentalny odbiór S1,
 - walidację i normalizację telegramów,
 - publikację poprawnego HEX telegramu do MQTT,
 - diagnostykę RF.
@@ -82,7 +82,46 @@ highlight_meters:
 
 To włącza snapshoty per licznik dla najważniejszych liczników.
 
-## 3. Topiki MQTT: nie składaj ich ręcznie
+
+## 3. Wybierz tryb odbioru i częstotliwość
+
+Dla większości instalacji zacznij od T1 albo T1/C1:
+
+```yaml
+wmbus_radio:
+  listen_mode: t1
+```
+
+```yaml
+wmbus_radio:
+  listen_mode: both
+```
+
+`both` oznacza tylko T1/C1. Nie obejmuje S1.
+
+S1 jest eksperymentalnym, osobnym trybem odbioru:
+
+```yaml
+wmbus_radio:
+  listen_mode: s1
+```
+
+Domyślne częstotliwości zależą od trybu:
+
+- `t1`, `c1`, `both` -> `868.950 MHz`
+- `s1` -> `868.300 MHz`
+
+Używaj `frequency:` tylko wtedy, gdy musisz nadpisać domyślną wartość, na przykład do testów kompatybilności S1:
+
+```yaml
+wmbus_radio:
+  listen_mode: s1
+  frequency: 868.36
+```
+
+Jeżeli poprawny telegram S1 zostanie odebrany, zostanie przekazany do MQTT tak jak inne zweryfikowane telegramy wM-Bus. Dekodowanie po stronie backendu nadal zależy od typu urządzenia, drivera i klucza szyfrowania.
+
+## 4. Topiki MQTT: nie składaj ich ręcznie
 
 Przeczytaj:
 
@@ -109,7 +148,7 @@ Jeśli `topic_name` nie jest podany, używany jest `esphome.name`.
 
 Stare ręczne ustawienia typu `telegram_topic` i `diagnostic_topic` nadal działają, ale nie powinny być używane w nowych konfiguracjach, chyba że naprawdę tego potrzebujesz.
 
-## 4. Wgraj ESP i najpierw sprawdź tylko warstwę RF/MQTT
+## 5. Wgraj ESP i najpierw sprawdź tylko warstwę RF/MQTT
 
 Zanim skonfigurujesz liczniki w backendzie, udowodnij, że odbiornik ESP działa.
 
@@ -130,7 +169,7 @@ wmbus/<device>/diag/meter_snapshot
 
 Nie debuguj kluczy AES, driverów liczników ani encji Home Assistant, dopóki nie wiesz, że RF/MQTT działa.
 
-## 5. Zrozum diagnostykę
+## 6. Zrozum diagnostykę
 
 Przeczytaj:
 
@@ -152,7 +191,7 @@ To daje:
 
 `debug` albo `dev` używaj tylko do krótkich testów. Nie trzymaj pełnej diagnostyki developerskiej cały czas.
 
-## 6. Jeśli coś nie działa, idź ścieżką troubleshooting
+## 7. Jeśli coś nie działa, idź ścieżką troubleshooting
 
 Przeczytaj:
 
@@ -167,7 +206,7 @@ Krótka wersja:
 5. Czy dropy są losowe, CRC, false-start-like czy związane z trybem?
 6. Dopiero po potwierdzeniu RF/MQTT debuguj backend.
 
-## 7. Skonfiguruj backend
+## 8. Skonfiguruj backend
 
 To repozytorium jest tylko odbiornikiem RF ESP.
 
@@ -183,7 +222,7 @@ wmbus/+/telegram
 
 ID liczników, drivery, klucze AES, JSON i Home Assistant Discovery należą do backendu, nie do komponentu ESP.
 
-## 8. Czytaj głębiej tylko wtedy, gdy trzeba
+## 9. Czytaj głębiej tylko wtedy, gdy trzeba
 
 Używaj tych plików zależnie od pytania:
 
@@ -199,7 +238,7 @@ Używaj tych plików zależnie od pytania:
 | Jak SX1262 wypada względem SX1276? | [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md) |
 | Jaki jest zakres projektu/supportu? | [`SUPPORT.md`](SUPPORT.md) |
 
-## 9. Gdzie pytać
+## 10. Gdzie pytać
 
 Używaj:
 
@@ -220,7 +259,7 @@ Przed pytaniem o pomoc podaj:
 
 Nie ma logów — nie ma supportu.
 
-## 10. Najkrótsza ścieżka
+## 11. Najkrótsza ścieżka
 
 ```text
 1. Przeczytaj START_HERE_PL.md.

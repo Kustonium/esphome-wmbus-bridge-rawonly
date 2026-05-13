@@ -10,7 +10,7 @@ The component publishes only telegrams that passed the internal wM-Bus frame che
 radio IRQ
   -> read PHY bytes from SX1262/SX1276
   -> build a packet candidate
-  -> detect link mode hint: T1 or C1
+  -> detect link mode hint: T1, C1 or forced S1
   -> calculate expected candidate length
   -> parse and validate the candidate
   -> remove DLL CRC bytes
@@ -37,6 +37,30 @@ Common T1 reject stages:
 - `t1_l_field` — invalid decoded L-field,
 - `t1_length_check` — candidate shorter than expected,
 - `dll_crc_first`, `dll_crc_mid`, `dll_crc_final` — DLL CRC failed.
+
+## S1 path
+
+S1 is a dedicated experimental receive path. It is selected explicitly with `listen_mode: s1` and does not participate in `both`.
+
+Current logic:
+
+- configure the radio for the S-mode / Manchester RF profile,
+- force the packet candidate to `LinkMode::S1`,
+- read raw bytes after S1 sync,
+- try Manchester decoding,
+- validate the L-field and DLL CRC blocks,
+- publish the validated telegram HEX to MQTT,
+- drop the candidate if Manchester, length or CRC validation fails.
+
+Common S1 reject stages:
+
+- `s1_precheck` — candidate too short,
+- `s1_manchester` — Manchester decoding failed,
+- `s1_l_field` — invalid decoded L-field,
+- `s1_length_check` — candidate shorter than expected,
+- `dll_crc_*` — DLL CRC failed.
+
+`listen_mode: both` remains T1/C1 only. S1 must be selected explicitly and uses its own RF profile and default frequency.
 
 ## C1 path
 
@@ -66,6 +90,7 @@ Common C1 reject stages:
 That means:
 
 - T1 was decoded from 3-out-of-6,
+- S1 was decoded from Manchester coding,
 - C1 was normalized by removing the C-mode leading bytes,
 - DLL CRC bytes were validated and stripped,
 - the payload is still not meter-decoded.
@@ -80,6 +105,7 @@ Diagnostics may count or optionally publish failed candidates:
 - `false_start_like`,
 - `preamble_read_failed`,
 - `t1_decode3of6`,
+- `s1_manchester`,
 - `dll_crc_failed`,
 - `truncated`.
 

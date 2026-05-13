@@ -25,7 +25,7 @@ The ESP does not:
 
 The ESP does:
 
-- receive T1/C1 frames,
+- receive T1/C1 frames and experimental S1 frames,
 - validate/normalize telegrams,
 - publish valid telegram HEX to MQTT,
 - publish RF diagnostics.
@@ -82,7 +82,46 @@ highlight_meters:
 
 This enables per-meter snapshots for the meters that matter.
 
-## 3. MQTT topics: do not build them manually
+
+## 3. Pick the receive mode and frequency
+
+For most installations, start with T1 or T1/C1:
+
+```yaml
+wmbus_radio:
+  listen_mode: t1
+```
+
+```yaml
+wmbus_radio:
+  listen_mode: both
+```
+
+`both` means T1/C1 only. It does not include S1.
+
+S1 is an experimental dedicated receive mode:
+
+```yaml
+wmbus_radio:
+  listen_mode: s1
+```
+
+Default frequencies are mode-aware:
+
+- `t1`, `c1`, `both` -> `868.950 MHz`
+- `s1` -> `868.300 MHz`
+
+Use `frequency:` only when you need to override the default, for example for S1 compatibility tests:
+
+```yaml
+wmbus_radio:
+  listen_mode: s1
+  frequency: 868.36
+```
+
+If a valid S1 telegram is received, it is forwarded to MQTT like other validated wM-Bus telegrams. Backend decoding still depends on the meter type, driver and encryption key.
+
+## 4. MQTT topics: do not build them manually
 
 Read:
 
@@ -109,7 +148,7 @@ If `topic_name` is omitted, `esphome.name` is used.
 
 Legacy manual overrides such as `telegram_topic` and `diagnostic_topic` still work, but should not be used in new configs unless you really need them.
 
-## 4. Flash the ESP and check only the RF/MQTT layer first
+## 5. Flash the ESP and check only the RF/MQTT layer first
 
 Before configuring meters in the backend, prove that the ESP receiver works.
 
@@ -130,7 +169,7 @@ wmbus/<device>/diag/meter_snapshot
 
 Do not debug AES keys, meter drivers, or Home Assistant entities before you know that RF/MQTT works.
 
-## 5. Understand diagnostics
+## 6. Understand diagnostics
 
 Read:
 
@@ -152,7 +191,7 @@ This gives:
 
 Use `debug` or `dev` only for short tests. Do not run full developer diagnostics forever.
 
-## 6. If something does not work, follow the troubleshooting path
+## 7. If something does not work, follow the troubleshooting path
 
 Read:
 
@@ -167,7 +206,7 @@ The short version:
 5. Are drops random, CRC-related, false-start-like, or mode-related?
 6. Only after RF/MQTT is proven, debug backend decoding.
 
-## 7. Configure the backend
+## 8. Configure the backend
 
 This repository is only the ESP RF receiver.
 
@@ -183,7 +222,7 @@ wmbus/+/telegram
 
 Meter IDs, drivers, AES keys, JSON output, and Home Assistant Discovery belong to the backend side, not to this ESP component.
 
-## 8. Read deeper only when needed
+## 9. Read deeper only when needed
 
 Use these files depending on the question:
 
@@ -199,7 +238,7 @@ Use these files depending on the question:
 | How does SX1262 compare with SX1276? | [`BENCHMARKS.md`](BENCHMARKS.md) |
 | What is the project scope/support rule? | [`SUPPORT.md`](SUPPORT.md) |
 
-## 9. Where to ask
+## 10. Where to ask
 
 Use:
 
@@ -220,7 +259,7 @@ Before asking for help, include:
 
 No logs, no support.
 
-## 10. The shortest path
+## 11. The shortest path
 
 ```text
 1. Read START_HERE.md.

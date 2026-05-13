@@ -1,3 +1,37 @@
+# Current documentation note
+
+## EN
+
+### Added
+- Experimental S1 receive mode.
+- `listen_mode: s1` uses a dedicated S1 receive path and does not fall back to T1/C1 parsing.
+- `listen_mode: both` remains T1/C1 only.
+- `listen_mode: s1` defaults to `868.300 MHz`; T1/C1/both remain at `868.950 MHz`.
+- Explicit `frequency:` in YAML still overrides the mode default.
+
+### Notes
+- S1 support is intended for diagnostics and compatibility testing.
+- If a valid S1 telegram is received, it is published to MQTT like other validated wM-Bus telegrams.
+- Meter-value decoding remains external and depends on the backend driver and encryption key.
+- Proprietary or polling-based systems may not produce standard passive S1 telegrams.
+
+## PL
+
+### Dodano
+- Eksperymentalny tryb odbioru S1.
+- `listen_mode: s1` używa dedykowanej ścieżki odbioru S1 i nie przechodzi przez logikę T1/C1.
+- `listen_mode: both` nadal oznacza tylko T1/C1.
+- `listen_mode: s1` domyślnie ustawia `868.300 MHz`; T1/C1/both zostają przy `868.950 MHz`.
+- Jawne `frequency:` w YAML nadal nadpisuje domyślną częstotliwość trybu.
+
+### Uwagi
+- Obsługa S1 jest przeznaczona do diagnostyki i testów kompatybilności.
+- Jeżeli poprawny telegram S1 zostanie odebrany, zostanie opublikowany do MQTT tak jak inne zweryfikowane telegramy wM-Bus.
+- Dekodowanie wartości licznika pozostaje po stronie backendu i zależy od drivera oraz klucza szyfrowania.
+- Systemy zamknięte albo odpytywane mogą nie nadawać standardowych pasywnych telegramów S1.
+
+---
+
 **EN**
 
 **Summary**

@@ -25,7 +25,7 @@ It does not:
 - replace `wmbusmeters`.
 
 It does:
-- receive T1/C1 frames,
+- receive T1/C1 frames and experimental S1 frames,
 - validate/normalize telegrams,
 - publish valid telegram HEX to MQTT,
 - publish RF diagnostics.
@@ -111,6 +111,30 @@ wmbus_radio:
 
   # ... SPI/radio pins go here ...
 ```
+
+## Listen modes and frequency
+
+`listen_mode` selects one RF profile for the receiver:
+
+| `listen_mode` | Meaning | Default frequency |
+|---|---|---:|
+| `t1` | T1 only | `868.950 MHz` |
+| `c1` | C1 only | `868.950 MHz` |
+| `both` | T1/C1 only | `868.950 MHz` |
+| `s1` | experimental S1 only | `868.300 MHz` |
+
+`both` means **T1/C1 only**. S1 is a separate receive mode and cannot be combined with T1/C1 in one receiver configuration.
+
+For normal T1/C1 use, `frequency:` can usually be omitted. For S1, the default is `868.300 MHz`, but it can be overridden for compatibility tests, for example:
+
+```yaml
+wmbus_radio:
+  radio_type: SX1262
+  listen_mode: s1
+  frequency: 868.36
+```
+
+If an S1 telegram is received and passes validation, the component publishes it to MQTT the same way as T1/C1 telegrams. Meter-value decoding still happens outside the ESP, for example in `wmbusmeters`, and may require the correct driver and key. Proprietary or polling-based systems may not produce standard passive S1 telegrams.
 
 ## Diagnostic modes
 

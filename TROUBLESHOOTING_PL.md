@@ -177,7 +177,33 @@ highlight_meters:
 sx1276_busy_ether_mode: adaptive
 ```
 
-## 10. Najkrótsza ścieżka decyzji
+## 10. Tryb S1 nic nie odbiera
+
+Najpierw sprawdź założenie: `listen_mode: s1` to dedykowany profil RF tylko dla S1. Nie jest częścią `both`.
+
+Domyślne częstotliwości:
+
+- `t1`, `c1`, `both` -> `868.950 MHz`
+- `s1` -> `868.300 MHz`
+
+Jeżeli testujesz urządzenia, które mogą używać przesuniętej częstotliwości S-mode, nadpisz ją jawnie:
+
+```yaml
+listen_mode: s1
+frequency: 868.36
+```
+
+Jeżeli poprawne telegramy S1 zostaną odebrane, trafią do MQTT tak samo jak telegramy T1/C1. Jeśli nie pojawia się nic, prawdopodobne przyczyny to:
+
+- urządzenie nie nadaje standardowego pasywnego S1,
+- urządzenie używa systemu zamkniętego albo odpytywanego,
+- rzeczywista częstotliwość jest inna,
+- urządzenie nadaje bardzo rzadko,
+- antena albo lokalizacja są słabe.
+
+Nie debuguj driverów liczników ani kluczy AES, dopóki ESP nie publikuje poprawnych telegramów do MQTT.
+
+## 11. Najkrótsza ścieżka decyzji
 
 - użyj `SX1262`, jeśli zależy Ci na niezawodności,
 - używaj `SX1276` tylko wtedy, gdy środowisko jest łatwiejsze albo ruch wolniejszy,
