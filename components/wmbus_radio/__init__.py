@@ -92,14 +92,6 @@ CONF_GDO0_PIN = "gdo0_pin"
 CONF_GDO2_PIN = "gdo2_pin"
 CONF_CC1101_ALLOW_EXPERIMENTAL = "cc1101_allow_experimental"
 CONF_FREQUENCY = "frequency"
-CONF_OPERATION = "operation"
-CONF_MODE = "mode"
-CONF_TX_MODE = "tx_mode"
-CONF_FRAME_LENGTH = "frame_length"
-CONF_LENGTH_FRAME = "length_frame"
-CONF_INTERVAL = "interval"
-CONF_INTERWAL = "interwal"
-CONF_TX_DATA_GPIO = "tx_data_gpio"
 
 radio_ns = cg.esphome_ns.namespace("wmbus_radio")
 RadioComponent = radio_ns.class_("Radio", cg.Component)
@@ -152,14 +144,6 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
             cv.Optional(CONF_FREQUENCY): cv.float_range(min=300.0, max=928.0),
-            cv.Optional(CONF_OPERATION, default="rx"): cv.one_of("rx", "tx_test", lower=True),
-            cv.Optional(CONF_MODE): cv.one_of("t1", "c1", "s1", lower=True),
-            cv.Optional(CONF_TX_MODE): cv.one_of("t1", "c1", "s1", lower=True),
-            cv.Optional(CONF_FRAME_LENGTH, default=40): cv.int_range(min=10, max=255),
-            cv.Optional(CONF_LENGTH_FRAME): cv.int_range(min=10, max=255),
-            cv.Optional(CONF_INTERVAL, default="30s"): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_INTERWAL): cv.positive_time_period_milliseconds,
-            cv.Optional(CONF_TX_DATA_GPIO, default=34): cv.int_range(min=0, max=48),
             cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
                 "t1", "c1", "s1", "both", lower=True
             ),
@@ -258,9 +242,6 @@ BASE_CONFIG_SCHEMA = (
 def _validate_radio_pins(config):
     radio_type = config[CONF_RADIO_TYPE].upper()
 
-    if config.get(CONF_OPERATION, "rx") == "tx_test" and radio_type != "SX1276":
-        raise cv.Invalid("tx_test currently supports SX1276 only / tx_test obecnie obsluguje tylko SX1276")
-
     if radio_type == "CC1101":
         if not config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid(
@@ -342,11 +323,7 @@ async def to_code(config):
         "both": ListenMode.LISTEN_MODE_BOTH,
         "s1": ListenMode.LISTEN_MODE_S1,
     }
-    tx_mode_str = config.get(CONF_TX_MODE) or config.get(CONF_MODE) or config[CONF_LISTEN_MODE]
-    if tx_mode_str == "both":
-        tx_mode_str = "t1"
-    operation = config.get(CONF_OPERATION, "rx")
-    effective_listen_mode = tx_mode_str if operation == "tx_test" else config[CONF_LISTEN_MODE]
+    effective_listen_mode = config[CONF_LISTEN_MODE]
 
     # Mode-aware frequency defaults:
     # - T1/C1/both keep the legacy 868.950 MHz default.
@@ -384,10 +361,6 @@ async def to_code(config):
     cg.add(var.set_radio(radio_var))
     cg.add(var.set_receiver_task_stack_size(config[CONF_RECEIVER_TASK_STACK_SIZE]))
     cg.add(var.set_listen_mode_filter_after_parse(config[CONF_LISTEN_MODE_FILTER_AFTER_PARSE]))
-
-    tx_interval = config[CONF_INTERWAL] if CONF_INTERWAL in config else config[CONF_INTERVAL]
-    tx_frame_length = config[CONF_LENGTH_FRAME] if CONF_LENGTH_FRAME in config else config[CONF_FRAME_LENGTH]
-    cg.add(var.set_tx_test_config(config.get(CONF_OPERATION, "rx") == "tx_test", listen_mode_map[tx_mode_str], tx_frame_length, tx_interval.total_milliseconds, config[CONF_TX_DATA_GPIO]))
 
     topic_name = config.get(CONF_TOPIC_NAME) or CORE.name
     if not topic_name:
