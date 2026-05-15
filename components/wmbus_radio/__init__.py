@@ -50,6 +50,9 @@ CONF_DIO2_RF_SWITCH = "dio2_rf_switch"
 CONF_RF_SWITCH = "rf_switch"  # alias used by some configs
 CONF_HAS_TCXO = "has_tcxo"
 
+# SX1276 board helper: optional external TCXO enable/power pin.
+CONF_TCXO_PIN = "tcxo_pin"
+
 # RX gain option (datasheet: boosted / power_saving)
 CONF_RX_GAIN = "rx_gain"
 CONF_LONG_GFSK_PACKETS = "long_gfsk_packets"
@@ -171,6 +174,9 @@ BASE_CONFIG_SCHEMA = (
             ),
             cv.Optional(CONF_LONG_GFSK_PACKETS, default=False): cv.boolean,
 
+            # SX1276-specific board helper (for boards such as LilyGO T3 V3.0 TCXO).
+            cv.Optional(CONF_TCXO_PIN): pins.internal_gpio_output_pin_schema,
+
             # Heltec V4 FEM pins (optional, only makes sense for SX1262)
             cv.Optional(CONF_FEM_CTRL_PIN): pins.internal_gpio_output_pin_schema,
             cv.Optional(CONF_FEM_EN_PIN): pins.internal_gpio_output_pin_schema,
@@ -242,6 +248,9 @@ BASE_CONFIG_SCHEMA = (
 def _validate_radio_pins(config):
     radio_type = config[CONF_RADIO_TYPE].upper()
 
+    if CONF_TCXO_PIN in config and radio_type != "SX1276":
+        raise cv.Invalid("tcxo_pin is only valid for radio_type: SX1276. For SX1262 use has_tcxo instead.")
+
     if radio_type == "CC1101":
         if not config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid(
@@ -311,6 +320,11 @@ async def to_code(config):
         if CONF_FEM_PA_PIN in config:
             p = await cg.gpio_pin_expression(config[CONF_FEM_PA_PIN])
             cg.add(radio_var.set_fem_pa_pin(p))
+
+
+    if config[CONF_RADIO_TYPE] == "SX1276" and CONF_TCXO_PIN in config:
+        tcxo_pin = await cg.gpio_pin_expression(config[CONF_TCXO_PIN])
+        cg.add(radio_var.set_tcxo_pin(tcxo_pin))
 
     if config[CONF_RADIO_TYPE] != "CC1101":
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
@@ -479,6 +493,9 @@ async def to_code(config):
             config.get(CONF_LONG_GFSK_PACKETS, False),
             config.get(CONF_RX_GAIN, "boosted"),
         ))
+
+    if config[CONF_RADIO_TYPE] == "SX1276":
+        cg.add(var.set_sx1276_yaml_sanity(CONF_TCXO_PIN in config))
 
     # Log highlight config
     meters = config.get(CONF_HIGHLIGHT_METERS, [])

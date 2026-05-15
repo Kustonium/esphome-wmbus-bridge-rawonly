@@ -21,6 +21,7 @@ class SX1276 : public RadioTransceiver {
   void set_frequency_mhz(float frequency_mhz) {
     this->configured_frequency_hz_ = (uint32_t) (frequency_mhz * 1000000.0f + 0.5f);
   }
+  void set_tcxo_pin(InternalGPIOPin *pin) { this->tcxo_pin_ = pin; }
   void setup() override;
   optional<uint8_t> read() override;
   void restart_rx() override;
@@ -34,6 +35,7 @@ class SX1276 : public RadioTransceiver {
 
  protected:
   uint32_t configured_frequency_hz_{868950000UL};
+  InternalGPIOPin *tcxo_pin_{nullptr};
   uint8_t sync_cycle_{0};
 
   // Burst chunk buffered in ESP32 RAM and served byte-by-byte to upper layer.

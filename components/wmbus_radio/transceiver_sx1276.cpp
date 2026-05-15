@@ -80,6 +80,13 @@ void SX1276::setup() {
   // Here DIO1 is remapped to FifoLevel, which is active-high, so wake on rising edge.
   this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE;
 
+  if (this->tcxo_pin_ != nullptr) {
+    this->tcxo_pin_->setup();
+    this->tcxo_pin_->digital_write(true);
+    delay(10);
+    ESP_LOGI(TAG, "TCXO enable pin set HIGH before radio init / pin TCXO ustawiony HIGH przed inicjalizacja radia");
+  }
+
   this->common_setup();
   ESP_LOGV(TAG, "Setup");
   {

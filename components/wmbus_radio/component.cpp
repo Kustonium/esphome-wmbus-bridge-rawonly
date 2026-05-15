@@ -2104,6 +2104,15 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                busy_mode,
                busy_state,
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
+
+      if (this->sx1276_yaml_sanity_configured_) {
+        ESP_LOGI(TAG, "SX1276 YAML sanity / sprawdzenie YAML SX1276:");
+        if (this->sx1276_yaml_tcxo_pin_configured_) {
+          ESP_LOGI(TAG, "  tcxo_pin: configured -> TCXO enable pin driven HIGH before radio init / pin TCXO ustawiany HIGH przed inicjalizacja radia");
+        } else {
+          ESP_LOGI(TAG, "  tcxo_pin: not configured -> OK for normal SX1276 boards; LilyGO T3 V3.0 TCXO uses tcxo_pin: GPIO12 / OK dla zwyklych plytek SX1276; LilyGO T3 V3.0 TCXO uzywa tcxo_pin: GPIO12");
+        }
+      }
     } else if (strcmp(radio_name, "SX1262") == 0 && this->sx1262_yaml_sanity_configured_) {
       const bool t1_like = this->radio->get_listen_mode() == LISTEN_MODE_T1 || this->radio->get_listen_mode() == LISTEN_MODE_BOTH;
 

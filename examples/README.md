@@ -2,13 +2,13 @@
 
 [Polska wersja](README_PL.md)
 
-Public examples are provided only for SX1262,SX1276,CC1101 boards.
+Public examples are provided for SX1262, SX1276 and CC1101 boards.
 
 CC1101 support is available, but still experimental. It requires explicit YAML opt-in and proper GDO0/GDO2 wiring. This example is provided for advanced/testing use, not as the recommended user path.
 
 ## Topic model
 
-Examples use the new automatic MQTT topic model.
+Examples use the automatic MQTT topic model.
 
 If `topic_name` is omitted, the component uses `esphome.name` and generates:
 
@@ -25,6 +25,7 @@ wmbus/+/telegram
 
 Do not copy old `telegram_topic` / `diagnostic_topic` snippets unless you intentionally need a legacy/manual override.
 
+If the MQTT broker is unavailable at runtime, radio reception continues and frames are still visible in local logs. MQTT publishing is skipped with a throttled warning.
 
 ## Listen modes and frequency
 
@@ -54,6 +55,35 @@ wmbus_radio:
 ```
 
 If a valid S1 telegram is received, the component publishes the raw telegram to MQTT the same way as T1/C1. Decoding meter values still depends on the backend, driver and encryption key.
+
+## SX1262 board-level options
+
+SX1262 examples use explicit board-level options instead of guessing the board wiring:
+
+```yaml
+has_tcxo: true
+dio2_rf_switch: true
+rx_gain: boosted
+long_gfsk_packets: true
+```
+
+The component prints a multiline SX1262 YAML sanity report during boot. Risky settings, such as missing `has_tcxo: true` on TCXO-based boards or disabled `long_gfsk_packets` in T1/both modes, are reported as warnings but do not block startup.
+
+## SX1276 TCXO boards
+
+Normal SX1276 boards do not require a TCXO option.
+
+Some SX1276 boards expose a dedicated TCXO enable pin. For those boards, configure it explicitly:
+
+```yaml
+wmbus_radio:
+  radio_type: SX1276
+  tcxo_pin: GPIO12
+```
+
+Example: LILYGO T3 V3.0 TCXO OLED LoRa32 uses `tcxo_pin: GPIO12`.
+
+The component does not auto-detect board wiring. Check the board schematic or vendor documentation before setting `tcxo_pin`.
 
 ## Diagnostic model
 
@@ -85,4 +115,4 @@ diagnostic_mode: debug
 Each board has two variants:
 
 - `*_clean.yaml` — minimal practical config,
-- `*_commented.yaml` — same idea with comments and explanations.
+- `*_commented.yaml` — same idea with bilingual comments and explanations.

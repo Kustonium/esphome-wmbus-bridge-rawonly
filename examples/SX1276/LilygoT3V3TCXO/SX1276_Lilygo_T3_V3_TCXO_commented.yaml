@@ -1,0 +1,114 @@
+# ESPHome wM-Bus Bridge RAW-only — LILYGO T3 V3.0 TCXO OLED LoRa32 / SX1276
+# EN: Commented example for the SX1276 TCXO variant.
+# PL: Przykład z komentarzami dla wariantu SX1276 z TCXO.
+#
+# EN: This board has a dedicated TCXO enable pin.
+#     The component sets tcxo_pin HIGH before SX1276 radio initialization.
+# PL: Ta płytka ma osobny pin włączający TCXO.
+#     Komponent ustawia tcxo_pin w stan HIGH przed inicjalizacją radia SX1276.
+
+substitutions:
+  devicename: esphome-wmbus-lilygo-t3-v3-tcxo
+  friendly_name: "wMBus Bridge LilyGO T3 V3 TCXO"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32dev
+  variant: ESP32
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+    wmbus: info
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+
+api:
+ota:
+  - platform: esphome
+mdns:
+  disabled: false
+time:
+  - platform: homeassistant
+
+# EN: Pinout based on LILYGO T3 V3.0 SX1276 TCXO documentation.
+# PL: Pinout na podstawie dokumentacji LILYGO T3 V3.0 SX1276 TCXO.
+#
+# SX1276       ESP32
+# ------------------
+# SCK      ->  GPIO5
+# MISO     ->  GPIO19
+# MOSI     ->  GPIO27
+# RESET    ->  GPIO23
+# DIO1     ->  GPIO32  (used as IRQ by this component)
+# CS       ->  GPIO7
+# TCXO EN  ->  GPIO12
+spi:
+  clk_pin: GPIO5
+  mosi_pin: GPIO27
+  miso_pin: GPIO19
+
+wmbus_radio:
+  radio_type: SX1276
+  cs_pin: GPIO7
+  reset_pin: GPIO23
+
+  # EN: The SX1276 receiver path in this component uses DIO1/FifoLevel as IRQ.
+  #     Do not blindly copy examples that use DIO0/RxDone as irq_pin.
+  # PL: Ścieżka odbioru SX1276 w tym komponencie używa DIO1/FifoLevel jako IRQ.
+  #     Nie kopiuj bezmyślnie przykładów, które używają DIO0/RxDone jako irq_pin.
+  irq_pin:
+    number: GPIO32
+    mode: input
+
+  # EN: LILYGO T3 V3.0 TCXO uses GPIO12 as TCXO enable.
+  #     This option is explicit and board-specific. It is not needed for normal SX1276 boards.
+  # PL: LILYGO T3 V3.0 TCXO używa GPIO12 jako TCXO enable.
+  #     Ta opcja jest jawna i zależy od płytki. Zwykłe płytki SX1276 jej nie wymagają.
+  tcxo_pin: GPIO12
+
+  # EN: Receive mode. Available values: t1, c1, both, s1.
+  #     both means T1/C1 only. S1 is separate and cannot be combined with T1/C1.
+  #     Default frequency: T1/C1/both = 868.950 MHz, S1 = 868.300 MHz.
+  # PL: Tryb odbioru. Dostępne wartości: t1, c1, both, s1.
+  #     both oznacza tylko T1/C1. S1 jest osobny i nie łączy się z T1/C1.
+  #     Domyślna częstotliwość: T1/C1/both = 868.950 MHz, S1 = 868.300 MHz.
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+
+  # EN: adaptive is the recommended default for dense RF environments on SX1276.
+  # PL: adaptive to zalecany domyślny tryb dla SX1276 w gęstym eterze.
+  sx1276_busy_ether_mode: adaptive
+
+  # EN: Diagnostic preset. Normal mode gives summary + 15min summary + highlighted meter snapshots.
+  # PL: Preset diagnostyczny. Normal daje summary + summary 15 min + snapshot wyróżnionych liczników.
+  diagnostic_mode: normal
+  diagnostic_summary_interval: 60s
+
+  # EN: Optional selected meters for meter_snapshot in diagnostic_mode: normal.
+  # PL: Opcjonalne wyróżnione liczniki do meter_snapshot w diagnostic_mode: normal.
+  # highlight_meters:
+  #   - "00089907"
+  #   - "03534159"

@@ -73,6 +73,10 @@ public:
     this->sx1262_yaml_long_gfsk_packets_ = long_gfsk_packets;
     this->sx1262_yaml_rx_gain_ = rx_gain;
   }
+  void set_sx1276_yaml_sanity(bool tcxo_pin_configured) {
+    this->sx1276_yaml_sanity_configured_ = true;
+    this->sx1276_yaml_tcxo_pin_configured_ = tcxo_pin_configured;
+  }
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
   void set_tx_test_config(bool enabled, ListenMode mode, uint16_t frame_length, uint32_t interval_ms, uint8_t tx_data_gpio) {
     this->tx_test_enabled_ = enabled;
@@ -393,6 +397,11 @@ protected:
   bool sx1262_yaml_long_gfsk_packets_{false};
   std::string sx1262_yaml_rx_gain_{"boosted"};
   bool sx1262_yaml_warning_logged_{false};
+
+  // SX1276 YAML sanity state. tcxo_pin is optional: normal SX1276 boards do not need it,
+  // but boards such as LilyGO T3 V3.0 TCXO use GPIO12 as TCXO enable.
+  bool sx1276_yaml_sanity_configured_{false};
+  bool sx1276_yaml_tcxo_pin_configured_{false};
 
   // Adaptive busy-ether hold state: aggressive mode stays active until this timestamp (ms).
   // Updated once per diagnostic summary window by evaluate_busy_ether_adaptive_().
