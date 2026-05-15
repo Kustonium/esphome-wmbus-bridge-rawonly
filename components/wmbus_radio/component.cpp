@@ -2073,7 +2073,7 @@ void Radio::loop() {
   const uint32_t loop_now_ms = (uint32_t) esphome::millis();
 
 if (!this->boot_log_done_ && this->radio != nullptr) {
-  if (loop_now_ms - this->boot_log_last_ms_ >= 5000) {
+  if (loop_now_ms - this->boot_log_last_ms_ >= 10000) {
     const char *radio_name = this->radio->get_name();
 
     if (strcmp(radio_name, "SX1276") == 0) {
@@ -2104,6 +2104,45 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                busy_mode,
                busy_state,
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
+    } else if (strcmp(radio_name, "SX1262") == 0 && this->sx1262_yaml_sanity_configured_) {
+      const bool t1_like = this->radio->get_listen_mode() == LISTEN_MODE_T1 || this->radio->get_listen_mode() == LISTEN_MODE_BOTH;
+
+      ESP_LOGI(TAG,
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
+               radio_name,
+               listen_mode_to_string_(this->radio->get_listen_mode()),
+               (unsigned) this->receiver_task_stack_size_,
+               this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
+
+      ESP_LOGI(TAG, "SX1262 YAML sanity / sprawdzenie YAML SX1262:");
+
+      if (this->sx1262_yaml_has_tcxo_) {
+        ESP_LOGI(TAG, "  has_tcxo: true -> TCXO enabled / TCXO wlaczone");
+      } else {
+        ESP_LOGW(TAG,
+                 "  has_tcxo: false -> RISK(!): radio may initialize but receive no frames on TCXO boards, including Heltec V4 / radio moze sie zainicjalizowac, ale nie odbierac ramek na plytkach z TCXO, w tym Heltec V4");
+      }
+
+      if (this->sx1262_yaml_dio2_rf_switch_) {
+        ESP_LOGI(TAG, "  dio2_rf_switch: true -> DIO2 RF switch enabled / przelacznik RF na DIO2 wlaczony");
+      } else {
+        ESP_LOGW(TAG,
+                 "  dio2_rf_switch: false -> check board wiring; OK only for boards without DIO2 RF switch / sprawdz plytke; OK tylko bez przelacznika RF na DIO2");
+      }
+
+      if (t1_like) {
+        if (this->sx1262_yaml_long_gfsk_packets_) {
+          ESP_LOGI(TAG, "  long_gfsk_packets: true -> long T1 frames supported / dlugie ramki T1 obslugiwane");
+        } else {
+          ESP_LOGW(TAG,
+                   "  long_gfsk_packets: false -> RISK(!): long T1 frames may be truncated or dropped / dlugie ramki T1 moga byc ucinane albo dropowane");
+        }
+      } else {
+        ESP_LOGI(TAG, "  long_gfsk_packets: %s -> long T1 check not applicable for this listen_mode / kontrola dlugich T1 nie dotyczy tego trybu",
+                 this->sx1262_yaml_long_gfsk_packets_ ? "true" : "false");
+      }
+
+      ESP_LOGI(TAG, "  rx_gain: %s", this->sx1262_yaml_rx_gain_.c_str());
     } else {
       ESP_LOGI(TAG,
                "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
@@ -2115,9 +2154,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
 
     this->boot_log_last_ms_ = loop_now_ms;
     this->boot_log_count_++;
-    if (this->boot_log_count_ >= 3) {
-      this->boot_log_done_ = true;
-    }
+    this->boot_log_done_ = true;
   }
 }
 

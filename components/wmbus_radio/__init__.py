@@ -471,6 +471,15 @@ async def to_code(config):
     }
     cg.add(var.set_sx1276_busy_ether_mode(busy_ether_mode_map[config.get(CONF_SX1276_BUSY_ETHER_MODE, "adaptive")]))
 
+    if config[CONF_RADIO_TYPE] == "SX1262":
+        sx1262_dio2_rf = config.get(CONF_RF_SWITCH, config.get(CONF_DIO2_RF_SWITCH, True))
+        cg.add(var.set_sx1262_yaml_sanity(
+            config.get(CONF_HAS_TCXO, False),
+            sx1262_dio2_rf,
+            config.get(CONF_LONG_GFSK_PACKETS, False),
+            config.get(CONF_RX_GAIN, "boosted"),
+        ))
+
     # Log highlight config
     meters = config.get(CONF_HIGHLIGHT_METERS, [])
     meters_csv = ",".join([str(m).strip() for m in meters if str(m).strip()])

@@ -66,6 +66,13 @@ public:
   void set_diag_publish_summary_60min(bool enabled) { this->diag_publish_summary_60min_ = enabled; }
   void set_diag_publish_summary_highlight_meters(bool enabled) { this->diag_publish_summary_highlight_meters_ = enabled; }
   void set_sx1276_busy_ether_mode(SX1276BusyEtherMode mode) { this->sx1276_busy_ether_mode_ = mode; }
+  void set_sx1262_yaml_sanity(bool has_tcxo, bool dio2_rf_switch, bool long_gfsk_packets, const std::string &rx_gain) {
+    this->sx1262_yaml_sanity_configured_ = true;
+    this->sx1262_yaml_has_tcxo_ = has_tcxo;
+    this->sx1262_yaml_dio2_rf_switch_ = dio2_rf_switch;
+    this->sx1262_yaml_long_gfsk_packets_ = long_gfsk_packets;
+    this->sx1262_yaml_rx_gain_ = rx_gain;
+  }
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
   void set_tx_test_config(bool enabled, ListenMode mode, uint16_t frame_length, uint32_t interval_ms, uint8_t tx_data_gpio) {
     this->tx_test_enabled_ = enabled;
@@ -377,6 +384,15 @@ protected:
   uint32_t boot_log_count_{0};
   bool boot_info_mqtt_pending_{false};
   bool boot_info_event_pending_{false};
+
+  // SX1262 YAML sanity state. These values are copied from YAML as-is.
+  // They do not auto-configure board wiring; they only make risky settings visible in boot logs.
+  bool sx1262_yaml_sanity_configured_{false};
+  bool sx1262_yaml_has_tcxo_{false};
+  bool sx1262_yaml_dio2_rf_switch_{true};
+  bool sx1262_yaml_long_gfsk_packets_{false};
+  std::string sx1262_yaml_rx_gain_{"boosted"};
+  bool sx1262_yaml_warning_logged_{false};
 
   // Adaptive busy-ether hold state: aggressive mode stays active until this timestamp (ms).
   // Updated once per diagnostic summary window by evaluate_busy_ether_adaptive_().
