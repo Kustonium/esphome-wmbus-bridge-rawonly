@@ -1,7 +1,7 @@
 # ESPHome wM-Bus Bridge RAW-only
 
 RAW-only wireless M-Bus radio bridge for ESPHome.  
-Most radiowy wireless M-Bus RAW-only dla ESPHome.
+Most radiowy Wireless M-Bus RAW-only dla ESPHome.
 
 ```text
 meter / licznik
@@ -18,17 +18,25 @@ Urządzenie ESP jest odbiornikiem radiowym i publisherem MQTT. Nie dekoduje wart
 
 It does / Robi:
 
-- receive T1/C1 frames and experimental S1 frames,
-- validate and normalize telegrams,
-- publish valid RAW HEX telegrams to MQTT,
-- publish RF diagnostics.
+- receive T1/C1 frames and experimental S1 frames,  
+  odbiera ramki T1/C1 oraz eksperymentalne ramki S1,
+- validate and normalize telegrams,  
+  waliduje i normalizuje telegramy,
+- publish valid RAW HEX telegrams to MQTT,  
+  publikuje poprawne telegramy RAW HEX do MQTT,
+- publish RF diagnostics.  
+  publikuje diagnostykę RF.
 
-Nie robi / It does not:
+It does not / Nie robi:
 
-- choose `wmbusmeters` drivers,
-- decrypt AES payloads,
-- create final meter-value sensors,
-- replace `wmbusmeters`.
+- choose `wmbusmeters` drivers,  
+  nie wybiera driverów `wmbusmeters`,
+- decrypt AES payloads,  
+  nie deszyfruje payloadów AES,
+- create final meter-value sensors,  
+  nie tworzy końcowych sensorów z wartościami liczników,
+- replace `wmbusmeters`.  
+  nie zastępuje `wmbusmeters`.
 
 ## Quick start / Szybki start
 
@@ -37,15 +45,20 @@ Użyj jednego z przykładów YAML z `examples/`, a potem najpierw przeczytaj log
 
 Recommended path / Zalecana ścieżka:
 
-1. Choose the matching board example from `examples/`.
-2. Use `topic_name` or omit it and let the component use `esphome.name`.
-3. Start with `listen_mode: t1` unless you know you need C1 or S1.
-4. Start with `diagnostic_mode: normal`.
-5. Check the boot sanity report and local `Have data / odebrano dane` logs before debugging MQTT/backend.
+1. Choose the matching board example from `examples/`.  
+   Wybierz przykład z `examples/` pasujący do używanej płytki.
+2. Use `topic_name` or omit it and let the component use `esphome.name`.  
+   Użyj `topic_name` albo pomiń tę opcję i pozwól komponentowi użyć `esphome.name`.
+3. Start with `listen_mode: t1` unless you know you need C1 or S1.  
+   Zacznij od `listen_mode: t1`, chyba że wiesz, że potrzebujesz C1 albo S1.
+4. Start with `diagnostic_mode: normal`.  
+   Zacznij od `diagnostic_mode: normal`.
+5. Check the boot sanity report and local `Have data / odebrano dane` logs before debugging MQTT/backend.  
+   Sprawdź boot sanity report oraz lokalne logi `Have data / odebrano dane`, zanim zaczniesz debugować MQTT/backend.
 
 ## MQTT topic model / Model topiców MQTT
 
-Recommended topic scheme / Zalecany schemat:
+Recommended topic scheme / Zalecany schemat topiców:
 
 ```text
 wmbus/<device>/telegram
@@ -55,7 +68,8 @@ wmbus/<device>/diag/meter_snapshot
 wmbus/<device>/diag/boot
 ```
 
-The backend bridge should subscribe to / Backend bridge powinien subskrybować:
+The backend bridge should subscribe to:  
+Backend bridge powinien subskrybować:
 
 ```text
 wmbus/+/telegram
@@ -101,7 +115,8 @@ Podczas startu komponent wypisuje wieloliniowy raport sanity YAML dla SX1262. Br
 Normal SX1276 boards do not need a TCXO option. Some boards expose a dedicated TCXO enable pin. Configure it explicitly only when your board documentation says so.  
 Zwykłe płytki SX1276 nie wymagają opcji TCXO. Niektóre płytki mają osobny pin włączający TCXO. Ustaw go jawnie tylko wtedy, gdy wynika to z dokumentacji płytki.
 
-Example for LILYGO T3 V3.0 TCXO OLED LoRa32 / Przykład dla LILYGO T3 V3.0 TCXO OLED LoRa32:
+Example for LILYGO T3 V3.0 TCXO OLED LoRa32:  
+Przykład dla LILYGO T3 V3.0 TCXO OLED LoRa32:
 
 ```yaml
 wmbus_radio:
@@ -146,7 +161,8 @@ Deeper notes / Głębsze notatki:
 - [`docs/RX_PIPELINE.md`](docs/RX_PIPELINE.md) / [`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md)
 - [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)
 
-Older detailed README content was moved to / Starszy szczegółowy opis README przeniesiono do:
+Older detailed README content was moved to:  
+Starszy szczegółowy opis README przeniesiono do:
 
 - [`docs/README_FULL.md`](docs/README_FULL.md) / [`docs/README_FULL_PL.md`](docs/README_FULL_PL.md)
 
