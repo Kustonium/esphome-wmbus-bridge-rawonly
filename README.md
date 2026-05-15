@@ -1,7 +1,7 @@
 # ESPHome wM-Bus Bridge RAW-only
 
-RAW-only wireless M-Bus radio bridge for ESPHome.  
-Most radiowy Wireless M-Bus RAW-only dla ESPHome.
+RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262, SX1276 and experimental CC1101.  
+Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na SX1262, SX1276 oraz eksperymentalnie CC1101.
 
 ```text
 meter / licznik
