@@ -209,3 +209,58 @@ Nie debuguj driverów liczników ani kluczy AES, dopóki ESP nie publikuje popra
 - używaj `SX1276` tylko wtedy, gdy środowisko jest łatwiejsze albo ruch wolniejszy,
 - nie ufaj samemu `summary`,
 - dla środowisk mieszanych T1/C1 dwa dedykowane urządzenia są lepsze niż jeden setup `both`.
+
+## 12. Radio jest aktywne, ale nie ma linii `Have data`
+
+Nie zaczynaj od MQTT ani backendu.
+
+Najpierw sprawdź, czy ESP lokalnie widzi jakiekolwiek ramki radiowe:
+
+```text
+Have data / odebrano dane (...)
+```
+
+Jeżeli tej linii nie ma, problem nadal jest w warstwie RF / konfiguracji płytki.
+
+Dla `SX1262` przeczytaj raport sanity w logu startowym. Na płytkach z TCXO, takich jak Heltec WiFi LoRa 32 V4, brak:
+
+```yaml
+has_tcxo: true
+```
+
+może nadal pozwolić na inicjalizację radia i wypisanie `Radio active`, ale RX może być całkowicie martwy.
+
+Sprawdź też opcje sprzętowe płytki:
+
+```yaml
+dio2_rf_switch: true
+long_gfsk_packets: true
+rx_gain: boosted
+```
+
+Dla płytek z zewnętrznym FEM sprawdź również piny `fem_*`.
+
+Dla `SX1276` zwykłe płytki nie wymagają `tcxo_pin`. Warianty TCXO, na przykład LILYGO T3 V3.0 TCXO OLED LoRa32, wymagają jawnego pinu TCXO enable:
+
+```yaml
+tcxo_pin: GPIO12
+```
+
+Komponent nie wykrywa okablowania płytki. Sprawdź schemat albo dokumentację producenta.
+
+## 13. MQTT leży, ale radio powinno dalej działać
+
+Problemy MQTT są problemami transportu, a nie dowodem awarii RF.
+
+Jeżeli broker jest niedostępny, hasło jest złe, zdalny broker jest nieosiągalny albo negocjacja TLS się nie powiedzie, klient MQTT ESPHome może wypisywać błędy. `wmbus_radio` powinien nadal odbierać radio i logować ramki lokalnie.
+
+Oczekiwane zachowanie:
+
+```text
+Have data / odebrano dane (...)
+MQTT unavailable / MQTT niedostepny: skip telegram publish ... radio reception continues
+```
+
+TLS, certyfikaty, fingerprinty i szczegóły zdalnego brokera należą do standardowej sekcji `mqtt:` ESPHome. Nie konfiguruje się ich w `wmbus_radio`.
+
+Jeżeli lokalne linie `Have data` są widoczne, ale backend nic nie odbiera, najpierw debuguj MQTT. Jeżeli nie ma linii `Have data`, najpierw debuguj radio i konfigurację płytki.

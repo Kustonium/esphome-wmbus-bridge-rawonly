@@ -209,3 +209,58 @@ Do not debug meter drivers or AES keys until the ESP publishes valid telegrams t
 - use `SX1276` only when the environment is easier or the traffic is slower,
 - do not trust `summary` alone,
 - for mixed T1/C1 environments, two dedicated devices beat one `both` setup.
+
+## 12. Radio is active, but there are no `Have data` lines
+
+Do not start with MQTT or the backend.
+
+First check whether the ESP sees any radio frames locally:
+
+```text
+Have data / odebrano dane (...)
+```
+
+If this line is missing, the problem is still in the RF / board configuration layer.
+
+For `SX1262`, read the boot sanity report. On TCXO-based boards such as Heltec WiFi LoRa 32 V4, missing:
+
+```yaml
+has_tcxo: true
+```
+
+can still allow the radio to initialize and print `Radio active`, but RX may be completely silent.
+
+Also check board-level options:
+
+```yaml
+dio2_rf_switch: true
+long_gfsk_packets: true
+rx_gain: boosted
+```
+
+For boards with an external FEM, also check the `fem_*` pins.
+
+For `SX1276`, normal boards do not need `tcxo_pin`. TCXO variants, for example LILYGO T3 V3.0 TCXO OLED LoRa32, need an explicit TCXO enable pin:
+
+```yaml
+tcxo_pin: GPIO12
+```
+
+The component does not detect board wiring. Check the schematic or vendor documentation.
+
+## 13. MQTT is down, but radio should still work
+
+MQTT problems are transport problems, not proof of RF failure.
+
+If the broker is unavailable, credentials are wrong, the remote broker is unreachable, or TLS negotiation fails, ESPHome's MQTT client may log errors. `wmbus_radio` should still continue RX and local logging.
+
+Expected behavior:
+
+```text
+Have data / odebrano dane (...)
+MQTT unavailable / MQTT niedostepny: skip telegram publish ... radio reception continues
+```
+
+TLS, certificates, fingerprints and remote broker details belong to ESPHome's standard `mqtt:` section. They are not configured in `wmbus_radio`.
+
+If local `Have data` lines are visible but the backend receives nothing, debug MQTT first. If there are no `Have data` lines, debug radio/board configuration first.

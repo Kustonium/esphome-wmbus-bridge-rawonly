@@ -37,7 +37,7 @@ Jeśli chcesz jeden YAML ESPHome, który od razu tworzy sensory Home Assistant b
 Przeczytaj:
 
 - [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)
-- [`examples/README_PL.md`](examples/README_PL.md)
+- [`examples/README_PL.md`](../examples/README_PL.md)
 
 Zalecana kolejność dla początkujących:
 
@@ -50,7 +50,7 @@ Ważne: nie kopiuj YAML-i między Heltec V2/V3/V4 w ciemno. V4 nie jest zamienni
 
 ## 2. Wybierz pasujący przykład YAML
 
-Wejdź do [`examples/`](examples/).
+Wejdź do [`examples/`](../examples/).
 
 Użyj pliku `*_clean.yaml`, jeśli rozumiesz już płytkę.
 
@@ -125,7 +125,7 @@ Jeżeli poprawny telegram S1 zostanie odebrany, zostanie przekazany do MQTT tak 
 
 Przeczytaj:
 
-- [`docs/CONFIG_REFERENCE_MINIMAL.md`](docs/CONFIG_REFERENCE_MINIMAL.md)
+- [`docs/CONFIG_REFERENCE_MINIMAL.md`](CONFIG_REFERENCE_MINIMAL.md)
 
 Zalecana konfiguracja:
 
@@ -174,7 +174,7 @@ Nie debuguj kluczy AES, driverów liczników ani encji Home Assistant, dopóki n
 Przeczytaj:
 
 - [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md)
-- [`docs/DIAGNOSTICS_QUICK_REFERENCE.md`](docs/DIAGNOSTICS_QUICK_REFERENCE.md)
+- [`docs/DIAGNOSTICS_QUICK_REFERENCE.md`](DIAGNOSTICS_QUICK_REFERENCE.md)
 
 Dla normalnego użytkownika:
 
@@ -231,12 +231,12 @@ Używaj tych plików zależnie od pytania:
 | Jaką płytkę/radio wybrać? | [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md) |
 | Jak działa diagnostyka? | [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md) |
 | Co znaczą dropy/CRC/interwały? | [`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md) |
-| Jak wewnętrznie działa RX pipeline? | [`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md) |
-| Jakie są minimalne opcje YAML? | [`docs/CONFIG_REFERENCE_MINIMAL.md`](docs/CONFIG_REFERENCE_MINIMAL.md) |
-| Jakie są opcje radiowe? | [`docs/RADIO_OPTIONS_MINIMAL.md`](docs/RADIO_OPTIONS_MINIMAL.md) |
-| Co zmieniło się w release? | [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) |
+| Jak wewnętrznie działa RX pipeline? | [`docs/RX_PIPELINE_PL.md`](RX_PIPELINE_PL.md) |
+| Jakie są minimalne opcje YAML? | [`docs/CONFIG_REFERENCE_MINIMAL.md`](CONFIG_REFERENCE_MINIMAL.md) |
+| Jakie są opcje radiowe? | [`docs/RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) |
+| Co zmieniło się w release? | [`docs/RELEASE_NOTES.md`](RELEASE_NOTES.md) |
 | Jak SX1262 wypada względem SX1276? | [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md) |
-| Jaki jest zakres projektu/supportu? | [`SUPPORT.md`](SUPPORT.md) |
+| Jaki jest zakres projektu/supportu? | [`SUPPORT.md`](../SUPPORT.md) |
 
 ## 10. Gdzie pytać
 

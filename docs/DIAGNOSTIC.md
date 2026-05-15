@@ -193,3 +193,28 @@ diagnostic_verbose
 ```
 
 Use `diagnostic_mode` presets first.
+
+## Boot sanity reports
+
+Startup logs include radio sanity information before normal troubleshooting starts.
+
+For `SX1262`, the boot sanity report shows the effective YAML values for:
+
+- `has_tcxo`
+- `dio2_rf_switch`
+- `long_gfsk_packets`
+- `rx_gain`
+
+Risky settings are printed as warnings. They do not block startup, because some users intentionally test incomplete or unusual configurations.
+
+For `SX1276`, the boot sanity report shows whether `tcxo_pin` is configured. Missing `tcxo_pin` is OK for normal SX1276 boards. TCXO variants, such as LILYGO T3 V3.0 TCXO OLED LoRa32, require an explicit board-specific pin, for example `tcxo_pin: GPIO12`.
+
+These reports describe the YAML configuration. They do not auto-detect board wiring.
+
+## MQTT availability
+
+MQTT publishing is intentionally separated from radio reception.
+
+If MQTT is unavailable, received frames are still logged locally and MQTT publishing is skipped with a throttled warning. This helps separate RF problems from transport problems.
+
+If you see `Have data / odebrano dane` locally but nothing reaches the backend, debug MQTT. If you do not see local `Have data` lines, debug RF/board configuration first.

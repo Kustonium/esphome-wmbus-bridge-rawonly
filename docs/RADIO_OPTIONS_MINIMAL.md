@@ -5,7 +5,7 @@
 | Radio | Wymagane piny | Opcjonalne | Uwagi |
 |---|---|---|---|
 | `SX1262` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, TCXO, FEM, `long_gfsk_packets` | zalecany dla trudnego RF i długich ramek |
-| `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode` | dobry dla spokojniejszych instalacji; ma mechanizm busy-ether |
+| `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | dobry dla spokojniejszych instalacji; ma mechanizm busy-ether; `tcxo_pin` tylko dla płytek z osobnym TCXO enable |
 | `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | eksperymentalny; wymaga `cc1101_allow_experimental: true`; single-IRQ nie jest wspierany |
 
 ## Listen mode frequency defaults / domyślne częstotliwości trybów
@@ -45,10 +45,23 @@ S1 używa innego profilu RF niż T1/C1, dlatego nie jest łączony z `both`.
 | Opcja | Domyślnie | Opis |
 |---|---:|---|
 | `sx1276_busy_ether_mode` | `adaptive` | `normal`, `aggressive`, `adaptive` |
+| `tcxo_pin` | brak | opcjonalny pin TCXO enable; tylko dla SX1276 |
 
-`busy_ether_state` w summary jest raportem tego mechanizmu i ma sens tylko dla SX1276.
+`busy_ether_state` w summary jest raportem mechanizmu busy-ether i ma sens tylko dla SX1276.
 
 `sx1276_busy_ether_mode` jest akceptowane przez schemat YAML także przy innych radiach, ale dla SX1262/CC1101 jest ignorowane bez błędu; w summary będzie `n/a`.
+
+`tcxo_pin` jest opcją jawną dla płytek SX1276 z osobnym pinem TCXO enable. Jeśli jest ustawiony, komponent ustawia ten pin w stan HIGH przed inicjalizacją radia. Zwykłe płytki SX1276 nie wymagają tej opcji.
+
+Przykład dla LILYGO T3 V3.0 TCXO OLED LoRa32:
+
+```yaml
+wmbus_radio:
+  radio_type: SX1276
+  tcxo_pin: GPIO12
+```
+
+Komponent nie wykrywa automatycznie modelu płytki ani okablowania TCXO. Sprawdź schemat płytki albo dokumentację producenta.
 
 ## CC1101
 

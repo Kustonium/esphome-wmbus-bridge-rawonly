@@ -1,38 +1,51 @@
 # ESPHome wM-Bus Bridge RAW-only
 
-[Polska wersja](README_PL.md)
-
-RAW-only wireless M-Bus radio bridge for ESPHome.
-
-The ESP receives and validates wM-Bus telegrams, then publishes validated RAW HEX to MQTT. Meter decoding stays outside the ESP, for example in Home Assistant / Linux / `wmbusmeters`.
+RAW-only wireless M-Bus radio bridge for ESPHome.  
+Most radiowy wireless M-Bus RAW-only dla ESPHome.
 
 ```text
-meter -> SX1262/SX1276 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
+meter / licznik
+  -> SX1262 / SX1276 / CC1101
+  -> ESPHome wmbus_radio
+  -> MQTT RAW HEX
+  -> backend / wmbusmeters / Home Assistant
 ```
 
-## Start here
+## What this project is / Czym jest ten projekt
 
-New user? Start with [`START_HERE.md`](START_HERE.md). It gives the recommended reading order and explains which file to open first.
+The ESP device is a radio receiver and MQTT publisher. It does not decode meter values on the ESP.  
+Urządzenie ESP jest odbiornikiem radiowym i publisherem MQTT. Nie dekoduje wartości liczników na ESP.
 
-## Design rule
+It does / Robi:
 
-The ESP is a radio bridge, not a meter decoder.
-
-It does not:
-- select `wmbusmeters` drivers,
-- decrypt AES payloads,
-- create meter value sensors,
-- replace `wmbusmeters`.
-
-It does:
 - receive T1/C1 frames and experimental S1 frames,
-- validate/normalize telegrams,
-- publish valid telegram HEX to MQTT,
+- validate and normalize telegrams,
+- publish valid RAW HEX telegrams to MQTT,
 - publish RF diagnostics.
 
-## MQTT topic scheme
+Nie robi / It does not:
 
-The recommended topic scheme is:
+- choose `wmbusmeters` drivers,
+- decrypt AES payloads,
+- create final meter-value sensors,
+- replace `wmbusmeters`.
+
+## Quick start / Szybki start
+
+Use one of the YAML examples from `examples/`, then read the startup log before changing anything else.  
+Użyj jednego z przykładów YAML z `examples/`, a potem najpierw przeczytaj log startowy, zanim zaczniesz zmieniać kolejne rzeczy.
+
+Recommended path / Zalecana ścieżka:
+
+1. Choose the matching board example from `examples/`.
+2. Use `topic_name` or omit it and let the component use `esphome.name`.
+3. Start with `listen_mode: t1` unless you know you need C1 or S1.
+4. Start with `diagnostic_mode: normal`.
+5. Check the boot sanity report and local `Have data / odebrano dane` logs before debugging MQTT/backend.
+
+## MQTT topic model / Model topiców MQTT
+
+Recommended topic scheme / Zalecany schemat:
 
 ```text
 wmbus/<device>/telegram
@@ -42,213 +55,105 @@ wmbus/<device>/diag/meter_snapshot
 wmbus/<device>/diag/boot
 ```
 
-The Home Assistant bridge add-on should subscribe to:
+The backend bridge should subscribe to / Backend bridge powinien subskrybować:
 
 ```text
 wmbus/+/telegram
 ```
 
-Do not manually build topic paths in normal YAML. Use `topic_name`, or omit it and let the component use `esphome.name`.
+Do not manually build topic paths in normal YAML. Use `topic_name`, or omit it and let the component use `esphome.name`.  
+W normalnym YAML-u nie składaj topiców ręcznie. Użyj `topic_name` albo pomiń tę opcję, a komponent użyje `esphome.name`.
 
 ```yaml
 wmbus_radio:
   topic_name: "xiao_s3"
 ```
 
-This generates:
+If MQTT is unavailable, radio reception continues and frames remain visible in local logs. MQTT publishing is skipped with a throttled warning.  
+Jeżeli MQTT jest niedostępne, odbiór radiowy działa dalej, a ramki nadal są widoczne lokalnie w logach. Publikacja MQTT jest pomijana z ograniczanym czasowo ostrzeżeniem.
 
-```text
-wmbus/xiao_s3/telegram
-wmbus/xiao_s3/diag/...
-```
+TLS, remote brokers and certificates belong to ESPHome's standard `mqtt:` configuration, not to `wmbus_radio`.  
+TLS, zdalne brokery i certyfikaty należą do standardowej konfiguracji `mqtt:` ESPHome, a nie do `wmbus_radio`.
 
-If `topic_name` is omitted, `esphome.name` is used. `friendly_name` is not used for topics because it may contain spaces, uppercase characters or non-ASCII characters.
+## Radio notes / Uwagi radiowe
 
-`topic_name` accepts only letters, digits, `_` and `-`. Do not include `wmbus/`, `/`, `+`, `#` or spaces.
+### SX1262
 
-Legacy manual overrides still work:
+SX1262 board-level options are explicit. The component does not guess board wiring.  
+Opcje sprzętowe SX1262 są jawne. Komponent nie zgaduje okablowania płytki.
 
-```yaml
-telegram_topic: "..."
-diagnostic_topic: "..."
-```
-
-but they are intended only for compatibility and produce a bilingual warning.
-
-## Quick start
-
-Clean minimal example:
-
-```yaml
-substitutions:
-  devicename: esphome-wmbus-xiao-s3
-  friendly_name: "wMBus Bridge XIAO S3"
-
-esphome:
-  name: ${devicename}
-  friendly_name: ${friendly_name}
-
-external_components:
-  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
-    components: [wmbus_radio]
-    refresh: 0s
-
-wmbus_radio:
-  radio_type: SX1262
-  listen_mode: t1
-
-  # Optional. If omitted, esphome.name is used.
-  # topic_name: "${devicename}"
-
-  diagnostic_mode: normal
-
-  # Optional. In diagnostic_mode: normal this enables meter_snapshot
-  # for these meters.
-  highlight_meters:
-    - "12345678"
-    - "11335577"
-    - "22446688"
-
-  # ... SPI/radio pins go here ...
-```
-
-## Listen modes and frequency
-
-`listen_mode` selects one RF profile for the receiver:
-
-| `listen_mode` | Meaning | Default frequency |
-|---|---|---:|
-| `t1` | T1 only | `868.950 MHz` |
-| `c1` | C1 only | `868.950 MHz` |
-| `both` | T1/C1 only | `868.950 MHz` |
-| `s1` | experimental S1 only | `868.300 MHz` |
-
-`both` means **T1/C1 only**. S1 is a separate receive mode and cannot be combined with T1/C1 in one receiver configuration.
-
-For normal T1/C1 use, `frequency:` can usually be omitted. For S1, the default is `868.300 MHz`, but it can be overridden for compatibility tests, for example:
+Common options / Typowe opcje:
 
 ```yaml
 wmbus_radio:
   radio_type: SX1262
-  listen_mode: s1
-  frequency: 868.36
+  has_tcxo: true
+  dio2_rf_switch: true
+  rx_gain: boosted
+  long_gfsk_packets: true
 ```
 
-If an S1 telegram is received and passes validation, the component publishes it to MQTT the same way as T1/C1 telegrams. Meter-value decoding still happens outside the ESP, for example in `wmbusmeters`, and may require the correct driver and key. Proprietary or polling-based systems may not produce standard passive S1 telegrams.
+At boot, the component prints a multiline SX1262 YAML sanity report. Missing `has_tcxo: true` on TCXO-based boards can still allow the radio to initialize, but RX may be completely silent. Disabled `long_gfsk_packets` in T1/both is reported as a risk for long T1 telegrams.  
+Podczas startu komponent wypisuje wieloliniowy raport sanity YAML dla SX1262. Brak `has_tcxo: true` na płytkach z TCXO może nadal pozwolić na inicjalizację radia, ale RX może być całkowicie martwy. Wyłączone `long_gfsk_packets` w T1/both jest raportowane jako ryzyko dla długich telegramów T1.
 
-## Diagnostic modes
+### SX1276
 
-Use presets, not a pile of individual flags:
+Normal SX1276 boards do not need a TCXO option. Some boards expose a dedicated TCXO enable pin. Configure it explicitly only when your board documentation says so.  
+Zwykłe płytki SX1276 nie wymagają opcji TCXO. Niektóre płytki mają osobny pin włączający TCXO. Ustaw go jawnie tylko wtedy, gdy wynika to z dokumentacji płytki.
 
-| Mode | Meaning |
-|---|---|
-| `off` | no MQTT diagnostics |
-| `low` | global `summary` + hint |
-| `normal` | `summary` + `summary_15min` + `meter_snapshot` for `highlight_meters` |
-| `debug` | `normal` + drop/RX-path events |
-| `dev` | full developer diagnostics, including raw/debug payloads |
-
-Old modes remain accepted as deprecated aliases:
-- `medium` -> `normal`
-- `full` -> `dev`
-- `raw` -> `dev`
-
-Old detailed options such as `diagnostic_publish_summary_highlight_meters` and `diagnostic_publish_highlight_only` still compile for compatibility, but they are deprecated/advanced. Use the presets first.
-
-`diagnostic_publish_highlight_only` was a confusing name. It filters detailed diagnostic events to `highlight_meters`; it does not enable meter statistics. The clearer name is:
+Example for LILYGO T3 V3.0 TCXO OLED LoRa32 / Przykład dla LILYGO T3 V3.0 TCXO OLED LoRa32:
 
 ```yaml
-diagnostic_events_highlight_only: true
+wmbus_radio:
+  radio_type: SX1276
+  tcxo_pin: GPIO12
 ```
 
-## Per-meter statistics
+`tcxo_pin`, when configured, is driven HIGH before SX1276 radio initialization.  
+Jeżeli `tcxo_pin` jest skonfigurowany, komponent ustawia go w stan HIGH przed inicjalizacją SX1276.
 
-For normal use:
+### CC1101
+
+CC1101 support is experimental and requires explicit opt-in plus dual IRQ wiring. Single-IRQ CC1101 wiring is not supported.  
+Obsługa CC1101 jest eksperymentalna i wymaga jawnego włączenia oraz podłączenia dwóch linii IRQ. Konfiguracja single-IRQ dla CC1101 nie jest wspierana.
 
 ```yaml
-diagnostic_mode: normal
-highlight_meters:
-  - "00089907"
-  - "03534159"
+wmbus_radio:
+  radio_type: CC1101
+  cc1101_allow_experimental: true
+  gdo0_pin: GPIOxx
+  gdo2_pin: GPIOyy
 ```
 
-This publishes a combined snapshot on:
+## Documentation / Dokumentacja
 
-```text
-wmbus/<device>/diag/meter_snapshot
-```
+Main documentation lives in `docs/`. Examples live in `examples/`.  
+Główna dokumentacja jest w `docs/`. Przykłady są w `examples/`.
 
-For advanced use:
+Start here / Zacznij tutaj:
 
-```yaml
-diagnostic_meter_stats: highlighted
-```
+- [`docs/START_HERE.md`](docs/START_HERE.md) / [`docs/START_HERE_PL.md`](docs/START_HERE_PL.md)
+- [`docs/CONFIG_REFERENCE_MINIMAL.md`](docs/CONFIG_REFERENCE_MINIMAL.md)
+- [`docs/RADIO_OPTIONS_MINIMAL.md`](docs/RADIO_OPTIONS_MINIMAL.md)
+- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) / [`docs/TROUBLESHOOTING_PL.md`](docs/TROUBLESHOOTING_PL.md)
+- [`docs/DIAGNOSTIC.md`](docs/DIAGNOSTIC.md) / [`docs/DIAGNOSTIC_PL.md`](docs/DIAGNOSTIC_PL.md)
+- [`examples/README.md`](examples/README.md) / [`examples/README_PL.md`](examples/README_PL.md)
 
-or:
+Deeper notes / Głębsze notatki:
 
-```yaml
-diagnostic_meter_stats: all
-```
+- [`docs/CHIP_SELECTION.md`](docs/CHIP_SELECTION.md) / [`docs/CHIP_SELECTION_PL.md`](docs/CHIP_SELECTION_PL.md)
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) / [`docs/BENCHMARKS_PL.md`](docs/BENCHMARKS_PL.md)
+- [`docs/RX_PIPELINE.md`](docs/RX_PIPELINE.md) / [`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md)
+- [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)
 
-Use `all` only for development or controlled testing in dense RF environments.
+Older detailed README content was moved to / Starszy szczegółowy opis README przeniesiono do:
 
-## `listen_mode_filter_after_parse`
+- [`docs/README_FULL.md`](docs/README_FULL.md) / [`docs/README_FULL_PL.md`](docs/README_FULL_PL.md)
 
-Default:
+## Support / Wsparcie
 
-```yaml
-listen_mode_filter_after_parse: false
-```
+This project is intentionally RAW-only and is not a general ESPHome/Home Assistant support desk.  
+Ten projekt jest celowo RAW-only i nie jest ogólnym helpdeskiem ESPHome/Home Assistant.
 
-This is the conservative/stable behavior. It is recommended when meters are nearby and reception is already good.
-
-Experimental mode:
-
-```yaml
-listen_mode_filter_after_parse: true
-```
-
-This filters `listen_mode` after frame parsing/CRC/fallback has determined the final T1/C1 mode. It may help when meters are farther away, behind walls, or when frames are partially lost.
-
-It may also increase:
-- `false_start_like`,
-- `payload_size_unknown`,
-- `t1_decode3of6` drops.
-
-Compare this option using `meter_snapshot` for the meters that matter, not only global `drop_pct`.
-
-## Radio notes
-
-- SX1262 is preferred for dense RF, frequent packets and long T1 frames.
-- SX1276 can work well, especially in T1-only and quieter environments.
-- For mixed T1/C1 environments, two dedicated receivers are usually better than one receiver in `both`.
-
-`busy_ether_state` is SX1276-only. For SX1262 and CC1101 it is reported as:
-
-```json
-"busy_ether_state": "n/a"
-```
-
-## CC1101
-
-CC1101 support is available in the component, but it is still experimental. It requires explicit YAML opt-in and proper GDO0/GDO2 wiring.
-
-## Documentation
-
-- [`START_HERE.md`](START_HERE.md)
-- [`DIAGNOSTIC.md`](DIAGNOSTIC.md)
-- [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
-- [`CHIP_SELECTION.md`](CHIP_SELECTION.md)
-- [`BENCHMARKS.md`](BENCHMARKS.md)
-- [`docs/RX_PIPELINE.md`](docs/RX_PIPELINE.md)
-
-## Support rule
-
-No logs, no support.
-
-Before asking for help provide:
-- YAML without secrets,
-- full boot log,
-- 2-5 minutes of runtime log,
-- radio module and ESP board model,
-- wiring photo if using an external radio.
+Before opening an issue, read [`SUPPORT.md`](SUPPORT.md).  
+Przed otwarciem issue przeczytaj [`SUPPORT.md`](SUPPORT.md).

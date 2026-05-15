@@ -193,3 +193,28 @@ diagnostic_verbose
 ```
 
 Najpierw używaj presetów `diagnostic_mode`.
+
+## Raporty sanity podczas startu
+
+Logi startowe zawierają informacje sanity radia, zanim zacznie się normalne diagnozowanie.
+
+Dla `SX1262` raport sanity pokazuje skuteczne wartości YAML dla:
+
+- `has_tcxo`
+- `dio2_rf_switch`
+- `long_gfsk_packets`
+- `rx_gain`
+
+Ryzykowne ustawienia są wypisywane jako warningi. Nie blokują startu, bo część użytkowników może świadomie testować niepełne albo nietypowe konfiguracje.
+
+Dla `SX1276` raport sanity pokazuje, czy `tcxo_pin` jest skonfigurowany. Brak `tcxo_pin` jest OK dla zwykłych płytek SX1276. Warianty TCXO, takie jak LILYGO T3 V3.0 TCXO OLED LoRa32, wymagają jawnego pinu zależnego od płytki, np. `tcxo_pin: GPIO12`.
+
+Te raporty opisują konfigurację YAML. Nie wykrywają automatycznie okablowania płytki.
+
+## Dostępność MQTT
+
+Publikacja MQTT jest celowo oddzielona od odbioru radiowego.
+
+Jeżeli MQTT jest niedostępne, odebrane ramki nadal są logowane lokalnie, a publikacja MQTT jest pomijana z ograniczanym czasowo ostrzeżeniem. To pomaga oddzielić problemy RF od problemów transportu.
+
+Jeżeli lokalnie widzisz `Have data / odebrano dane`, ale backend nic nie odbiera, debuguj MQTT. Jeżeli nie widzisz lokalnych linii `Have data`, najpierw debuguj RF i konfigurację płytki.

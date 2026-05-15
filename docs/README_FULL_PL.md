@@ -1,6 +1,6 @@
 # ESPHome wM-Bus Bridge RAW-only
 
-[English version](README.md)
+[English version](README_FULL.md)
 
 Most radiowy wireless M-Bus RAW-only dla ESPHome.
 
@@ -240,7 +240,7 @@ Obsługa CC1101 jest dostępna w komponencie, ale nadal ma status eksperymentaln
 - [`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md)
 - [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)
 - [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)
-- [`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md)
+- [`docs/RX_PIPELINE_PL.md`](RX_PIPELINE_PL.md)
 
 ## Zasada supportu
 
