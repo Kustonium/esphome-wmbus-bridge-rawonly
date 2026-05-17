@@ -248,7 +248,22 @@ tcxo_pin: GPIO12
 
 The component does not detect board wiring. Check the schematic or vendor documentation.
 
-## 13. MQTT is down, but radio should still work
+## 13. `task stack overflow` in logs (XIAO and similar boards)
+
+Symptom: a panic / FreeRTOS message like `Task stack overflow` appears in the serial log, typically after enabling heavier diagnostics or after upgrading to a build with more counters.
+
+The `wmbus_radio` receiver runs in its own RTOS task (separate from ESPHome's main loop), so ESPHome's `loop_task_stack_size` does not change it. Some smaller boards — XIAO ESP32-S3 in particular — can run fine on older builds and then overflow this task on a newer build with more diagnostics.
+
+YAML option:
+
+```yaml
+wmbus_radio:
+  receiver_task_stack_size: 4096
+```
+
+Default is `3072` bytes. Allowed range is `2048..16384`. If you see a stack overflow on XIAO or another small board, try `4096`, then `6144`, then `8192` — increase only as far as needed.
+
+## 14. MQTT is down, but radio should still work
 
 MQTT problems are transport problems, not proof of RF failure.
 

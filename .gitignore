@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.pyo
+.claude/
+_bmad/
+_bmad\

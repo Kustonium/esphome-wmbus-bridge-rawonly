@@ -14,7 +14,8 @@ bridge architecture:
 - validated Wireless M-Bus telegram forwarding to MQTT,
 - external decoding by wmbusmeters / Home Assistant / Linux,
 - extended RF diagnostics and receive-path counters,
-- SX1262/SX1276-focused receive paths and long-packet handling.
+- SX1262/SX1276/CC1101 receive paths and long-packet handling
+  (CC1101 is a fully integrated transceiver path, currently experimental).
 
 Some source files may retain structural, naming, or code-level ancestry from
 that ecosystem. Those files are marked with SPDX headers and are distributed
@@ -33,7 +34,8 @@ niezależną architekturę mostu RAW-only RF->MQTT:
 - przekazywanie zwalidowanych telegramów Wireless M-Bus do MQTT,
 - zewnętrzne dekodowanie przez wmbusmeters / Home Assistant / Linux,
 - rozbudowana diagnostyka RF oraz liczniki ścieżki odbioru,
-- ścieżki odbioru skupione na SX1262/SX1276 oraz obsłudze długich pakietów.
+- ścieżki odbioru SX1262/SX1276/CC1101 oraz obsługa długich pakietów
+  (CC1101 to pełnoprawna ścieżka transceivera, obecnie eksperymentalna).
 
 Część plików źródłowych może zachowywać rodowód strukturalny, nazewniczy lub
 kodowy z tego ekosystemu. Pliki te są oznaczone nagłówkami SPDX i są

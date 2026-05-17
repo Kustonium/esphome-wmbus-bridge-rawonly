@@ -207,6 +207,11 @@ For `SX1262`, the boot sanity report shows the effective YAML values for:
 
 Risky settings are printed as warnings. They do not block startup, because some users intentionally test incomplete or unusual configurations.
 
+For SX1262, two extra YAML options control device-error handling at boot:
+
+- `clear_device_errors_on_boot: true|false` — when `true`, the component issues a Semtech `ClearDeviceErrors` command on startup so latched errors from a previous power cycle do not persist.
+- `publish_dev_err_after_clear: true|false` — when `true`, the SX1262 `dev_err` snapshot (before/after the clear) is published once after boot for diagnostics.
+
 For `SX1276`, the boot sanity report shows whether `tcxo_pin` is configured. Missing `tcxo_pin` is OK for normal SX1276 boards. TCXO variants, such as LILYGO T3 V3.0 TCXO OLED LoRa32, require an explicit board-specific pin, for example `tcxo_pin: GPIO12`.
 
 These reports describe the YAML configuration. They do not auto-detect board wiring.

@@ -64,6 +64,7 @@ examples/SX1262/Heltec V3/
 examples/SX1262/XIAO ESP32 S3/
 examples/SX1276/HeltecV2/
 examples/SX1276/LilygoT3S3/
+examples/SX1276/LilygoT3V3TCXO/
 examples/CC1101/
 ```
 

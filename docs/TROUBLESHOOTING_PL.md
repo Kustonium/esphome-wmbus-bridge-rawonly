@@ -248,7 +248,22 @@ tcxo_pin: GPIO12
 
 Komponent nie wykrywa okablowania płytki. Sprawdź schemat albo dokumentację producenta.
 
-## 13. MQTT leży, ale radio powinno dalej działać
+## 13. `task stack overflow` w logach (XIAO i podobne płytki)
+
+Objaw: w logu serial pojawia się panic / komunikat FreeRTOS w stylu `Task stack overflow`, zwykle po włączeniu cięższej diagnostyki albo po aktualizacji do buildu z większą liczbą liczników.
+
+Odbiornik `wmbus_radio` działa we własnym tasku RTOS (oddzielnym od głównej pętli ESPHome), więc `loop_task_stack_size` z ESPHome nie ma na niego wpływu. Mniejsze płytki — w szczególności XIAO ESP32-S3 — potrafią działać bez problemu na starszych buildach i przepełnić ten stos po przejściu na nowszy build z większą liczbą diagnostyk.
+
+Opcja YAML:
+
+```yaml
+wmbus_radio:
+  receiver_task_stack_size: 4096
+```
+
+Domyślnie `3072` bajty. Dozwolony zakres `2048..16384`. Jeśli widzisz stack overflow na XIAO lub innej małej płytce, spróbuj kolejno `4096`, `6144`, `8192` — zwiększaj tylko tyle, ile faktycznie potrzebne.
+
+## 14. MQTT leży, ale radio powinno dalej działać
 
 Problemy MQTT są problemami transportu, a nie dowodem awarii RF.
 

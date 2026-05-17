@@ -105,9 +105,9 @@ wmbus_radio:
   # Opcjonalne. W diagnostic_mode: normal włącza meter_snapshot
   # dla tych liczników.
   highlight_meters:
-    - "00089907"
-    - "03534159"
-    - "03528221"
+    - "12345678"
+    - "11335577"
+    - "22446688"
 
   # ... tutaj piny SPI/radia ...
 ```
