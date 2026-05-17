@@ -24,7 +24,7 @@ Ten katalog zawiera dokumentację projektu. Główny `README.md` w root jest tyl
 - [`RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md)
 - [`CONFIG_REFERENCE_MINIMAL.md`](CONFIG_REFERENCE_MINIMAL.md)
 - [`MIGRATION.md`](MIGRATION.md)
-- [`RELEASE_NOTES.md`](RELEASE_NOTES.md)
+- Release notes: [GitHub Releases](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases)
 
 ## Attribution and permissions / Atrybucja i uprawnienia
 

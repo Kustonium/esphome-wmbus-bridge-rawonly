@@ -159,7 +159,7 @@ Deeper notes / Głębsze notatki:
 - [`docs/CHIP_SELECTION.md`](docs/CHIP_SELECTION.md) / [`docs/CHIP_SELECTION_PL.md`](docs/CHIP_SELECTION_PL.md)
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) / [`docs/BENCHMARKS_PL.md`](docs/BENCHMARKS_PL.md)
 - [`docs/RX_PIPELINE.md`](docs/RX_PIPELINE.md) / [`docs/RX_PIPELINE_PL.md`](docs/RX_PIPELINE_PL.md)
-- [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)
+- Release notes: [GitHub Releases](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases)
 
 Older detailed README content was moved to:  
 Starszy szczegółowy opis README przeniesiono do:

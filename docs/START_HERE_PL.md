@@ -235,7 +235,7 @@ Używaj tych plików zależnie od pytania:
 | Jak wewnętrznie działa RX pipeline? | [`docs/RX_PIPELINE_PL.md`](RX_PIPELINE_PL.md) |
 | Jakie są minimalne opcje YAML? | [`docs/CONFIG_REFERENCE_MINIMAL.md`](CONFIG_REFERENCE_MINIMAL.md) |
 | Jakie są opcje radiowe? | [`docs/RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) |
-| Co zmieniło się w release? | [`docs/RELEASE_NOTES.md`](RELEASE_NOTES.md) |
+| Co zmieniło się w release? | [GitHub Releases](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases) |
 | Jak SX1262 wypada względem SX1276? | [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md) |
 | Jaki jest zakres projektu/supportu? | [`SUPPORT.md`](../SUPPORT.md) |
 
