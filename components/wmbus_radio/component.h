@@ -78,6 +78,8 @@ public:
     this->sx1276_yaml_tcxo_pin_configured_ = tcxo_pin_configured;
   }
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
+  void set_diagnostic_mode_str(const std::string &mode) { this->diag_mode_str_ = mode; }
+  void set_diagnostic_meter_stats_str(const std::string &mode) { this->meter_stats_str_ = mode; }
   void set_tx_test_config(bool enabled, ListenMode mode, uint16_t frame_length, uint32_t interval_ms, uint8_t tx_data_gpio) {
     this->tx_test_enabled_ = enabled;
     this->tx_test_mode_ = mode;
@@ -422,6 +424,8 @@ protected:
   bool diag_publish_summary_60min_{false};
   bool diag_publish_summary_highlight_meters_{false};
   std::string diag_topic_{};
+  std::string diag_mode_str_{"off"};
+  std::string meter_stats_str_{"off"};
 };
 } // namespace wmbus_radio
 } // namespace esphome

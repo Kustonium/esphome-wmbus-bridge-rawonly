@@ -2097,10 +2097,12 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       }
 
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | busy_ether=%s | state=%s | RF: %s",
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | busy_ether=%s | state=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
+               this->diag_mode_str_.c_str(),
+               this->meter_stats_str_.c_str(),
                busy_mode,
                busy_state,
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
@@ -2117,10 +2119,12 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       const bool t1_like = this->radio->get_listen_mode() == LISTEN_MODE_T1 || this->radio->get_listen_mode() == LISTEN_MODE_BOTH;
 
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
+               this->diag_mode_str_.c_str(),
+               this->meter_stats_str_.c_str(),
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
 
       ESP_LOGI(TAG, "SX1262 YAML sanity / sprawdzenie YAML SX1262:");
@@ -2154,10 +2158,12 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       ESP_LOGI(TAG, "  rx_gain: %s", this->sx1262_yaml_rx_gain_.c_str());
     } else {
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | RF: %s",
+               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
+               this->diag_mode_str_.c_str(),
+               this->meter_stats_str_.c_str(),
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
     }
 
