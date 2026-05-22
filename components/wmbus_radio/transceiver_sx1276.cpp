@@ -167,13 +167,21 @@ void SX1276::setup() {
 }
 
 void SX1276::log_reg_status() {
+  const uint8_t reg_version    = this->spi_read(REG_VERSION);
+  const uint8_t reg_op_mode    = this->spi_read(REG_OP_MODE);
+  const uint8_t reg_irq2       = this->spi_read(REG_IRQ_FLAGS2);
+  const uint8_t reg_rssi       = this->spi_read(REG_RSSI_VALUE);
+  const uint8_t reg_dio        = this->spi_read(REG_DIO_MAPPING1);
+  const uint8_t reg_fifo_thresh = this->spi_read(REG_FIFO_THRESH);
+
   ESP_LOGI(TAG, "RegVersion=0x%02X RegOpMode=0x%02X RegIrqFlags2=0x%02X RegRssiValue=0x%02X RegDioMapping1=0x%02X RegFifoThresh=0x%02X",
-           this->spi_read(REG_VERSION),
-           this->spi_read(REG_OP_MODE),
-           this->spi_read(REG_IRQ_FLAGS2),
-           this->spi_read(REG_RSSI_VALUE),
-           this->spi_read(REG_DIO_MAPPING1),
-           this->spi_read(REG_FIFO_THRESH));
+           reg_version, reg_op_mode, reg_irq2, reg_rssi, reg_dio, reg_fifo_thresh);
+
+  if (reg_version == 0x00 && reg_op_mode == 0x00 && reg_irq2 == 0x00 &&
+      reg_rssi == 0x00 && reg_dio == 0x00 && reg_fifo_thresh == 0x00) {
+    ESP_LOGE(TAG, "SX1276 not responding over SPI / SX1276 nie odpowiada po SPI. "
+                  "Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.");
+  }
 }
 
 optional<uint8_t> SX1276::read() {

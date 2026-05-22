@@ -584,11 +584,18 @@ void SX1262::setup() {
 
 void SX1262::log_reg_status() {
   // SX1262 uses 16-bit register addresses; reading via CMD_READ_REGISTER.
+  const uint8_t reg_rx_gain  = this->read_register8_(REG_RX_GAIN);
+  const uint8_t reg_sync0    = this->read_register8_(REG_SYNC_WORD_0);
+  const uint8_t reg_sync1    = this->read_register8_(REG_SYNC_WORD_0 + 1);
+  const uint8_t reg_sync2    = this->read_register8_(REG_SYNC_WORD_0 + 2);
+
   ESP_LOGI(TAG, "RegRxGain=0x%02X RegSyncWord[0]=0x%02X [1]=0x%02X [2]=0x%02X",
-           this->read_register8_(REG_RX_GAIN),
-           this->read_register8_(REG_SYNC_WORD_0),
-           this->read_register8_(REG_SYNC_WORD_0 + 1),
-           this->read_register8_(REG_SYNC_WORD_0 + 2));
+           reg_rx_gain, reg_sync0, reg_sync1, reg_sync2);
+
+  if (reg_rx_gain == 0x00 && reg_sync0 == 0x00 && reg_sync1 == 0x00 && reg_sync2 == 0x00) {
+    ESP_LOGE(TAG, "SX1262 not responding over SPI / SX1262 nie odpowiada po SPI. "
+                  "Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.");
+  }
 }
 
 // ---------------------------------------------------------------------------
