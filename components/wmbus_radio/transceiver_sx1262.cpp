@@ -579,16 +579,16 @@ void SX1262::setup() {
                     0x00, 0x00});        // DIO3 mask
 
   this->restart_rx();
+  ESP_LOGV(TAG, "SX1262 setup done");
+}
 
-  // Register verification dump — logged once at boot for diagnostics.
+void SX1262::log_reg_status() {
   // SX1262 uses 16-bit register addresses; reading via CMD_READ_REGISTER.
   ESP_LOGI(TAG, "RegRxGain=0x%02X RegSyncWord[0]=0x%02X [1]=0x%02X [2]=0x%02X",
            this->read_register8_(REG_RX_GAIN),
            this->read_register8_(REG_SYNC_WORD_0),
            this->read_register8_(REG_SYNC_WORD_0 + 1),
            this->read_register8_(REG_SYNC_WORD_0 + 2));
-
-  ESP_LOGV(TAG, "SX1262 setup done");
 }
 
 // ---------------------------------------------------------------------------

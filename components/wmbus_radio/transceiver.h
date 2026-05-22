@@ -42,6 +42,9 @@ public:
   // Optional radio-specific debug dump. Used when RX waits time out.
   virtual void dump_debug_status(const char *reason) {}
 
+  // Optional register dump logged once at boot (called from component boot log).
+  virtual void log_reg_status() {}
+
   // Optional: report SX126x device errors captured during boot clear.
   // Default: not supported.
   virtual bool get_boot_device_errors(uint16_t &before, uint16_t &after) const { return false; }

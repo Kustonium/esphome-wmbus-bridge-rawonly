@@ -55,6 +55,7 @@ class SX1262 : public RadioTransceiver {
   optional<uint8_t> read() override;
   int8_t get_rssi() override;
   const char *get_name() override;
+  void log_reg_status() override;
 
  protected:
   void wait_while_busy_();

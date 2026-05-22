@@ -2115,6 +2115,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
           ESP_LOGI(TAG, "  tcxo_pin: not configured -> OK for normal SX1276 boards; LilyGO T3 V3.0 TCXO uses tcxo_pin: GPIO12 / OK dla zwyklych plytek SX1276; LilyGO T3 V3.0 TCXO uzywa tcxo_pin: GPIO12");
         }
       }
+      this->radio->log_reg_status();
     } else if (strcmp(radio_name, "SX1262") == 0 && this->sx1262_yaml_sanity_configured_) {
       const bool t1_like = this->radio->get_listen_mode() == LISTEN_MODE_T1 || this->radio->get_listen_mode() == LISTEN_MODE_BOTH;
 
@@ -2156,6 +2157,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       }
 
       ESP_LOGI(TAG, "  rx_gain: %s", this->sx1262_yaml_rx_gain_.c_str());
+      this->radio->log_reg_status();
     } else {
       ESP_LOGI(TAG,
                "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
@@ -2165,6 +2167,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                this->diag_mode_str_.c_str(),
                this->meter_stats_str_.c_str(),
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
+      this->radio->log_reg_status();
     }
 
     this->boot_log_last_ms_ = loop_now_ms;

@@ -164,8 +164,9 @@ void SX1276::setup() {
   this->frame_active_ = false;
 
   ESP_LOGV(TAG, "SX1276 setup done (burst + tail-gap bridge)");
+}
 
-  // Register verification dump — logged once at boot for diagnostics.
+void SX1276::log_reg_status() {
   ESP_LOGI(TAG, "RegVersion=0x%02X RegOpMode=0x%02X RegIrqFlags2=0x%02X RegRssiValue=0x%02X RegDioMapping1=0x%02X RegFifoThresh=0x%02X",
            this->spi_read(REG_VERSION),
            this->spi_read(REG_OP_MODE),
