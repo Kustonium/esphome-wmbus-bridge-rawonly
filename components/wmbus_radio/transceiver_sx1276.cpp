@@ -17,6 +17,7 @@ static constexpr uint8_t REG_IRQ_FLAGS2   = 0x3F;
 static constexpr uint8_t REG_RSSI_VALUE   = 0x11;
 static constexpr uint8_t REG_FIFO_THRESH  = 0x35;
 static constexpr uint8_t REG_DIO_MAPPING1 = 0x40;
+static constexpr uint8_t REG_VERSION      = 0x42;
 
 static constexpr uint8_t FLAG2_FIFO_EMPTY   = (1 << 6);
 static constexpr uint8_t FLAG2_FIFO_LEVEL   = (1 << 5);
@@ -163,6 +164,15 @@ void SX1276::setup() {
   this->frame_active_ = false;
 
   ESP_LOGV(TAG, "SX1276 setup done (burst + tail-gap bridge)");
+
+  // Register verification dump — logged once at boot for diagnostics.
+  ESP_LOGI(TAG, "RegVersion=0x%02X RegOpMode=0x%02X RegIrqFlags2=0x%02X RegRssiValue=0x%02X RegDioMapping1=0x%02X RegFifoThresh=0x%02X",
+           this->spi_read(REG_VERSION),
+           this->spi_read(REG_OP_MODE),
+           this->spi_read(REG_IRQ_FLAGS2),
+           this->spi_read(REG_RSSI_VALUE),
+           this->spi_read(REG_DIO_MAPPING1),
+           this->spi_read(REG_FIFO_THRESH));
 }
 
 optional<uint8_t> SX1276::read() {
