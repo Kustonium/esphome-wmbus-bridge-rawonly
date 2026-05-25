@@ -421,6 +421,16 @@ bool SX1262::capture_rx_stream_() {
         break;
       }
 
+      // S1 / short packets: IRQ_RX_DONE never fires in FIXED_LEN + payload_len=0xFF
+      // when the packet is shorter than 255 bytes (radio keeps waiting for more bytes
+      // that never arrive). Without this exit the loop spins for the full 250ms safety
+      // timeout, creating a window where a second meter's bytes get mixed into our
+      // rx_buffer_ and corrupt both decodes. 30ms silence at 32.768 kcps (Manchester)
+      // is unambiguously end-of-packet.
+      if (copied > 0 && (now - last_change_ms) > 30) {
+        break;
+      }
+
       delay(1);
     }
   }
