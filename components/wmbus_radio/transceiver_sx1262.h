@@ -81,6 +81,14 @@ class SX1262 : public RadioTransceiver {
   // Long GFSK reception (Semtech AN1200.53)
   bool capture_rx_stream_();
 
+  // Adaptive long-packet mode:
+  // long_gfsk_packets=false -> always use fast normal FIFO/RX_DONE path.
+  // long_gfsk_packets=true  -> still use fast normal path by default; if a packet
+  // reaches the SX126x FIFO edge (>=250 B), enable long-stream reception for a
+  // short hold window so subsequent long frames can exceed the 255-byte FIFO limit.
+  bool long_stream_active_() const;
+  void configure_irq_params_();
+
   // Bias towards Block B (0x3D). Every 4th hop switches to Block A (0xCD).
   uint8_t sync_cycle_{0};
 
@@ -91,6 +99,9 @@ class SX1262 : public RadioTransceiver {
   SX1262RxGain rx_gain_{BOOSTED};
   bool long_gfsk_packets_{false};
   bool clear_device_errors_on_boot_{false};
+
+  // Adaptive long-stream hold. Only meaningful when long_gfsk_packets_ is true.
+  uint32_t long_stream_hold_until_ms_{0};
 
   // Captured SX126x device errors (best-effort)
   bool boot_dev_err_valid_{false};

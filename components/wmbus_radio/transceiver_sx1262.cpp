@@ -257,6 +257,25 @@ bool SX1262::has_rx_done_() {
   return (flags & IRQ_RX_DONE) != 0;
 }
 
+bool SX1262::long_stream_active_() const {
+  return this->long_gfsk_packets_ && this->long_stream_hold_until_ms_ != 0 &&
+         (int32_t) (this->long_stream_hold_until_ms_ - millis()) > 0;
+}
+
+void SX1262::configure_irq_params_() {
+  const bool stream_on_sync = this->long_stream_active_() || (this->listen_mode_ == LISTEN_MODE_S1);
+  const uint16_t mask = stream_on_sync ? (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT)
+                                       : (IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
+  const uint8_t mask_msb = (uint8_t) ((mask >> 8) & 0xFF);
+  const uint8_t mask_lsb = (uint8_t) (mask & 0xFF);
+
+  this->cmd_write_(CMD_SET_DIO_IRQ_PARAMS,
+                   {mask_msb, mask_lsb,  // IRQ mask
+                    mask_msb, mask_lsb,  // DIO1 mask
+                    0x00, 0x00,          // DIO2 mask
+                    0x00, 0x00});        // DIO3 mask
+}
+
 // ---------------------------------------------------------------------------
 // load_rx_buffer_: normal (non-long-packet) receive path.
 // After RX_DONE, reads payload length + start pointer, loads rx_buffer_, caches RSSI.
@@ -565,18 +584,10 @@ void SX1262::setup() {
                     0xFF,  // max payload
                     GFSK_CRC_OFF, GFSK_WHITENING_OFF});
 
-  // IRQ routing -> DIO1
-  const bool stream_on_sync = this->long_gfsk_packets_ || (this->listen_mode_ == LISTEN_MODE_S1);
-  const uint16_t mask = stream_on_sync ? (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT)
-                                       : (IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_TIMEOUT);
-  const uint8_t mask_msb = (uint8_t) ((mask >> 8) & 0xFF);
-  const uint8_t mask_lsb = (uint8_t) (mask & 0xFF);
-
-  this->cmd_write_(CMD_SET_DIO_IRQ_PARAMS,
-                   {mask_msb, mask_lsb,  // IRQ mask
-                    mask_msb, mask_lsb,  // DIO1 mask
-                    0x00, 0x00,          // DIO2 mask
-                    0x00, 0x00});        // DIO3 mask
+  // IRQ routing -> DIO1.
+  // Keep the fast RX_DONE-only path by default. When adaptive long-stream hold
+  // is active, restart_rx() will reconfigure this to include SYNC_WORD_VALID.
+  this->configure_irq_params_();
 
   this->restart_rx();
   ESP_LOGV(TAG, "SX1262 setup done");
@@ -619,6 +630,7 @@ void SX1262::restart_rx() {
     this->set_s1_sync_word_();
     this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
     this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
+    this->configure_irq_params_();
     this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
     this->rx_loaded_ = false;
     this->rx_idx_ = 0;
@@ -643,6 +655,10 @@ void SX1262::restart_rx() {
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
 
+  // Adaptive long-packet mode may switch IRQ routing between fast RX_DONE-only
+  // and long-stream SYNC_WORD_VALID+RX_DONE. Re-apply it each time RX is armed.
+  this->configure_irq_params_();
+
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
 
@@ -659,22 +675,34 @@ void SX1262::restart_rx() {
 // ---------------------------------------------------------------------------
 optional<uint8_t> SX1262::read() {
   if (!this->rx_loaded_) {
-    if (this->long_gfsk_packets_ || this->listen_mode_ == LISTEN_MODE_S1) {
-      // Don't start a long capture unless an IRQ is latched (SyncWordValid / RxDone / Timeout / CRCError).
-      // Otherwise we'd stop RX periodically and miss frames.
+    const bool use_long_stream = this->long_stream_active_() || this->listen_mode_ == LISTEN_MODE_S1;
+
+    if (use_long_stream) {
+      // Long stream is used only while adaptive hold is active (or S1, which is
+      // always handled as a stream). Do not use it for normal short T1 packets.
       const uint16_t irq = this->get_irq_status_();
       if ((irq & (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
         return {};
       }
-      ESP_LOGD(TAG, "IRQ=%04X, capturing RX stream (long GFSK)", irq);
+      ESP_LOGD(TAG, "IRQ=%04X, capturing RX stream (adaptive long GFSK)", irq);
       if (!this->capture_rx_stream_())
         return {};
     } else {
+      // Fast normal FIFO path. This is intentionally the default even when
+      // long_gfsk_packets_ is true; long_gfsk_packets_ only enables the
+      // adaptive fallback below when packets hit the FIFO edge.
       if (!this->irq_pin_->digital_read())
         return {};
       ESP_LOGD(TAG, "IRQ detected, loading buffer");
       if (!this->load_rx_buffer_())
         return {};
+
+      if (this->long_gfsk_packets_ && this->rx_len_ >= 250) {
+        this->long_stream_hold_until_ms_ = millis() + 300000UL;  // 5 minutes
+        ESP_LOGW(TAG,
+                 "SX1262 long-frame edge detected (payload_len=%u) -> enabling adaptive long-stream hold for 5 min",
+                 (unsigned) this->rx_len_);
+      }
     }
   }
 
