@@ -479,7 +479,16 @@ bool SX1262::capture_rx_stream_() {
   this->rx_len_ = this->rx_buffer_.size();
   this->rx_loaded_ = true;
 
-  ESP_LOGD(TAG, "Long RX captured %u bytes", (unsigned) this->rx_len_);
+  // Renew the adaptive hold if the captured frame is still long (>= 250 bytes).
+  // Without this the hold expires between consecutive transmissions of the same
+  // long-packet meter, causing the next frame to fall back to the FIFO path
+  // (truncated) and re-trigger from scratch.
+  if (this->long_gfsk_packets_ && this->rx_len_ >= 250) {
+    this->long_stream_hold_until_ms_ = millis() + 45000UL;
+    ESP_LOGD(TAG, "Long RX captured %u bytes (hold renewed for 45 s)", (unsigned) this->rx_len_);
+  } else {
+    ESP_LOGD(TAG, "Long RX captured %u bytes", (unsigned) this->rx_len_);
+  }
   return true;
 }
 
