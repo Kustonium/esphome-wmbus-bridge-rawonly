@@ -698,7 +698,9 @@ optional<uint8_t> SX1262::read() {
         return {};
 
       if (this->long_gfsk_packets_ && this->rx_len_ >= 250) {
-        this->long_stream_hold_until_ms_ = millis() + 300000UL;  // 5 minutes
+       // Keep the adaptive hold short. Fast meters may transmit every ~30s.
+       // A long hold reduces RX duty-cycle and hurts candidate discovery in dense RF.
+	   this->long_stream_hold_until_ms_ = millis() + 10000UL;  // 10 seconds
         ESP_LOGW(TAG,
                  "SX1262 long-frame edge detected (payload_len=%u) -> enabling adaptive long-stream hold for 5 min",
                  (unsigned) this->rx_len_);
