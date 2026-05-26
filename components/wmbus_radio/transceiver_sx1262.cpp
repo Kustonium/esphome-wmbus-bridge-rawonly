@@ -51,7 +51,8 @@ static constexpr uint8_t PACKET_TYPE_GFSK = 0x00;
 static constexpr uint8_t GFSK_PULSE_SHAPE_BT_0_5 = 0x09;
 static constexpr uint8_t GFSK_RX_BW_312_0 = 0x19;
 static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;  // 234.3 kHz RX bandwidth (legacy, unused)
-static constexpr uint8_t GFSK_PREAMBLE_DETECT_16 = 0x05;
+static constexpr uint8_t GFSK_PREAMBLE_DETECT_8  = 0x04;  // detect after 8 preamble bits — more sensitive, tolerates noisy/weak preamble starts
+static constexpr uint8_t GFSK_PREAMBLE_DETECT_16 = 0x05;  // detect after 16 preamble bits (previous default)
 static constexpr uint8_t GFSK_ADDRESS_FILT_OFF = 0x00;
 
 // SX126x GFSK header type:
@@ -597,7 +598,7 @@ void SX1262::setup() {
   // Always FIX_LEN for WMBus.
   const uint8_t pkt_len_mode = GFSK_PACKET_FIX_LEN;
   this->cmd_write_(CMD_SET_PACKET_PARAMS,
-                   {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_16,
+                   {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_8,
                     static_cast<uint8_t>((this->listen_mode_ == LISTEN_MODE_S1) ? 0x18 : 0x10),  // 24 bits sync for S1, 16 bits for T1/C1
                     GFSK_ADDRESS_FILT_OFF, pkt_len_mode,
                     0xFF,  // max payload
