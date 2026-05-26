@@ -2000,8 +2000,17 @@ void Radio::setup() {
   // larger receiver stack on newer builds with heavier diagnostics, while the
   // default 3 KB is still fine for existing setups. Making it runtime-configured
   // avoids board-specific forks and keeps one shared codebase.
+  // Pin to Core 1 on dual-core SoCs to avoid WiFi ISR preemption (Core 0).
+  // Priority 24: high enough to preempt WiFi (23) and ensure sub-ms wakeup
+  // after IRQ — critical for FIFO-based chips (CC1101: 64B fills in 5ms at 100kbps)
+  // and for fast radio re-arm after packet capture.
+#if portNUM_PROCESSORS > 1
+  ASSERT_SETUP(xTaskCreatePinnedToCore((TaskFunction_t)this->receiver_task, "radio_recv",
+                           this->receiver_task_stack_size_, this, 24, &(this->receiver_task_handle_), 1));
+#else
   ASSERT_SETUP(xTaskCreate((TaskFunction_t)this->receiver_task, "radio_recv",
-                           this->receiver_task_stack_size_, this, 2, &(this->receiver_task_handle_)));
+                           this->receiver_task_stack_size_, this, 24, &(this->receiver_task_handle_)));
+#endif
 
   ESP_LOGI(TAG, "Receiver task created / utworzono task odbiornika [%p], stack=%u bytes",
            this->receiver_task_handle_, (unsigned) this->receiver_task_stack_size_);
@@ -2632,7 +2641,12 @@ void Radio::wakeup_receiver_task_from_isr(TaskHandle_t *arg) {
 
 void Radio::receive_frame() {
   const uint32_t total_wait_ms = 60000;
-  const uint32_t hop_ms = 500;
+  // Hop interval: how often restart_rx() is called while waiting for a packet.
+  // 500ms was too aggressive — radio is blind during SPI re-arm, so a packet
+  // arriving in that window is lost. At 40+ meters with ~30s TX intervals the
+  // blind window hit statistically every few cycles. 5000ms keeps the safety-net
+  // re-arm while reducing the chance of colliding with an incoming packet by 10x.
+  const uint32_t hop_ms = 5000;
   uint32_t waited = 0;
   bool got_irq = false;
   while (waited < total_wait_ms) {
