@@ -587,8 +587,9 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   }
 
   // Weak signal — suggest drop_events + raw.
+  // Require total >= 20 to avoid firing on a handful of packets right after boot.
   // Skip if already enabled in YAML.
-  if (drop_pct >= 40 && this->diag_rssi_ok_n_ > 0 && (!this->diag_publish_drop_events_ || !this->diag_publish_raw_)) {
+  if (total >= 20 && drop_pct >= 40 && this->diag_rssi_ok_n_ > 0 && (!this->diag_publish_drop_events_ || !this->diag_publish_raw_)) {
     const int32_t avg_ok_rssi = this->diag_rssi_ok_sum_ / (int32_t) this->diag_rssi_ok_n_;
     if (avg_ok_rssi <= -85) {
       publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
@@ -601,22 +602,30 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   }
 
   // SX1262: symbol errors — suggest checking cpu_frequency.
+  // Requires: >= 10% invalid symbols (not just noise), >= 500 symbols counted (statistical
+  // significance), drop_pct >= 5 (symbol errors must cause actual losses to be actionable),
+  // total >= 20 (enough packets to distinguish real pattern from boot transient).
   // No YAML state to check — cpu_frequency is an ESPHome board setting, not a wmbus option.
-  if (!is_sx1276 && t1_sym_inv_pct >= 3) {
+  if (!is_sx1276
+      && t1_sym_inv_pct >= 10
+      && this->diag_t1_symbols_total_ >= 500
+      && drop_pct >= 5
+      && total >= 20) {
     publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
         chip, "SX1262_SYMBOL_ERRORS",
         "cpu_frequency", "160MHz",
         "cpu_frequency: 160MHz",
-        "SX1262 shows T1 symbol errors. Check cpu_frequency — 240MHz can cause EMI affecting reception. Use 160MHz.",
-        "SX1262 pokazuje błędy symboli T1. Sprawdź cpu_frequency — 240MHz może powodować EMI wpływające na odbiór. Użyj 160MHz.");
+        "SX1262 shows T1 symbol errors (>=10%) with real packet losses. Check cpu_frequency — 240MHz can cause EMI affecting reception. Use 160MHz.",
+        "SX1262 pokazuje błędy symboli T1 (>=10%) z realnymi stratami. Sprawdź cpu_frequency — 240MHz może powodować EMI wpływające na odbiór. Użyj 160MHz.");
   }
 
   // Quiet ether on SX1276 with adaptive — suggest considering normal mode.
+  // Require total >= 30 to avoid firing too early after boot on sparse RF environments.
   // Skip if already set to normal in YAML.
   if (is_sx1276 &&
       this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE &&
       now_ms > this->busy_ether_active_until_ms_ &&
-      fsl < 20 && total >= 3) {
+      fsl < 20 && total >= 30) {
     publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
         chip, "QUIET_ETHER_ADAPTIVE_IDLE",
         "sx1276_busy_ether_mode", "normal",
