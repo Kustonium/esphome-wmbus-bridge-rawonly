@@ -33,6 +33,7 @@ class CC1101 : public RadioTransceiver {
   bool consume_rx_abort_request() override;
   uint32_t take_fifo_overrun_count() override;
   void dump_debug_status(const char *reason) override;
+  void log_reg_status() override;
 
  protected:
   InternalGPIOPin *gdo0_pin_{nullptr};

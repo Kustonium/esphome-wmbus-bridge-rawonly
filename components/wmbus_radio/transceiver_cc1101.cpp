@@ -612,6 +612,12 @@ void CC1101::dump_debug_status(const char *reason) {
            frend1, fscal3, sync1, sync0);
 }
 
+void CC1101::log_reg_status() {
+  // Reuse the existing CC1101 register/status dump after the delayed boot log.
+  // This keeps the RX path and startup validation logic unchanged.
+  this->dump_debug_status("boot_log");
+}
+
 void CC1101::setup() {
   // CC1101 deliberately does not use the generic reset_pin/irq_pin-only setup.
   // It needs both GDO2(sync) and GDO0(FIFO threshold) for deterministic RX.
