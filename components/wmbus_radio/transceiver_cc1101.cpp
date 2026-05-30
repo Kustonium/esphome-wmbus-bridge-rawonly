@@ -173,6 +173,12 @@ static const char *gdo_signal_name_(uint8_t value) {
 
 static bool reg_ok_(uint8_t got, uint8_t expected) { return got == expected; }
 
+static bool fscal3_config_ok_(uint8_t got, uint8_t expected) {
+  // FSCAL3[7:4] contains configuration bits.
+  // FSCAL3[3:0] is a runtime calibration result and may legitimately change after SCAL.
+  return (got & 0xF0) == (expected & 0xF0);
+}
+
 static void log_expected_reg_(const char *name, uint8_t got, uint8_t expected,
                               const char *meaning_en, const char *meaning_pl) {
   if (got == expected) {
@@ -395,7 +401,20 @@ bool CC1101::validate_startup_config_() {
   check("AGCCTRL1", agc1, EXP_AGCCTRL1, "AGC profile", "profil AGC");
   check("AGCCTRL0", agc0, EXP_AGCCTRL0, "AGC profile", "profil AGC");
   check("FREND1", frend1, EXP_FREND1, "RF frontend profile", "profil toru RF");
-  check("FSCAL3", fscal3, EXP_FSCAL3, "frequency synthesizer calibration", "kalibracja syntezy czestotliwosci");
+  const bool fscal3_ok = fscal3_config_ok_(fscal3, EXP_FSCAL3);
+  ok = ok && fscal3_ok;
+  if (fscal3_ok) {
+    ESP_LOGI(TAG,
+             "CC1101 check OK / test OK: FSCAL3=0x%02X "
+             "(config bits match 0x%02X; result nibble may vary after SCAL / "
+             "bity konfiguracji zgodne z 0x%02X; wynik kalibracji moze sie zmieniac po SCAL)",
+             fscal3, EXP_FSCAL3 & 0xF0, EXP_FSCAL3 & 0xF0);
+  } else {
+    ESP_LOGE(TAG,
+             "CC1101 CONFIG MISMATCH / blad konfiguracji: FSCAL3 expected config bits=0x%02X got=0x%02X "
+             "(only FSCAL3[7:4] are validated / sprawdzane sa tylko bity FSCAL3[7:4])",
+             EXP_FSCAL3 & 0xF0, fscal3);
+  }
 
   if (ok) {
     ESP_LOGI(TAG,
@@ -471,7 +490,7 @@ void CC1101::dump_debug_status(const char *reason) {
       reg_ok_(deviatn, EXP_DEVIATN) && reg_ok_(foccfg, EXP_FOCCFG) &&
       reg_ok_(bscfg, EXP_BSCFG) && reg_ok_(agc2, EXP_AGCCTRL2) &&
       reg_ok_(agc1, EXP_AGCCTRL1) && reg_ok_(agc0, EXP_AGCCTRL0) &&
-      reg_ok_(frend1, EXP_FREND1) && reg_ok_(fscal3, EXP_FSCAL3);
+      reg_ok_(frend1, EXP_FREND1) && fscal3_config_ok_(fscal3, EXP_FSCAL3);
 
   const bool config_ok = spi_ok && version_ok && partnum_ok && gdo2_cfg_ok && gdo0_cfg_ok &&
                          fifothr_ok && pktctrl1_ok && pktctrl0_ok && rf_profile_ok && sync_known;
