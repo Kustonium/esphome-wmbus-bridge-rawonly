@@ -6,3 +6,11 @@ __pycache__/
 _bmad/
 _bmad\
 _bmad-output/
+
+# Local AI / BMAD workflow files
+/.agents/
+/.claude/
+/_bmad/
+/_bmad-output/
+/_bmad-custom-backup-temp/
+/CLAUDE.md
