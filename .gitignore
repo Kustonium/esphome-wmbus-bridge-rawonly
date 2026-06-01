@@ -2,5 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .claude/
+.agents/
 _bmad/
 _bmad\
+_bmad-output/
