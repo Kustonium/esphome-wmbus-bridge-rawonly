@@ -659,15 +659,25 @@ void Radio::maybe_publish_health_(uint32_t now_ms) {
     // -1 until the first frame is received (honest "never heard anything yet").
     const int32_t sec_since_last_rx =
         this->any_rx_ ? (int32_t) ((now_ms - this->last_rx_ms_) / 1000U) : -1;
-    char payload[192];
+    // Recent average RSSI of OK frames (EWMA), maintained always — even with
+    // diagnostics off — because the adaptive RF logic depends on it. This is the
+    // real radio RSSI (negative dBm), unlike the 0 that wmbusmeters reports from
+    // the RAW-hex stream downstream. 1 = "no valid sample yet" (RSSI is always
+    // negative); the consumer should treat rx_total==0 as "no signal data".
+    const int32_t rssi = this->recent_ok_rssi_valid_ ? this->recent_ok_rssi_avg_ : 1;
+    char payload[224];
     snprintf(payload, sizeof(payload),
              "{\"uptime_s\":%lu,\"rx_total\":%u,\"sec_since_last_rx\":%ld,"
-             "\"chip\":\"%s\",\"listen_mode\":\"%s\"}",
+             "\"rssi\":%ld,\"chip\":\"%s\",\"listen_mode\":\"%s\"}",
              (unsigned long) (now_ms / 1000U),
              (unsigned) this->rx_total_lifetime_,
              (long) sec_since_last_rx,
+             (long) rssi,
              chip, listen_mode);
-    mqtt->publish(this->health_topic_, payload, static_cast<uint8_t>(0), false);
+    // std::string(...) disambiguates the publish() overload set: a bare char[]
+    // is ambiguous between the (const char*, size_t, ...) and (const std::string&,
+    // ...) signatures; wrapping forces the string overload (as elsewhere here).
+    mqtt->publish(this->health_topic_, std::string(payload), static_cast<uint8_t>(0), false);
   }
 
   if (!this->meters_topic_.empty()) {
