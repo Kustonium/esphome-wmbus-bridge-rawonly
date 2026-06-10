@@ -636,6 +636,79 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
 }
 
 
+void Radio::maybe_publish_health_(uint32_t now_ms) {
+  // Always-on (independent of diagnostic_mode). Two sibling topics:
+  //   {health_topic}  -> liveness + identity pulse (no quality fields)
+  //   {meters_topic}  -> meters the ESP explicitly knows about (target + highlight)
+  // Both retain=false: a liveness/flag signal must never replay as a stale
+  // tombstone to a freshly-connected subscriber (the addon applies its own TTL).
+  if (this->health_topic_.empty() && this->meters_topic_.empty()) return;
+  // last_health_ms_ == 0 means "publish ASAP" so the addon sees us within one
+  // loop of MQTT connect, not after a full interval.
+  if (this->last_health_ms_ != 0 && (now_ms - this->last_health_ms_) < HEALTH_INTERVAL_MS_) return;
+
+  auto *mqtt = mqtt::global_mqtt_client;
+  if (mqtt == nullptr || !mqtt->is_connected()) return;  // retry next loop; do not advance timer
+  this->last_health_ms_ = now_ms;
+
+  if (!this->health_topic_.empty()) {
+    const char *chip = (this->radio != nullptr) ? this->radio->get_name() : "unknown";
+    const char *listen_mode = (this->radio != nullptr)
+                                  ? listen_mode_to_string_(this->radio->get_listen_mode())
+                                  : "unknown";
+    // -1 until the first frame is received (honest "never heard anything yet").
+    const int32_t sec_since_last_rx =
+        this->any_rx_ ? (int32_t) ((now_ms - this->last_rx_ms_) / 1000U) : -1;
+    // Recent average RSSI of OK frames (EWMA), maintained always — even with
+    // diagnostics off — because the adaptive RF logic depends on it. This is the
+    // real radio RSSI (negative dBm), unlike the 0 that wmbusmeters reports from
+    // the RAW-hex stream downstream. 1 = "no valid sample yet" (RSSI is always
+    // negative); the consumer should treat rx_total==0 as "no signal data".
+    const int32_t rssi = this->recent_ok_rssi_valid_ ? this->recent_ok_rssi_avg_ : 1;
+    char payload[224];
+    snprintf(payload, sizeof(payload),
+             "{\"uptime_s\":%lu,\"rx_total\":%u,\"sec_since_last_rx\":%ld,"
+             "\"rssi\":%ld,\"chip\":\"%s\",\"listen_mode\":\"%s\"}",
+             (unsigned long) (now_ms / 1000U),
+             (unsigned) this->rx_total_lifetime_,
+             (long) sec_since_last_rx,
+             (long) rssi,
+             chip, listen_mode);
+    // std::string(...) disambiguates the publish() overload set: a bare char[]
+    // is ambiguous between the (const char*, size_t, ...) and (const std::string&,
+    // ...) signatures; wrapping forces the string overload (as elsewhere here).
+    mqtt->publish(this->health_topic_, std::string(payload), static_cast<uint8_t>(0), false);
+  }
+
+  if (!this->meters_topic_.empty()) {
+    // highlight_meters_csv_ is a comma-separated list joined in python; emit it
+    // as a JSON array of quoted ids. target is a single id ("" when unset).
+    std::string arr = "[";
+    bool first = true;
+    const std::string &csv = this->highlight_meters_csv_;
+    size_t start = 0;
+    while (start <= csv.size()) {
+      size_t comma = csv.find(',', start);
+      std::string tok = csv.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+      // trim spaces
+      while (!tok.empty() && (tok.front() == ' ' || tok.front() == '\t')) tok.erase(tok.begin());
+      while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\t')) tok.pop_back();
+      if (!tok.empty()) {
+        if (!first) arr += ',';
+        arr += '"';
+        arr += tok;
+        arr += '"';
+        first = false;
+      }
+      if (comma == std::string::npos) break;
+      start = comma + 1;
+    }
+    arr += ']';
+    std::string payload = "{\"target\":\"" + this->target_meter_id_str_ + "\",\"highlight\":" + arr + "}";
+    mqtt->publish(this->meters_topic_, payload, static_cast<uint8_t>(0), false);
+  }
+}
+
 void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   if (!this->diag_publish_summary_) return;
   if (this->diag_topic_.empty()) return;
@@ -2239,6 +2312,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     return;
   }
 
+  this->maybe_publish_health_(loop_now_ms);
   this->maybe_publish_diag_summary_(loop_now_ms);
   this->maybe_publish_diag_15min_summary_(loop_now_ms);
   this->maybe_publish_diag_60min_summary_(loop_now_ms);
@@ -2297,6 +2371,12 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   this->diag_total_++;
   this->diag_15m_total_++;
   this->diag_60min_total_++;
+  // Always-on liveness: proof the RX path delivered a frame (not just that the
+  // main loop ticks). Drives the health pulse's sec_since_last_rx, independent
+  // of diagnostic_mode.
+  this->rx_total_lifetime_++;
+  this->last_rx_ms_ = loop_now_ms;
+  this->any_rx_ = true;
   if (mode_idx < this->diag_mode_total_.size()) this->diag_mode_total_[mode_idx]++;
   if (mode_idx < this->diag_15m_mode_total_.size()) this->diag_15m_mode_total_[mode_idx]++;
   if (mode_idx < this->diag_60min_mode_total_.size()) this->diag_60min_mode_total_[mode_idx]++;

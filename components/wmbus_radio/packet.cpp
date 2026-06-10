@@ -269,9 +269,8 @@ static ParseAttemptResult try_parse_t1_(const std::vector<uint8_t> &raw) {
     return out;
   }
 
-  std::vector<uint8_t> decoded_input = raw;
   Decode3of6Stats st;
-  auto decoded_data = decode3of6(decoded_input, &st);
+  auto decoded_data = decode3of6(raw, &st);
   out.t1_symbols_total = st.symbols_total;
   out.t1_symbols_invalid = st.symbols_invalid;
   if (!decoded_data || decoded_data->size() < 2) {
@@ -592,17 +591,23 @@ std::optional<Frame> Packet::convert_to_frame() {
   // This avoids a hard one-shot decision where a borderline packet gets pushed
   // through the wrong parser and we lose a valid candidate.
   const ParseAttemptResult first = looks_c1 ? try_parse_c1_(raw) : try_parse_t1_(raw);
-  const ParseAttemptResult second = looks_c1 ? try_parse_t1_(raw) : try_parse_c1_(raw);
 
+  // Run the alternate parser only when the preferred one fails. When `first`
+  // succeeds, `second` was never read — computing it eagerly burned a full
+  // parse (for C1->T1 fallback, a whole 3-of-6 decode) on every good packet.
+  ParseAttemptResult second;
   const ParseAttemptResult *chosen = nullptr;
   bool fallback_used = false;
   if (first.ok) {
     chosen = &first;
-  } else if (second.ok) {
-    chosen = &second;
-    fallback_used = true;
   } else {
-    chosen = &pick_better_failure_(first, second);
+    second = looks_c1 ? try_parse_t1_(raw) : try_parse_c1_(raw);
+    if (second.ok) {
+      chosen = &second;
+      fallback_used = true;
+    } else {
+      chosen = &pick_better_failure_(first, second);
+    }
   }
 
   // Copy chosen result back into the packet object used by the rest of the pipeline.

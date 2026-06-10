@@ -441,7 +441,15 @@ async def to_code(config):
     else:
         diag_topic = ""
 
+    # Always-on radio health pulse + ESP-side meter flags. Derived from
+    # topic_name regardless of diagnostic_mode, so the addon can present Layer 1
+    # ("ESP alive") and the ESP-flagged meter badge even when diagnostics are off.
+    health_topic = f"wmbus/{topic_name}/health"
+    meters_topic = f"wmbus/{topic_name}/meters"
+
     cg.add(var.set_diag_topic(diag_topic))
+    cg.add(var.set_health_topic(health_topic))
+    cg.add(var.set_meters_topic(meters_topic))
     cg.add(var.set_telegram_topic(telegram_topic))
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
     cg.add(var.set_target_topic(config.get(CONF_TARGET_TOPIC, "")))

@@ -1,23 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "decode3of6.h"
 
-#include <map>
-
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "3of6";
-std::optional<std::vector<uint8_t>>
-decode3of6(std::vector<uint8_t> &coded_data, Decode3of6Stats *stats) {
 
-  static const std::map<uint8_t, uint8_t> lookupTable = {
-      {0b010110, 0x0}, {0b001101, 0x1}, {0b001110, 0x2}, {0b001011, 0x3},
-      {0b011100, 0x4}, {0b011001, 0x5}, {0b011010, 0x6}, {0b010011, 0x7},
-      {0b101100, 0x8}, {0b100101, 0x9}, {0b100110, 0xA}, {0b100011, 0xB},
-      {0b110100, 0xC}, {0b110001, 0xD}, {0b110010, 0xE}, {0b101001, 0xF},
-  };
+// Flat 6-bit -> nibble lookup. `code` is always masked to 0..63 below, so a
+// 64-entry array is a direct index (O(1), cache-friendly) instead of an
+// std::map tree walk per symbol. INVALID marks the 48 codes that are not part
+// of the 16-symbol 3-of-6 alphabet (EN 13757-4); seeing one means a bit error
+// or collision, exactly like a failed map lookup did before.
+static constexpr uint8_t INVALID = 0xFF;
+static const uint8_t LOOKUP_3OF6[64] = {
+    // 0x00-0x07
+    INVALID, INVALID, INVALID, INVALID, INVALID, INVALID, INVALID, INVALID,
+    // 0x08-0x0F
+    INVALID, INVALID, INVALID, 0x3,     INVALID, 0x1,     0x2,     INVALID,
+    // 0x10-0x17
+    INVALID, INVALID, INVALID, 0x7,     INVALID, INVALID, 0x0,     INVALID,
+    // 0x18-0x1F
+    INVALID, 0x5,     0x6,     INVALID, 0x4,     INVALID, INVALID, INVALID,
+    // 0x20-0x27
+    INVALID, INVALID, INVALID, 0xB,     INVALID, 0x9,     0xA,     INVALID,
+    // 0x28-0x2F
+    INVALID, 0xF,     INVALID, INVALID, 0x8,     INVALID, INVALID, INVALID,
+    // 0x30-0x37
+    INVALID, 0xD,     0xE,     INVALID, 0xC,     INVALID, INVALID, INVALID,
+    // 0x38-0x3F
+    INVALID, INVALID, INVALID, INVALID, INVALID, INVALID, INVALID, INVALID,
+};
+
+std::optional<std::vector<uint8_t>>
+decode3of6(const std::vector<uint8_t> &coded_data, Decode3of6Stats *stats) {
 
   // ESP_LOGD(TAG, "Decoding 3of6 data: %s", format_hex(coded_data).c_str());
 
@@ -49,23 +66,23 @@ decode3of6(std::vector<uint8_t> &coded_data, Decode3of6Stats *stats) {
     }
     code >>= 2;
 
-    auto it = lookupTable.find(code);
-    if (it == lookupTable.end()) {
+    // `code` holds the 6-bit symbol in bits 5..0 (top two bits already shifted
+    // out above), so it is guaranteed to be 0..63 — a safe direct LUT index.
+    const uint8_t nibble = LOOKUP_3OF6[code];
+    if (nibble == INVALID) {
       // Invalid 6-bit symbol.
       invalid++;
       // Keep alignment so we can continue counting and preserve nibble pairing.
       // We still return nullopt at the end if any invalid symbols were seen.
       if (i % 2 == 0)
         decodedBytes.push_back(0x00);
-      else
-        decodedBytes.back() |= 0x00;
       continue;
     }
 
     if (i % 2 == 0)
-      decodedBytes.push_back(it->second << 4);
+      decodedBytes.push_back(nibble << 4);
     else
-      decodedBytes.back() |= it->second;
+      decodedBytes.back() |= nibble;
   }
 
   if (stats != nullptr) {

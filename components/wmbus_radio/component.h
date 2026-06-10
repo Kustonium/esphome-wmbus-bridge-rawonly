@@ -31,6 +31,12 @@ public:
   void set_radio(RadioTransceiver *radio) { this->radio = radio; };
   void set_diag_topic(const std::string &topic) { this->diag_topic_ = topic; }
 
+  // Always-on radio health pulse + ESP-side meter flags (independent of
+  // diagnostic_mode). The addon presents Layer 1 ("ESP alive = ear alive") and
+  // the ESP-flagged meter badge from these, even when diagnostics are off.
+  void set_health_topic(const std::string &topic) { this->health_topic_ = topic; }
+  void set_meters_topic(const std::string &topic) { this->meters_topic_ = topic; }
+
   // Optional built-in RAW forwarding to MQTT.
   void set_telegram_topic(const std::string &topic) { this->telegram_topic_ = topic; }
   void set_target_meter_id_str(const std::string &meter_id) { this->target_meter_id_str_ = meter_id; }
@@ -168,6 +174,20 @@ protected:
   // This keeps T1 and C1 statistics separate for dual-mode meters
   // (e.g. a device that transmits the same ID on both T1 and C1).
   std::unordered_map<uint64_t, MeterStats> highlight_meter_stats_{};
+
+  // Always-on radio health pulse + ESP-side meter flags. Published every
+  // HEALTH_INTERVAL_MS_ regardless of diagnostic_mode, with retain=false (a
+  // liveness signal must never become a retained tombstone). The pulse carries
+  // proof that the RX path is alive (sec_since_last_rx), not just that the main
+  // loop ticks.
+  std::string health_topic_{};
+  std::string meters_topic_{};
+  uint32_t rx_total_lifetime_{0};   // monotonic count of received (filtered) frames
+  uint32_t last_rx_ms_{0};          // millis() of the last received frame
+  bool any_rx_{false};              // false until the first frame is received
+  uint32_t last_health_ms_{0};      // last health/meters publish (0 = publish ASAP)
+  static constexpr uint32_t HEALTH_INTERVAL_MS_ = 60000;
+  void maybe_publish_health_(uint32_t now_ms);
 
   // Optional RAW forwarding / target forwarding.
   std::string telegram_topic_{};

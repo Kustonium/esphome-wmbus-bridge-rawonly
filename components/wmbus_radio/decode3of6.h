@@ -17,7 +17,7 @@ struct Decode3of6Stats {
 };
 
 std::optional<std::vector<uint8_t>>
-decode3of6(std::vector<uint8_t> &coded_data, Decode3of6Stats *stats = nullptr);
+decode3of6(const std::vector<uint8_t> &coded_data, Decode3of6Stats *stats = nullptr);
 size_t encoded_size(size_t decoded_size);
 } // namespace wmbus_radio
 } // namespace esphome
