@@ -561,7 +561,10 @@ std::optional<Frame> Packet::convert_to_frame() {
   // Capture raw bytes early so dropped packets can be inspected later from MQTT/logs.
   this->raw_hex_ = hex_prefix_(this->data_, 256);
 
-  const std::vector<uint8_t> raw = this->data_;
+  // Reference, not a copy: the parsers only read `raw` (const &), and
+  // `this->data_` is not overwritten until the write-back below, so the former
+  // full per-packet buffer copy (up to ~250 B) was unnecessary.
+  const std::vector<uint8_t> &raw = this->data_;
   const bool forced_s1 = (this->link_mode_ == LinkMode::S1);
   const bool looks_c1 = !raw.empty() && raw[0] == WMBUS_MODE_C_PREAMBLE;
 
@@ -611,7 +614,11 @@ std::optional<Frame> Packet::convert_to_frame() {
   }
 
   // Copy chosen result back into the packet object used by the rest of the pipeline.
-  this->data_ = chosen->data;
+  // The frame buffer is moved (not copied): `chosen` points at the non-const
+  // locals `first`/`second` (directly, or via pick_better_failure_), whose
+  // `data` is not read again after this. const_cast is safe — the referents are
+  // non-const. The small scalar/string fields below are still copied.
+  this->data_ = std::move(const_cast<ParseAttemptResult &>(*chosen).data);
   this->link_mode_ = chosen->mode;
   this->frame_format_ = chosen->frame_format;
   this->truncated_ = chosen->truncated;
