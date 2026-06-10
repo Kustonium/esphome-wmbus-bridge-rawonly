@@ -2345,6 +2345,9 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     }
   }
 
+  // The raw-hex capture inside convert_to_frame() is only ever read behind
+  // diag_publish_raw_, so let the packet skip it when that's off.
+  p->set_capture_raw_hex(this->diag_publish_raw_);
   auto frame = p->convert_to_frame();
 
   if (this->listen_mode_filter_after_parse_) {

@@ -99,13 +99,13 @@ void Packet::set_drop_(const char *stage, const char *reason, const std::string 
 
 // Determine the link mode based on the first byte of the data
 LinkMode Packet::link_mode() {
-  if (this->link_mode_ == LinkMode::UNKNOWN)
-    if (this->data_.size())
-      if (this->data_[0] == WMBUS_MODE_C_PREAMBLE)
-        this->link_mode_ = LinkMode::C1;
-      else
-        this->link_mode_ = LinkMode::T1;
-
+  if (this->link_mode_ == LinkMode::UNKNOWN && !this->data_.empty()) {
+    if (this->data_[0] == WMBUS_MODE_C_PREAMBLE) {
+      this->link_mode_ = LinkMode::C1;
+    } else {
+      this->link_mode_ = LinkMode::T1;
+    }
+  }
   return this->link_mode_;
 }
 
@@ -334,33 +334,41 @@ static ParseAttemptResult try_parse_c1_(const std::vector<uint8_t> &raw) {
     return out;
   }
 
-  out.data = raw;
-  if (out.data[0] != WMBUS_MODE_C_PREAMBLE) {
+  // Run the preamble/suffix prechecks on `raw` and copy into out.data only
+  // once they pass, skipping the two suffix bytes in the same copy. The old
+  // copy-then-erase(begin) paid a full memmove of the frame on every good C1
+  // packet. Failure paths below still copy the whole raw frame into out.data
+  // so downstream diagnostics (try_get_meter_id on dropped packets, which
+  // understands a raw C1 frame with its suffix) see exactly what they used to.
+  if (raw[0] != WMBUS_MODE_C_PREAMBLE) {
+    out.data = raw;
     char detail[64];
     snprintf(detail, sizeof(detail), "first_byte=%02X raw_len=%u",
-             (unsigned) out.data[0], (unsigned) out.data.size());
+             (unsigned) raw[0], (unsigned) raw.size());
     set_attempt_drop_(out, "c1_precheck", "unknown_preamble", detail);
     return out;
   }
 
-  if (out.data[1] == WMBUS_BLOCK_A_PREAMBLE) {
+  if (raw[1] == WMBUS_BLOCK_A_PREAMBLE) {
     out.frame_format = "A";
-  } else if (out.data[1] == WMBUS_BLOCK_B_PREAMBLE) {
+  } else if (raw[1] == WMBUS_BLOCK_B_PREAMBLE) {
     out.frame_format = "B";
   } else {
+    out.data = raw;
     char detail[64];
-    snprintf(detail, sizeof(detail), "preamble=%02X raw_len=%u", (unsigned) out.data[1], (unsigned) out.data.size());
+    snprintf(detail, sizeof(detail), "preamble=%02X raw_len=%u", (unsigned) raw[1], (unsigned) raw.size());
     set_attempt_drop_(out, "c1_preamble", "unknown_preamble", detail);
     return out;
   }
 
-  if (out.data.size() < WMBUS_MODE_C_SUFIX_LEN) {
+  if (raw.size() < WMBUS_MODE_C_SUFIX_LEN) {
+    out.data = raw;
     set_attempt_drop_(out, "c1_suffix", "too_short",
-                      "raw_len=" + std::to_string((unsigned) out.data.size()) + " min_suffix=2");
+                      "raw_len=" + std::to_string((unsigned) raw.size()) + " min_suffix=2");
     return out;
   }
 
-  out.data.erase(out.data.begin(), out.data.begin() + WMBUS_MODE_C_SUFIX_LEN);
+  out.data.assign(raw.begin() + WMBUS_MODE_C_SUFIX_LEN, raw.end());
   out.suffix_ignored = WMBUS_MODE_C_SUFIX_LEN;
   out.decoded_len = out.data.size();
 
@@ -558,8 +566,12 @@ std::optional<Frame> Packet::convert_to_frame() {
   this->t1_symbols_total_ = 0;
   this->t1_symbols_invalid_ = 0;
 
-  // Capture raw bytes early so dropped packets can be inspected later from MQTT/logs.
-  this->raw_hex_ = hex_prefix_(this->data_, 256);
+  // Capture raw bytes early so dropped packets can be inspected later from
+  // MQTT/logs. Skipped when the component knows nothing will read it
+  // (diag_publish_raw off — the default), because this builds an
+  // up-to-512-char heap string for every packet, good ones included.
+  if (this->capture_raw_hex_)
+    this->raw_hex_ = hex_prefix_(this->data_, 256);
 
   // Reference, not a copy: the parsers only read `raw` (const &), and
   // `this->data_` is not overwritten until the write-back below, so the former

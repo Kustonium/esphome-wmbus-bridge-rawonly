@@ -58,6 +58,11 @@ public:
   // Raw packet bytes (hex) captured at the beginning of convert_to_frame().
   // Intended for diagnostics; may be truncated to keep MQTT/log payloads small.
   const std::string &raw_hex() const { return this->raw_hex_; }
+  // Skip the raw-hex capture when nothing will read it: raw_hex() is only
+  // consumed behind diag_publish_raw (off by default), yet the capture builds
+  // an up-to-512-char heap string for every packet. Defaults to true so
+  // callers that never set it (e.g. host tests) keep the old behaviour.
+  void set_capture_raw_hex(bool enabled) { this->capture_raw_hex_ = enabled; }
   std::string packet_hex() const;
 
   // Best-effort meter id extraction from the current packet buffer.
@@ -96,6 +101,7 @@ protected:
   std::string drop_stage_{};
   std::string drop_detail_{};
   std::string raw_hex_{};
+  bool capture_raw_hex_{true};
 
   // T1 (3-of-6) symbol diagnostics
   uint16_t t1_symbols_total_{0};
