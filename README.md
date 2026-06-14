@@ -16,6 +16,8 @@ RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262,
 
 The ESP device is a radio receiver and MQTT publisher. It does not decode meter values on the ESP.
 
+> 🌉 Together with the Home Assistant add-on [`homeassistant-wmbus-mqtt-bridge`](https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge) this ESP is the **radio front-end of a distributed wM-Bus → Home Assistant gateway**: the ESP receives and forwards RAW HEX, the add-on decrypts and decodes. Unlike a monolithic wM-Bus gateway (radio + decoder in one box), the decode side is offloaded to Home Assistant — no meter drivers and no AES keys live on the ESP.
+
 It does:
 
 - receive T1/C1 frames and experimental S1 frames,
@@ -154,6 +156,8 @@ Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na S
 ### Czym jest ten projekt
 
 Urządzenie ESP jest odbiornikiem radiowym i publisherem MQTT. Nie dekoduje wartości liczników na ESP.
+
+> 🌉 Razem z dodatkiem Home Assistant [`homeassistant-wmbus-mqtt-bridge`](https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge) ten ESP jest **radiowym frontendem rozproszonego gatewaya wM-Bus → Home Assistant**: ESP odbiera i przekazuje RAW HEX, add-on deszyfruje i dekoduje. W odróżnieniu od monolitycznej bramki wM-Bus (radio + dekoder w jednym pudełku) dekodowanie jest przeniesione na Home Assistant — na ESP nie ma driverów ani kluczy AES.
 
 Robi:
 
