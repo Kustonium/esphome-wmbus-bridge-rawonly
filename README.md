@@ -18,6 +18,8 @@ The ESP device is a radio receiver and MQTT publisher. It does not decode meter 
 
 > 🌉 Together with the Home Assistant add-on [`homeassistant-wmbus-mqtt-bridge`](https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge) this ESP is the **radio front-end of a distributed wM-Bus → Home Assistant gateway**: the ESP receives and forwards RAW HEX, the add-on decrypts and decodes. Unlike a monolithic wM-Bus gateway (radio + decoder in one box), the decode side is offloaded to Home Assistant — no meter drivers and no AES keys live on the ESP. The ESP also works standalone with any MQTT backend (Node-RED, a custom script), and the add-on accepts hex from any source (rtl-wmbus, another gateway, the replay tool) — the two cooperate, but neither depends on the other.
 
+> 🧱 **Responsibility boundary.** This firmware is an MQTT client: it publishes to a topic and its scope ends there. The broker — authentication, ACLs, TLS, network exposure and any broker-to-broker bridging for remote/distributed setups (site A → internet → site B) — is the operator's responsibility. Keep the broker on your LAN and use a tunnel/VPN or TLS broker bridging for remote access; do not expose port 1883 to the internet.
+
 It does:
 
 - receive T1/C1 frames and experimental S1 frames,
@@ -158,6 +160,8 @@ Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na S
 Urządzenie ESP jest odbiornikiem radiowym i publisherem MQTT. Nie dekoduje wartości liczników na ESP.
 
 > 🌉 Razem z dodatkiem Home Assistant [`homeassistant-wmbus-mqtt-bridge`](https://github.com/Kustonium/homeassistant-wmbus-mqtt-bridge) ten ESP jest **radiowym frontendem rozproszonego gatewaya wM-Bus → Home Assistant**: ESP odbiera i przekazuje RAW HEX, add-on deszyfruje i dekoduje. W odróżnieniu od monolitycznej bramki wM-Bus (radio + dekoder w jednym pudełku) dekodowanie jest przeniesione na Home Assistant — na ESP nie ma driverów ani kluczy AES. ESP działa też samodzielnie z dowolnym backendem MQTT (Node-RED, własny skrypt), a add-on przyjmuje hex z dowolnego źródła (rtl-wmbus, inny gateway, narzędzie replay) — współpracują, ale żadna strona nie zależy od drugiej.
+
+> 🧱 **Granica odpowiedzialności.** To firmware jest klientem MQTT: publikuje na temat i jego zakres tam się kończy. Broker — uwierzytelnianie, ACL, TLS, ekspozycja sieciowa oraz ewentualny mostek broker-broker dla instalacji zdalnych/rozproszonych (lokalizacja A → internet → lokalizacja B) — jest odpowiedzialnością operatora. Trzymaj broker w LAN, a do dostępu zdalnego użyj tunelu/VPN albo mostka brokera z TLS; nie wystawiaj portu 1883 do internetu.
 
 Robi:
 
