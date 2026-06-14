@@ -34,6 +34,12 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_user
   password: !secret mqtt_password
+  # EN: plain MQTT on 1883; don't enable TLS unless your broker has a valid cert
+  #     (a wrong/unknown cert blocks the ESP from connecting).
+  # PL: zwykłe MQTT na 1883; nie włączaj TLS bez pewności co do certu brokera
+  #     (zły/nieznany cert blokuje połączenie ESP).
+  port: 1883
+  skip_cert_cn_check: true
 
 api:
 ota:

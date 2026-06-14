@@ -39,6 +39,12 @@ mqtt:
   broker: !secret mqtt_broker
   username: !secret mqtt_user
   password: !secret mqtt_password
+  # EN: plain MQTT on 1883; don't enable TLS unless your broker has a valid cert
+  #     (a wrong/unknown cert blocks the ESP from connecting).
+  # PL: zwykłe MQTT na 1883; nie włączaj TLS bez pewności co do certu brokera
+  #     (zły/nieznany cert blokuje połączenie ESP).
+  port: 1883
+  skip_cert_cn_check: true
 
 api:
 ota:
@@ -63,6 +69,20 @@ output:
     pin: GPIO37
 
 wmbus_radio:
+  # ─────────────────────────────────────────────────────────────────────────
+  # EN: REQUIRED here: radio_type, the board pins (cs/reset/busy/irq — or
+  #     gdo0/gdo2 + cc1101_allow_experimental for CC1101), has_tcxo where the
+  #     module has a TCXO, and listen_mode. Everything else below is OPTIONAL —
+  #     sane defaults apply if you delete it: frequency, rx_gain,
+  #     long_gfsk_packets, listen_mode_filter_after_parse, topic_name,
+  #     diagnostic_* and highlight_meters.
+  # PL: WYMAGANE tutaj: radio_type, piny płytki (cs/reset/busy/irq — lub
+  #     gdo0/gdo2 + cc1101_allow_experimental dla CC1101), has_tcxo gdy moduł ma
+  #     TCXO, oraz listen_mode. Cała reszta poniżej jest OPCJONALNA — po
+  #     usunięciu działają sensowne domyślne: frequency, rx_gain,
+  #     long_gfsk_packets, listen_mode_filter_after_parse, topic_name,
+  #     diagnostic_* oraz highlight_meters.
+  # ─────────────────────────────────────────────────────────────────────────
   radio_type: SX1276
   spi_id: spi_lora
   cs_pin: GPIO07
