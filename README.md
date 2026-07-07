@@ -1,5 +1,7 @@
 # ESPHome wM-Bus Bridge RAW-only
 
+<a href="https://buymeacoffee.com/Kustonium"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="41"></a>
+
 🇬🇧 [English](#english) | 🇵🇱 [Polski](#polski)
 
 ```text
