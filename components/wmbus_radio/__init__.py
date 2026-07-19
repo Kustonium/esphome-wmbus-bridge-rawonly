@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 from contextlib import suppress
+import logging
 import re
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -16,6 +17,8 @@ from esphome.const import (
     CONF_DATA,
 )
 from pathlib import Path
+
+_LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@SzczepanLeon", "@kubasaw", "@Kustonium"]
 
@@ -381,6 +384,19 @@ async def to_code(config):
         topic_name = "wmbus"
 
     warnings = []
+
+    # All builds, examples and the 2026.7.0 day-one verification use esp-idf.
+    # Arduino may compile, but nobody tests it — say so at compile time and in
+    # the boot log instead of letting tutorial-style configs drift onto an
+    # unverified path silently.
+    if CORE.using_arduino:
+        arduino_warning = (
+            "framework arduino is untested for this component - all builds and tests use esp-idf, "
+            "see examples/ / framework arduino jest nieprzetestowany dla tego komponentu - "
+            "wszystkie buildy i testy uzywaja esp-idf, patrz examples/."
+        )
+        _LOGGER.warning("[wmbus_radio] %s", arduino_warning)
+        warnings.append(arduino_warning)
 
     if CONF_TELEGRAM_TOPIC in config and str(config.get(CONF_TELEGRAM_TOPIC, "")).strip():
         telegram_topic = config[CONF_TELEGRAM_TOPIC]
