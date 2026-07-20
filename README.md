@@ -42,6 +42,8 @@ It does not:
 
 Use one of the YAML examples from `examples/`, then read the startup log before changing anything else.
 
+> **Requirements.** This component builds and runs on the ESP-IDF framework (every example uses it) and publishes to absolute MQTT topics of the form `wmbus/<topic_name>/telegram` — there is no configurable topic prefix.
+
 Recommended path:
 
 1. Choose the matching board example from `examples/`.
@@ -186,6 +188,8 @@ Nie robi:
 ### Szybki start
 
 Użyj jednego z przykładów YAML z `examples/`, a potem najpierw przeczytaj log startowy, zanim zaczniesz zmieniać kolejne rzeczy.
+
+> **Wymagania.** Komponent buduje się i działa na frameworku ESP-IDF (używa go każdy przykład) i publikuje na bezwzględne tematy MQTT w postaci `wmbus/<topic_name>/telegram` — nie ma konfigurowalnego prefiksu tematu.
 
 Zalecana ścieżka:
 
