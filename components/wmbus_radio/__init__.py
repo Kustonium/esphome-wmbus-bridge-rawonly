@@ -97,6 +97,7 @@ CONF_FEM_PA_PIN = "fem_pa_pin"
 CONF_GDO0_PIN = "gdo0_pin"
 CONF_GDO2_PIN = "gdo2_pin"
 CONF_CC1101_ALLOW_EXPERIMENTAL = "cc1101_allow_experimental"
+CONF_ALLOW_UNTESTED_FRAMEWORK = "allow_untested_framework"
 CONF_FREQUENCY = "frequency"
 
 radio_ns = cg.esphome_ns.namespace("wmbus_radio")
@@ -149,6 +150,7 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO0_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
+            cv.Optional(CONF_ALLOW_UNTESTED_FRAMEWORK, default=False): cv.boolean,
             cv.Optional(CONF_FREQUENCY): cv.float_range(min=300.0, max=928.0),
             cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
                 "t1", "c1", "s1", "both", lower=True
@@ -284,6 +286,30 @@ def _validate_radio_pins(config):
 
 
 CONFIG_SCHEMA = cv.All(BASE_CONFIG_SCHEMA, _validate_radio_pins)
+
+
+def _validate_framework(config):
+    # Every build, example and CI target uses esp-idf; arduino is never exercised.
+    # The difference is not cosmetic: arduino headers type uint32_t as
+    # 'unsigned long' where esp-idf uses 'unsigned int', so format strings that
+    # are clean here warn there. Configs written for other wMBus components
+    # routinely carry 'framework: arduino' over, so refuse to produce an
+    # untested binary unless the user opts in on purpose. Same shape as
+    # cc1101_allow_experimental: explicit consent for an unverified path.
+    # On esp-idf the flag is ignored - esp-idf always passes.
+    if CORE.using_arduino and not config.get(CONF_ALLOW_UNTESTED_FRAMEWORK, False):
+        raise cv.Invalid(
+            "framework arduino is untested for this component - use esp-idf (see examples/), "
+            "or set allow_untested_framework: true to build it anyway / "
+            "framework arduino jest nieprzetestowany dla tego komponentu - uzyj esp-idf "
+            "(patrz examples/), albo ustaw allow_untested_framework: true aby zbudowac mimo to."
+        )
+    return config
+
+
+# Final validation: the target framework is only reliably known once every
+# component has been validated, so this cannot live in CONFIG_SCHEMA.
+FINAL_VALIDATE_SCHEMA = _validate_framework
 
 
 async def to_code(config):
