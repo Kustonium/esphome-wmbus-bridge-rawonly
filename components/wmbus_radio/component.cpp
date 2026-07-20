@@ -816,10 +816,14 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   for (auto &handler : this->handlers_)
     handler(&frame.value());
 
-  if (frame->handlers_count())
+  if (frame->handlers_count()) {
     ESP_LOGI(TAG, "Telegram handled / obsluzono przez %d handlers", frame->handlers_count());
-  else
+  } else {
+    // Braces are required: at log level INFO the ESP_LOGD below compiles to an
+    // empty statement, and an unbraced 'else' with an empty body warns
+    // -Wempty-body (seen on the SX1276 arduino build, 2026.7.0).
     ESP_LOGD(TAG, "Telegram not handled by any handler");
+  }
 
   delete p;
 }
