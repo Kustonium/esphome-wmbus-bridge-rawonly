@@ -14,7 +14,7 @@ meter -> SX1262 / SX1276 / CC1101 -> ESPHome wmbus_radio -> MQTT RAW HEX -> back
 
 RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262, SX1276 and experimental CC1101.
 
-> ✅ **Verified on ESPHome 2026.7.0** (release day, 2026-07-16) — clean builds on all three test boards.
+> ✅ **Verified on ESPHome 2026.7.0** — clean builds on all three test boards in CI.
 
 ### What this project is
 
@@ -161,7 +161,7 @@ Before opening an issue, read [`SUPPORT.md`](SUPPORT.md).
 
 Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na SX1262, SX1276 oraz eksperymentalnie CC1101.
 
-> ✅ **Zweryfikowano na ESPHome 2026.7.0** (dzień premiery, 16.07.2026) — czyste kompilacje na wszystkich trzech płytkach testowych.
+> ✅ **Zweryfikowano na ESPHome 2026.7.0** — czyste kompilacje na wszystkich trzech płytkach testowych w CI.
 
 ### Czym jest ten projekt
 
