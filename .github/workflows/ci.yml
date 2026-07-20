@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  # `pip install esphome` in firmware-build is deliberately unpinned, so this
+  # workflow doubles as an upstream-compatibility check: a nightly run tells us
+  # the day a new ESPHome release breaks (or keeps building) this component,
+  # instead of waiting for a user to report it. Odd minute avoids the
+  # top-of-hour cron backlog on GitHub's side.
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  firmware-build:
+    # Compile the real ESPHome firmware against THIS checkout for every
+    # board/chip/core-count variant, so a change that breaks a target (or a
+    # specific core count) is caught here.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: CC1101 / esp32-c3 (single-core)
+            config: examples/CC1101/CC1101_clean.yaml
+          - name: SX1262 / esp32-s3 (dual-core)
+            config: examples/SX1262/Heltec V3/SX1262_Heltec_V3_clean.yaml
+          - name: SX1276 / esp32 (dual-core)
+            config: examples/SX1276/HeltecV2/SX1276_Heltec_V2_clean.yaml
+
+    name: build (${{ matrix.name }})
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO and ESPHome
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ matrix.config }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: |
+            pio-${{ runner.os }}-${{ matrix.config }}-
+            pio-${{ runner.os }}-
+
+      - name: Install ESPHome
+        run: pip install esphome
+
+      - name: Prepare config (local component + dummy secrets)
+        env:
+          CONFIG: ${{ matrix.config }}
+        run: |
+          # Copy the example into a space-free working dir: PlatformIO (the build
+          # backend ESPHome calls for esp-idf) rejects any project path containing
+          # whitespace, and some example dirs are named e.g. "Heltec V3".
+          mkdir -p ci-build
+          flat="ci-build/$(basename "$CONFIG")"
+          cp "$CONFIG" "$flat"
+          # Dummy secrets so config validation passes (compile-only, never flashed).
+          cat > ci-build/secrets.yaml <<'EOF'
+          wifi_ssid: "ci-build"
+          wifi_password: "ci-build-password"
+          mqtt_broker: "127.0.0.1"
+          mqtt_user: "ci"
+          mqtt_password: "ci"
+          EOF
+          # Build the component from THIS checkout, not the published github repo.
+          sed -i "s|github://Kustonium/esphome-wmbus-bridge-rawonly@main|{ type: local, path: ${GITHUB_WORKSPACE}/components }|" "$flat"
+          # 'refresh' is only valid for a git source; drop it for the local override.
+          sed -i "/refresh: 0s/d" "$flat"
+          echo "FLAT_CONFIG=$flat" >> "$GITHUB_ENV"
+          echo "----- effective external_components -----"
+          grep -n -A2 "external_components" "$flat"
+
+      - name: Compile firmware
+        run: esphome compile "$FLAT_CONFIG"
