@@ -19,11 +19,20 @@
 // Protocol constants shared with the split-out translation units (rf_runtime, ...).
 #include "wmbus_radio_internal.h"
 
+// xQueueCreate returns a handle (a pointer), xTaskCreate returns BaseType_t.
+// Funnel both through one overload set so a single format specifier stays
+// correct for either: printing a handle with %d is what warned on arduino.
+static inline intptr_t assert_result_value(const void *value) {
+  return reinterpret_cast<intptr_t>(value);
+}
+static inline intptr_t assert_result_value(intptr_t value) { return value; }
+
 #define ASSERT(expr, expected, before_exit)                                    \
   {                                                                            \
     auto result = (expr);                                                      \
     if (!!result != expected) {                                                \
-      ESP_LOGE(TAG, "Assertion failed: %s -> %d", #expr, result);              \
+      ESP_LOGE(TAG, "Assertion failed: %s -> %" PRIdPTR, #expr,                \
+               assert_result_value(result));                                   \
       before_exit;                                                             \
       return;                                                                  \
     }                                                                          \

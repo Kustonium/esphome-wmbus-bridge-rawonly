@@ -15,6 +15,7 @@
 #include "esphome/components/mqtt/mqtt_client.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <cstdio>
 
 namespace esphome {
@@ -115,7 +116,8 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
     this->busy_ether_active_until_ms_ = now_ms + 300000; // 5-minute hold
     if (!was_active) {
       ESP_LOGW(TAG, "BusyEther [ADAPTIVE]: noisy window detected / wykryto zaszumione okno — activating / aktywacja na 5 min "
-               "(fsl=%u drop_pct=%u t1_sym_inv_pct=%u preamble_fail=%u probe_abort=%u fifo_overrun=%u)",
+               "(fsl=%" PRIu32 " drop_pct=%" PRIu32 " t1_sym_inv_pct=%" PRIu32
+               " preamble_fail=%" PRIu32 " probe_abort=%" PRIu32 " fifo_overrun=%" PRIu32 ")",
                fsl, drop_pct, t1_sym_inv_pct,
                this->diag_rx_path_.preamble_read_failed,
                this->diag_rx_path_.probe_start_aborted,
@@ -128,18 +130,18 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
           snprintf(ev, sizeof(ev),
                    "{\"event\":\"busy_ether_changed\",\"chip\":\"%s\","
                    "\"state\":\"adaptive_active\","
-                   "\"fsl\":%u,\"drop_pct\":%u}",
+                   "\"fsl\":%" PRIu32 ",\"drop_pct\":%" PRIu32 "}",
                    chip, fsl, drop_pct);
           mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), static_cast<uint8_t>(0), false);
         }
       }
       this->busy_ether_was_active_ = true;
     } else {
-      ESP_LOGI(TAG, "BusyEther [ADAPTIVE]: hold extended / przedluzono hold (fsl=%u drop_pct=%u)", fsl, drop_pct);
+      ESP_LOGI(TAG, "BusyEther [ADAPTIVE]: hold extended / przedluzono hold (fsl=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, drop_pct);
     }
   } else if (was_active && !is_active_now) {
     // Hold has expired and no new trigger — transition to passive.
-    ESP_LOGI(TAG, "BusyEther [ADAPTIVE]: hold expired / hold wygasl, returning to passive mode / powrot do trybu pasywnego (fsl=%u drop_pct=%u)", fsl, drop_pct);
+    ESP_LOGI(TAG, "BusyEther [ADAPTIVE]: hold expired / hold wygasl, returning to passive mode / powrot do trybu pasywnego (fsl=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, drop_pct);
     // Publish busy_ether_changed event: active -> passive
     if (!this->diag_topic_.empty()) {
       auto *mqtt = esphome::mqtt::global_mqtt_client;
@@ -148,7 +150,7 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
         snprintf(ev, sizeof(ev),
                  "{\"event\":\"busy_ether_changed\",\"chip\":\"%s\","
                  "\"state\":\"adaptive_passive\","
-                 "\"fsl\":%u,\"drop_pct\":%u}",
+                 "\"fsl\":%" PRIu32 ",\"drop_pct\":%" PRIu32 "}",
                  chip, fsl, drop_pct);
         mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), static_cast<uint8_t>(0), false);
       }
