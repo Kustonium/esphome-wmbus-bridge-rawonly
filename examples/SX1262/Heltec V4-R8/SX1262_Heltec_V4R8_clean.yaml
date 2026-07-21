@@ -1,0 +1,94 @@
+# ESPHome wM-Bus Bridge RAW-only — Heltec WiFi LoRa 32 V4-R8 / SX1262
+#
+# EN: Derived from the working "Heltec V4" (V4.2) example. The V4-R8 uses the
+#     ESP32-S3R8 (8 MB octal PSRAM) and a DIFFERENT LoRa front-end: KCT8103L
+#     (V4.2 uses GC1109). Per Heltec's own driver (board-config.h / radio.c),
+#     the only functional change for a RAW-only receiver is fem_pa_pin 46 -> 5
+#     (PA_CTX moved to GPIO5; GPIO46 became the LED). fem_en/fem_ctrl unchanged.
+#     STATUS: pin map + RX levels validated against Heltec's driver source, but
+#     NOT yet flashed on physical R8 hardware. If it boots but receives nothing
+#     despite good RSSI, fem_pa_pin is the first suspect (KCT8103L != GC1109).
+# PL: Pochodzi od działającego przykładu "Heltec V4" (V4.2). R8 to ESP32-S3R8
+#     (8 MB octal PSRAM) i INNY front-end LoRa: KCT8103L (V4.2 ma GC1109). Wg
+#     sterownika Helteca jedyna funkcjonalna zmiana dla odbiornika RAW-only to
+#     fem_pa_pin 46 -> 5 (PA_CTX przeniesiony na GPIO5; GPIO46 przejął LED).
+#     STATUS: mapa pinów i poziomy RX zgodne ze sterownikiem Helteca, ale
+#     JESZCZE nie flashowane na fizycznym R8. Jak wstanie i nic nie odbierze
+#     mimo dobrego RSSI — pierwszy podejrzany to fem_pa_pin (KCT8103L != GC1109).
+
+substitutions:
+  devicename: esphome-wmbus-heltec-v4r8
+  friendly_name: "wMBus Bridge Heltec V4-R8"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  cpu_frequency: 160MHz
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal  # V4-R8 = ESP32-S3R8, 8 MB octal PSRAM (V4.2 was quad/2 MB)
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  # EN: plain MQTT on 1883; don't enable TLS unless your broker has a valid cert
+  #     (a wrong/unknown cert blocks the ESP from connecting).
+  # PL: zwykłe MQTT na 1883; nie włączaj TLS bez pewności co do certu brokera
+  #     (zły/nieznany cert blokuje połączenie ESP).
+  port: 1883
+  skip_cert_cn_check: true
+
+api:
+ota:
+  - platform: esphome
+time:
+  - platform: homeassistant
+
+spi:
+  clk_pin: GPIO9
+  mosi_pin: GPIO10
+  miso_pin: GPIO11
+
+wmbus_radio:
+  radio_type: SX1262
+  cs_pin: GPIO8
+  reset_pin: GPIO12
+  busy_pin: GPIO13
+  irq_pin:
+    number: GPIO14
+    mode: input
+  fem_en_pin: GPIO2     # KCT8103L CSD (unchanged vs V4.2)
+  fem_ctrl_pin: GPIO7   # FEM power / VFEM (unchanged vs V4.2)
+  fem_pa_pin: GPIO5     # KCT8103L CTX — was GPIO46 on V4.2 (GC1109 TX_EN)
+  dio2_rf_switch: true
+  has_tcxo: true
+  rx_gain: boosted
+  long_gfsk_packets: true
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+  diagnostic_mode: normal
