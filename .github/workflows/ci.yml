@@ -26,6 +26,8 @@ jobs:
             config: examples/CC1101/CC1101_clean.yaml
           - name: SX1262 / esp32-s3 (dual-core)
             config: examples/SX1262/Heltec V3/SX1262_Heltec_V3_clean.yaml
+          - name: SX1262 / esp32-s3 R8 (KCT8103L FEM, HW-untested)
+            config: examples/SX1262/Heltec V4-R8/SX1262_Heltec_V4R8_clean.yaml
           - name: SX1276 / esp32 (dual-core)
             config: examples/SX1276/HeltecV2/SX1276_Heltec_V2_clean.yaml
 
