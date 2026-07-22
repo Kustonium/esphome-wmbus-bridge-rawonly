@@ -525,14 +525,26 @@ void SX1262::setup() {
   // MUST be before any SPI transfers
   this->spi_setup();
 
-  // Optional FEM pins (if used instead of YAML switch/output)
-  if (this->fem_en_pin_ != nullptr) {
-    this->fem_en_pin_->setup();
-    this->fem_en_pin_->digital_write(true);
-  }
+  // Optional FEM pins (if used instead of YAML switch/output).
+  //
+  // Power-on sequence follows the FEM datasheet, not source order: FEM supply
+  // (POWER/VFEM) MUST be asserted before any control line. GC1109 (Heltec V4.2)
+  // Table 3 note 2: "VBAT must be prior to CSD/CPS/CTX for the power on
+  // sequence", note 1: "CSD/CPS/CTX voltage level must not exceed VBAT".
+  // KCT8103L (V4-R8) has the same CSD/CPS/CTX logic. Heltec's own driver does
+  // POWER -> CSD -> CTX with a 1 ms settle; we mirror that here.
+  //
+  //   fem_ctrl -> POWER/VFEM (HIGH, enable supply)
+  //   fem_en   -> CSD        (HIGH, RX select)
+  //   fem_pa   -> CTX        (LOW,  TX disabled -> RX path)
   if (this->fem_ctrl_pin_ != nullptr) {
     this->fem_ctrl_pin_->setup();
     this->fem_ctrl_pin_->digital_write(true);
+    delay(1);  // let VFEM settle before driving control lines
+  }
+  if (this->fem_en_pin_ != nullptr) {
+    this->fem_en_pin_->setup();
+    this->fem_en_pin_->digital_write(true);
   }
   if (this->fem_pa_pin_ != nullptr) {
     this->fem_pa_pin_->setup();
