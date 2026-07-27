@@ -1,0 +1,93 @@
+# CI-only configuration - NOT an example, do not flash it to a device.
+#
+# The firmware matrix otherwise never sets forward_meters, so every build went
+# through the default (empty) path and neither branch of the option was ever
+# exercised by real ESPHome validation. This config covers both in a single
+# compile, using MULTI_CONF to declare two radios on one SPI bus:
+#
+#   ci_inherited - forward_meters: true, taking the list from highlight_meters
+#   ci_explicit  - forward_meters as an explicit list, no highlight_meters
+#
+# Both lists mix a decimal (BCD) ID with a quoted hex one, so the meter-ID
+# validator and both C++ lookup lists (decimal + raw A-field) are covered too.
+#
+# The hex entries are quoted on purpose: unquoted, YAML would resolve
+# 0x417F0666 to the number 1098843750 and the validator would reject it. That
+# rejection is itself worth keeping in mind if this file ever stops building.
+
+substitutions:
+  devicename: esphome-wmbus-ci-forward-meters
+  friendly_name: "wMBus CI forward_meters"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32dev
+  variant: ESP32
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  port: 1883
+  skip_cert_cn_check: true
+
+api:
+ota:
+  - platform: esphome
+
+spi:
+  clk_pin: GPIO5
+  mosi_pin: GPIO27
+  miso_pin: GPIO19
+
+wmbus_radio:
+  # Inherited whitelist: forward_meters takes its IDs from highlight_meters.
+  - topic_name: ci_inherited
+    radio_type: SX1276
+    cs_pin: GPIO18
+    reset_pin: GPIO14
+    irq_pin:
+      number: GPIO35
+      mode: input
+    listen_mode: t1
+    diagnostic_mode: normal
+    highlight_meters:
+      - "00089907"
+      - "0x417F0666"
+    forward_meters: true
+
+  # Explicit whitelist, independent of highlight_meters.
+  - topic_name: ci_explicit
+    radio_type: SX1276
+    cs_pin: GPIO2
+    reset_pin: GPIO4
+    irq_pin:
+      number: GPIO34
+      mode: input
+    listen_mode: t1
+    forward_meters:
+      - "03534159"
+      - "0x417F0666"

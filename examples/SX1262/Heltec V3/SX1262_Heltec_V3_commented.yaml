@@ -72,13 +72,13 @@ wmbus_radio:
   #     module has a TCXO, and listen_mode. Everything else below is OPTIONAL —
   #     sane defaults apply if you delete it: frequency, rx_gain,
   #     long_gfsk_packets, listen_mode_filter_after_parse, topic_name,
-  #     diagnostic_* and highlight_meters.
+  #     diagnostic_*, highlight_meters and forward_meters.
   # PL: WYMAGANE tutaj: radio_type, piny płytki (cs/reset/busy/irq — lub
   #     gdo0/gdo2 + cc1101_allow_experimental dla CC1101), has_tcxo gdy moduł ma
   #     TCXO, oraz listen_mode. Cała reszta poniżej jest OPCJONALNA — po
   #     usunięciu działają sensowne domyślne: frequency, rx_gain,
   #     long_gfsk_packets, listen_mode_filter_after_parse, topic_name,
-  #     diagnostic_* oraz highlight_meters.
+  #     diagnostic_*, highlight_meters oraz forward_meters.
   # ─────────────────────────────────────────────────────────────────────────
   radio_type: SX1262
   cs_pin: GPIO8
@@ -121,3 +121,15 @@ wmbus_radio:
   # for IDs listed in highlight_meters.
   # highlight_meters:
   #   - "12345678"
+
+  # EN: Optional whitelist — only these meters reach wmbus/<topic_name>/telegram.
+  #     Everything else is dropped on the ESP, which is the point in a dense block.
+  #     Use `forward_meters: true` instead of a list to reuse highlight_meters above.
+  #     Quote hex IDs, otherwise YAML turns 0x417F0666 into the number 1098843750.
+  # PL: Opcjonalna whitelista — na wmbus/<topic_name>/telegram trafiają tylko te liczniki.
+  #     Reszta jest odrzucana na ESP, o co chodzi w gęstej zabudowie.
+  #     Zamiast listy można dać `forward_meters: true` i użyć listy z highlight_meters.
+  #     ID szesnastkowe w cudzysłowie, inaczej YAML zamieni 0x417F0666 na 1098843750.
+  # forward_meters:
+  #   - "00089907"
+  #   - "0x417F0666"

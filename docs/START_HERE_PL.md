@@ -41,7 +41,7 @@ Przeczytaj:
 
 Zalecana kolejność dla początkujących:
 
-1. **XIAO ESP32-S3 + Wio-SX1262** — kompaktowy, bez OLED-a, bardzo dobry praktyczny target.
+1. **XIAO ESP32-S3 + Wio-SX1262** — kompaktowy, bez OLED-a, bardzo dobry praktyczny target. Wymaga `rf_sw_pin: GPIO38` — moduł bramkuje tor antenowy i bez tego pracuje z czułością niższą o około 30 dB. Przykład w repo już to zawiera; jeśli piszesz YAML samodzielnie, nie pomiń tej opcji.
 2. **Heltec WiFi LoRa 32 V4** — dobra płytka dev z SX1262, ale V4 wymaga poprawnego YAML-a z FEM/RF switch.
 3. **Heltec WiFi LoRa 32 V2 / LilyGo T3-S3 SX1276** — używalne targety SX1276.
 4. **CC1101** — eksperymentalnie, tylko zaawansowane/testowe użycie. Wymaga `GDO0 + GDO2` i jawnego włączenia w YAML.

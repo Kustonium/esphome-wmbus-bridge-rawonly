@@ -57,11 +57,11 @@ static bool is_bcd_(uint8_t b) {
   return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
 }
 
-static bool try_extract_meter_id_(const std::vector<uint8_t> &d, uint32_t &out_id) {
-  out_id = 0;
-  if (d.size() < 9) return false;
+// Offset of the A-field within `d`, or -1 when it cannot be located.
+static int meter_id_base_(const std::vector<uint8_t> &d) {
+  if (d.size() < 9) return -1;
 
-  int base = -1;
+  int base;
   // Raw C1 still carrying the two leading suffix bytes.
   if (d.size() >= 12 && (size_t) (d[2] + 1) == (d.size() - 2)) {
     base = 2;
@@ -73,7 +73,14 @@ static bool try_extract_meter_id_(const std::vector<uint8_t> &d, uint32_t &out_i
     base = 0;
   }
 
-  if ((size_t) (base + 6) >= d.size()) return false;
+  return ((size_t) (base + 6) >= d.size()) ? -1 : base;
+}
+
+static bool try_extract_meter_id_(const std::vector<uint8_t> &d, uint32_t &out_id) {
+  out_id = 0;
+  const int base = meter_id_base_(d);
+  if (base < 0) return false;
+
   if (!is_bcd_(d[base + 3]) || !is_bcd_(d[base + 4]) || !is_bcd_(d[base + 5]) || !is_bcd_(d[base + 6])) {
     return false;
   }
@@ -85,9 +92,24 @@ static bool try_extract_meter_id_(const std::vector<uint8_t> &d, uint32_t &out_i
   return out_id != 0;
 }
 
+// The same four bytes without the BCD requirement, in the order the log prints
+// them as id:XXXXXXXX. This is the only form available for meters whose A-field
+// is not BCD, so anything that has to recognise those must use it.
+static bool try_extract_meter_id_raw_(const std::vector<uint8_t> &d, uint32_t &out_id) {
+  out_id = 0;
+  const int base = meter_id_base_(d);
+  if (base < 0) return false;
+
+  out_id = ((uint32_t) d[base + 6] << 24) | ((uint32_t) d[base + 5] << 16) |
+           ((uint32_t) d[base + 4] << 8) | (uint32_t) d[base + 3];
+  return out_id != 0;
+}
+
 Packet::Packet() { this->data_.reserve(WMBUS_PREAMBLE_SIZE); }
 
 bool Packet::try_get_meter_id(uint32_t &out_id) const { return try_extract_meter_id_(this->data_, out_id); }
+
+bool Packet::try_get_meter_id_raw(uint32_t &out_id) const { return try_extract_meter_id_raw_(this->data_, out_id); }
 
 std::string Packet::packet_hex() const { return hex_prefix_(this->data_, 0); }
 
@@ -678,11 +700,20 @@ std::string Frame::as_hex() { return format_hex(this->data_); }
 
 bool Frame::try_get_meter_id(uint32_t &out_id) const { return try_extract_meter_id_(this->data_, out_id); }
 
+bool Frame::try_get_meter_id_raw(uint32_t &out_id) const { return try_extract_meter_id_raw_(this->data_, out_id); }
+
 std::string Frame::as_rtlwmbus() {
   const size_t time_repr_size = sizeof("YYYY-MM-DD HH:MM:SS.00Z");
   char time_buffer[time_repr_size];
   auto t = std::time(NULL);
-  std::strftime(time_buffer, time_repr_size, "%F %T.00Z", std::gmtime(&t));
+  auto *tm_info = std::gmtime(&t);
+  // gmtime() returns nullptr for a time_t it cannot represent, and strftime()
+  // returns 0 (leaving the buffer indeterminate) when the result does not fit.
+  // Guard both so a broken/out-of-range clock can never null-deref or emit an
+  // unterminated timestamp into the rtlwmbus line.
+  if (tm_info == nullptr || std::strftime(time_buffer, time_repr_size, "%F %T.00Z", tm_info) == 0) {
+    snprintf(time_buffer, time_repr_size, "1970-01-01 00:00:00.00Z");
+  }
 
   auto output = std::string{};
   output.reserve(2 + 5 + 24 + 1 + 4 + 5 + 2 * this->data_.size() + 1);

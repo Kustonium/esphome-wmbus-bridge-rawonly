@@ -4,19 +4,43 @@ on:
   push:
   pull_request:
   # `pip install esphome` in firmware-build is deliberately unpinned, so this
-  # workflow doubles as an upstream-compatibility check: a nightly run tells us
-  # the day a new ESPHome release breaks (or keeps building) this component,
-  # instead of waiting for a user to report it. Odd minute avoids the
-  # top-of-hour cron backlog on GitHub's side.
+  # workflow doubles as an upstream-compatibility check. Without a schedule it
+  # only ever ran on push, meaning a new ESPHome release could break the
+  # component silently until the next commit. Nightly (odd minute, to avoid the
+  # top-of-hour cron backlog on GitHub's side) catches it on release day.
   schedule:
     - cron: "23 4 * * *"
   workflow_dispatch: {}
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Python syntax check
+        run: python -m py_compile components/wmbus_radio/__init__.py
+
+      - name: Build host parser tests
+        run: |
+          mkdir -p build
+          g++ -std=c++17 -Wall -Wextra -Wno-unused-variable \
+            -Itests/host \
+            -Icomponents/wmbus_radio \
+            tests/host/test_core.cpp \
+            components/wmbus_radio/decode3of6.cpp \
+            components/wmbus_radio/packet.cpp \
+            -o build/test_core
+
+      - name: Run host parser tests
+        run: ./build/test_core
+
   firmware-build:
     # Compile the real ESPHome firmware against THIS checkout for every
-    # board/chip/core-count variant, so a change that breaks a target (or a
-    # specific core count) is caught here.
+    # board/chip/core-count variant, so a change that builds on the host but
+    # breaks a target (or a specific core count) is caught here.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,6 +54,15 @@ jobs:
             config: examples/SX1262/Heltec V4-R8/SX1262_Heltec_V4R8_clean.yaml
           - name: SX1276 / esp32 (dual-core)
             config: examples/SX1276/HeltecV2/SX1276_Heltec_V2_clean.yaml
+          # Wio-SX1262 on XIAO: the only board that needs rf_sw_pin, so this is
+          # also the only entry that compiles that option.
+          - name: SX1262 / XIAO esp32-s3 (Wio-SX1262, rf_sw_pin)
+            config: examples/SX1262/XIAO ESP32 S3/xiao_esp32_s3_clean.yaml
+          # Not a board variant: this one exists to put forward_meters through
+          # real ESPHome validation. The examples never set it, so without this
+          # entry only the default (empty) path is ever compiled.
+          - name: forward_meters schema (SX1276 / esp32)
+            config: tests/ci/forward_meters_ci.yaml
 
     name: build (${{ matrix.name }})
 

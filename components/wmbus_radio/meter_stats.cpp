@@ -6,6 +6,7 @@
 // names and the windowing behaviour are identical.
 
 #include "component.h"
+#include "meter_filter.h"
 #include "wmbus_radio_internal.h"
 
 #include "esphome/core/log.h"
@@ -24,9 +25,8 @@ namespace wmbus_radio {
 
 static const char *TAG = "wmbus";
 
-bool Radio::meter_is_highlighted_(uint32_t meter_id) const {
-  return meter_id != 0 && !this->highlight_meter_ids_.empty() &&
-         std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), meter_id);
+bool Radio::meter_is_highlighted_(uint32_t meter_id, uint32_t meter_id_raw) const {
+  return meter_id_in_lists(this->highlight_meter_ids_, this->highlight_meter_raw_ids_, meter_id, meter_id_raw);
 }
 
 void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s, uint32_t now_ms) {
@@ -59,10 +59,9 @@ void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s,
   for (auto &kv : this->highlight_meter_stats_) {
     const uint64_t key = kv.first;
     MeterStats &st = kv.second;
-    const uint32_t meter_id = (uint32_t)(key >> 8);
     const uint8_t mode_byte = (uint8_t)(key & 0xFF);
-    char id_str[12];
-    snprintf(id_str, sizeof(id_str), "%08" PRIu32, meter_id);
+    // The key holds the raw A-field value, which is not the printable ID.
+    const char *id_str = (st.id_str[0] != '\0') ? st.id_str : "????????";
     const char *mode_str = (mode_byte == (uint8_t) LinkMode::C1) ? "C1" : ((mode_byte == (uint8_t) LinkMode::S1) ? "S1" : "T1");
 
     // Use dedicated 60min counters for summary_60min trigger to avoid
@@ -74,6 +73,9 @@ void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s,
     const uint32_t interval_sum_ms = is_60min ? st.interval_sum_window_60min_ms : st.interval_sum_window_time_ms;
     const uint32_t interval_n      = is_60min ? st.interval_n_window_60min      : st.interval_n_window_time;
 
+    // rssi_n counts measured samples only (frames the transceiver reported as
+    // unmeasured are not accumulated), so a window can hold packets and still
+    // have rssi_n == 0. Both last_rssi and win_avg_rssi then publish 0.
     const int32_t win_avg_rssi = (rssi_n > 0) ? (rssi_sum / (int32_t) rssi_n) : 0;
     const uint32_t avg_interval_s = (st.interval_n > 0) ? (st.interval_sum_ms / st.interval_n) / 1000 : 0;
     const uint32_t win_avg_interval_s = (interval_n > 0) ? (interval_sum_ms / interval_n) / 1000 : 0;
@@ -124,6 +126,8 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
+  // rssi_n_window counts measured samples only, so count_window > 0 does not
+  // imply rssi_n_window > 0; the guard below covers that case.
   const int32_t win_avg_rssi = (rssi_n_window > 0)
       ? (rssi_sum_window / (int32_t) rssi_n_window) : 0;
   const uint32_t avg_interval_s = (st.interval_n > 0)
@@ -210,15 +214,14 @@ void Radio::maybe_publish_meter_windows_(uint32_t now_ms) {
   this->last_meter_window_ms_ = now_ms;
 
   for (auto &kv : this->highlight_meter_stats_) {
-    // Key = (meter_id << 8) | link_mode_byte. Decode both.
-    const uint32_t key_id   = (uint32_t) (kv.first >> 8);
+    // Key = (raw A-field value << 8) | link_mode_byte. Only the mode can be
+    // recovered from it; the printable ID is carried in the stats entry.
     const uint8_t  key_mode = (uint8_t)  (kv.first & 0xFF);
-    char id_str[9];
-    snprintf(id_str, sizeof(id_str), "%08" PRIu32, key_id);
+    auto &st = kv.second;
+    const char *id_str = (st.id_str[0] != '\0') ? st.id_str : "????????";
     const char *mode_str = (key_mode == (uint8_t) LinkMode::T1) ? "T1"
                          : (key_mode == (uint8_t) LinkMode::C1) ? "C1"
                          : (key_mode == (uint8_t) LinkMode::S1) ? "S1" : "UNK";
-    auto &st = kv.second;
     this->publish_meter_window_for_("time", elapsed_s, id_str, mode_str, st,
                                     st.count_window_time,
                                     st.rssi_sum_window_time,

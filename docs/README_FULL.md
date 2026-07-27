@@ -75,6 +75,59 @@ diagnostic_topic: "..."
 
 but they are intended only for compatibility and produce a bilingual warning.
 
+## Forwarding whitelist
+
+By default every frame that decodes and passes the DLL CRC is published to
+`wmbus/<device>/telegram`. In a dense block that is mostly neighbours' meters. Use
+`forward_meters` to publish only your own:
+
+```yaml
+wmbus_radio:
+  forward_meters:
+    - 41551279
+    - 90830781
+```
+
+If the same meters are already listed in `highlight_meters`, do not repeat them —
+`true` reuses that list:
+
+```yaml
+wmbus_radio:
+  highlight_meters:
+    - 41551279
+    - 90830781
+  forward_meters: true
+```
+
+An empty list (the default) or `false` forwards everything, so existing configurations
+are unaffected.
+
+Notes:
+
+- `forward_meters: true` with an empty `highlight_meters` does **not** silence the
+  stream. Filtering stays off and a warning is printed at boot, because a filter
+  matching an empty list would drop every frame.
+- The boot log prints the parsed IDs and whether they came from `highlight_meters`;
+  `dump_config()` reports the state as `Forward whitelist:`.
+
+- The filter runs after decoding and DLL CRC, so it matches an ID the parser has
+  already validated. Filtering on the raw header would be cheaper in theory but
+  unreliable: an ID read from a frame that failed CRC can be corrupted.
+- Use the ID exactly as the log prints it. A decimal `id:41551279` is written
+  `- 41551279`; a meter whose A-field is not BCD prints as hex (`id:417F0666`, typical
+  of Diehl/IZAR) and is written `- "0x417F0666"`. Both forms are matched.
+- **Quote hex entries.** Unquoted, YAML resolves `0x417F0666` to the number
+  `1098843750`, which would be stored as a decimal ID and never match. That case is
+  caught at compile time with the quoted form spelled out, rather than failing silently.
+- You do not have to know which kind a meter is. A non-BCD A-field always contains a
+  nibble above 9, so its printed form always carries a hex letter, while a BCD ID never
+  does — an all-digits entry means decimal, anything with letters means raw. The `0x`
+  form also works for BCD meters (`"0x00089907"` is meter `89907`).
+- Diagnostics are unaffected: counters and RSSI statistics are updated before
+  publishing, so summaries still cover the whole ether including neighbours. Only the
+  RAW stream is reduced.
+- `target_meter_id` has its own topic and is deliberately not subject to the whitelist.
+
 ## Quick start
 
 Clean minimal example:

@@ -4,7 +4,7 @@
 
 | Radio | Wymagane piny | Opcjonalne | Uwagi |
 |---|---|---|---|
-| `SX1262` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, TCXO, FEM, `long_gfsk_packets` | zalecany dla trudnego RF i długich ramek |
+| `SX1262` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, TCXO, FEM, bramka RF switch, `long_gfsk_packets` | zalecany dla trudnego RF i długich ramek |
 | `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | dobry dla spokojniejszych instalacji; ma mechanizm busy-ether; `tcxo_pin` tylko dla płytek z osobnym TCXO enable |
 | `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | eksperymentalny; wymaga `cc1101_allow_experimental: true`; single-IRQ nie jest wspierany |
 
@@ -39,6 +39,27 @@ S1 używa innego profilu RF niż T1/C1, dlatego nie jest łączony z `both`.
 | `clear_device_errors_on_boot` | `false` | czyści latched device errors po starcie |
 | `publish_dev_err_after_clear` | `false` | publikuje wynik czyszczenia błędów |
 | `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | brak | piny FEM, np. Heltec V4 |
+| `rf_sw_pin` | brak | bramka wewnętrznego przełącznika RF modułu; wymagane na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`) |
+
+### `rf_sw_pin` a `dio2_rf_switch`
+
+To dwie różne rzeczy i na płytkach, które tego wymagają, potrzebne są obie.
+
+`dio2_rf_switch` odnosi się do wyprowadzenia DIO2 samego układu SX1262 i wybiera **kierunek** TX/RX. `rf_sw_pin` to zewnętrzne wyprowadzenie GPIO hosta, które otwiera **bramkę** przełącznika RF w module — decyduje, czy przełącznik w ogóle przewodzi.
+
+Moduł Seeed Wio-SX1262 wyprowadza tę bramkę na pinie 1 (`RF_SW`); w zestawie z XIAO ESP32-S3 sygnał trafia na `GPIO38`:
+
+```yaml
+wmbus_radio:
+  radio_type: SX1262
+  rf_sw_pin: GPIO38
+```
+
+Bez tej opcji odbiornik pracuje z czułością niższą o około 30 dB. Objawem nie jest cisza: ramki nadal się dekodują i `DIAG hint` raportuje `GOOD`, ale jest ich kilka razy mniej, a wszystkie wartości RSSI leżą w wąskim paśmie tuż nad progiem czułości.
+
+Nie steruj tym wyprowadzeniem akcją `on_boot` na wyjściu `gpio` — patrz TROUBLESHOOTING, sekcja o odbiorniku słyszącym mało liczników.
+
+Płytki Heltec V3 / V4 / V4-R8 tej opcji nie wymagają; korzystają z wyprowadzeń `fem_*`.
 
 ## SX1276
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "component.h"
+#include "meter_filter.h"
 
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -49,8 +50,22 @@ static const char *TAG = "wmbus";
 // - DEBUG/VERBOSE stays English to keep issue reports and grep output usable,
 // - YAML/MQTT identifiers remain English-only because they form the stable technical API.
 
-static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &out) {
-  out.clear();
+// Splits the YAML meter list into the two forms a meter can be addressed by.
+//
+// A plain decimal token is a BCD-decoded meter ID and lands in `out_bcd`. A
+// token with a 0x prefix, or any token containing a-f/A-F, is the raw A-field
+// value as printed in the log (id:XXXXXXXX) and lands in `out_raw`.
+//
+// The split is unambiguous: a non-BCD A-field must contain a nibble > 9, so its
+// printed form always carries a hex letter, while a BCD ID never does. Writing
+// a BCD meter in its 0x form works too - it simply matches on the raw list.
+//
+// `option` only names the YAML key in the warning below, so a bad token is
+// reported against the option the user actually wrote.
+static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &out_bcd,
+                                std::vector<uint32_t> &out_raw, const char *option) {
+  out_bcd.clear();
+  out_raw.clear();
   if (csv.empty()) return;
   size_t i = 0;
   while (i < csv.size()) {
@@ -86,24 +101,71 @@ static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &o
       char *endp = nullptr;
       unsigned long v = std::strtoul(s, &endp, base);
       if (endp != s && *endp == '\0') {
-        out.push_back((uint32_t) v);
+        (base == 16 ? out_raw : out_bcd).push_back((uint32_t) v);
       } else {
         // Token did not parse cleanly — warn the user
-        ESP_LOGW("wmbus", "highlight_meters: could not parse meter ID '%s' — use decimal (e.g. 12345678) or hex with prefix (e.g. 0x417f0666)", tok.c_str());
+        ESP_LOGW("wmbus", "%s: could not parse meter ID '%s' — use the value the log prints as id:, either decimal (e.g. 12345678) or hex (e.g. 0x417F0666)", option, tok.c_str());
       }
     }
     i = j;
   }
-  if (!out.empty()) {
-    std::sort(out.begin(), out.end());
-    out.erase(std::unique(out.begin(), out.end()), out.end());
+  for (auto *out : {&out_bcd, &out_raw}) {
+    if (!out->empty()) {
+      std::sort(out->begin(), out->end());
+      out->erase(std::unique(out->begin(), out->end()), out->end());
+    }
   }
 }
 
 
+std::string Radio::forward_whitelist_summary_() const {
+  const size_t bcd_n = this->forward_meter_ids_.size();
+  const size_t raw_n = this->forward_meter_raw_ids_.size();
+  if (bcd_n == 0 && raw_n == 0)
+    return "disabled - every decoded frame is published / wylaczona - publikowana jest kazda ramka";
+
+  // List the parsed IDs, not just the count: a mistyped entry is only obvious
+  // when the resulting values are visible. Each form is printed the way the log
+  // prints that meter's id:, so a config entry can be compared by eye. Cap the
+  // list so a long one cannot overrun the log buffer.
+  const size_t log_limit = 16;
+  size_t budget = log_limit;
+  std::string ids;
+
+  for (size_t i = 0; i < bcd_n && budget > 0; i++, budget--) {
+    // Zero-padded to eight digits so an entry reads exactly like the id: field
+    // of the reception log and the two can be compared at a glance. The buffer
+    // is deliberately wider than eight digits: %08u pads but never truncates,
+    // so a value too large to be a BCD ID still prints in full and stays
+    // visible as the mistake it is.
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%08u", (unsigned) this->forward_meter_ids_[i]);
+    if (!ids.empty()) ids += ", ";
+    ids += buf;
+  }
+  for (size_t i = 0; i < raw_n && budget > 0; i++, budget--) {
+    char buf[13];
+    snprintf(buf, sizeof(buf), "0x%08X", (unsigned) this->forward_meter_raw_ids_[i]);
+    if (!ids.empty()) ids += ", ";
+    ids += buf;
+  }
+  if (bcd_n + raw_n > log_limit)
+    ids += ", ... (+" + std::to_string(bcd_n + raw_n - log_limit) + ")";
+
+  return std::to_string(bcd_n + raw_n) + " ids" +
+         (this->forward_meters_inherited_ ? " (from highlight_meters)" : "") + ": " + ids;
+}
+
 static bool radio_supports_preamble_retry_(const RadioTransceiver *radio) {
   return radio != nullptr && radio->supports_preamble_retry();
 }
+
+// True when an RSSI reading is an actual measurement. The transceivers publish
+// -127 dBm as "not measured for this frame" (restart_rx() / drain_fifo_once_()
+// in transceiver_sx1276.cpp, restart_rx() in transceiver_sx1262.cpp). Such a
+// sample is not a signal level, so it must never enter an average or an EMA;
+// rf_runtime.cpp applies the same <= -126 test before acting on an RSSI.
+static inline bool rssi_is_measured_(int rssi_dbm) { return rssi_dbm > -126; }
 
 // Returns the RSSI bucket index for abort RSSI distributions.
 // [0] > -70   [1] -70..-79   [2] -80..-89   [3] -90..-99   [4] <= -100
@@ -120,10 +182,19 @@ void Radio::setup() {
     ESP_LOGW(TAG, "Config warning / ostrzezenie konfiguracji: %s", warning.c_str());
   }
   // Parse optional highlight meter list (CSV provided by python/YAML).
-  parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_);
+  parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_,
+                      this->highlight_meter_raw_ids_, "highlight_meters");
+  parse_meter_id_csv_(this->forward_meters_csv_, this->forward_meter_ids_,
+                      this->forward_meter_raw_ids_, "forward_meters");
   if (!this->target_meter_id_str_.empty()) {
-    std::vector<uint32_t> tmp;
-    parse_meter_id_csv_(this->target_meter_id_str_, tmp);
+    std::vector<uint32_t> tmp, tmp_raw;
+    parse_meter_id_csv_(this->target_meter_id_str_, tmp, tmp_raw, "target_meter_id");
+    if (tmp.empty() && !tmp_raw.empty()) {
+      // Would otherwise be accepted and then never match anything, because the
+      // target is compared against the BCD-decoded ID only.
+      ESP_LOGW(TAG, "target_meter_id: non-BCD (hex) meter IDs are not supported here - use forward_meters for such meters / "
+                    "szesnastkowe ID nie sa tu obslugiwane - dla takich licznikow uzyj forward_meters");
+    }
     if (!tmp.empty()) {
       this->target_meter_id_ = tmp.front();
       this->target_meter_enabled_ = true;
@@ -141,34 +212,26 @@ void Radio::setup() {
     ESP_LOGI(TAG, "Frame RAW forwarding topic / topic publikacji RAW: %s", this->telegram_topic_.c_str());
   }
 
+  if (!this->forward_meter_ids_.empty() || !this->forward_meter_raw_ids_.empty()) {
+    ESP_LOGI(TAG, "Forward whitelist / whitelista przekazywania: %s",
+             this->forward_whitelist_summary_().c_str());
+  }
+
   if (this->publish_radio_raw_) {
     ESP_LOGI(TAG, "Internal radio RAW tap enabled / wlaczono wewnetrzny RAW tap: wmbus_bridge/raw");
   }
 
-  if (!this->highlight_meter_ids_.empty()) {
+  // Both lists, or a config listing only non-BCD meters would skip the window
+  // clamp below and log nothing.
+  if (!this->highlight_meter_ids_.empty() || !this->highlight_meter_raw_ids_.empty()) {
     // meter_window_interval_ms_ defaults to 15 min; cap it at diag_summary_interval_ms_ minimum
     if (this->meter_window_interval_ms_ < this->diag_summary_interval_ms_)
       this->meter_window_interval_ms_ = this->diag_summary_interval_ms_;
     ESP_LOGI(TAG, "Highlight meters enabled / wlaczono wyroznione liczniki (%u ids) tag=%s ansi=%s window=%us",
-             (unsigned) this->highlight_meter_ids_.size(),
+             (unsigned) (this->highlight_meter_ids_.size() + this->highlight_meter_raw_ids_.size()),
              this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(),
              this->highlight_ansi_ ? "true" : "false",
              (unsigned) (this->meter_window_interval_ms_ / 1000));
-  }
-
-  if (this->tx_test_enabled_) {
-    ESP_LOGI(TAG, "TX test mode enabled / wlaczono tryb nadajnika testowego: radio=%s mode=%s frame_length=%u interval=%ums tx_data_gpio=%u",
-             this->radio != nullptr ? this->radio->get_name() : "<null>",
-             listen_mode_to_string_(this->tx_test_mode_),
-             (unsigned) this->tx_test_frame_length_,
-             (unsigned) this->tx_test_interval_ms_,
-             (unsigned) this->tx_test_data_gpio_);
-    this->boot_log_done_ = false;
-    this->boot_log_last_ms_ = (uint32_t) esphome::millis();
-    this->boot_log_count_ = 0;
-    this->boot_info_mqtt_pending_ = true;
-    this->boot_info_event_pending_ = true;
-    return;
   }
 
   ASSERT_SETUP(this->packet_queue_ = xQueueCreate(3, sizeof(Packet *)));
@@ -230,16 +293,7 @@ void Radio::dump_config() {
   ESP_LOGCONFIG(TAG, "  Listen mode filter: %s",
                 this->listen_mode_filter_after_parse_ ? "after parse (experimental)" : "before parse (legacy)");
   ESP_LOGCONFIG(TAG, "  Receiver task stack: %u bytes", (unsigned) this->receiver_task_stack_size_);
-  if (this->tx_test_enabled_) {
-    ESP_LOGCONFIG(TAG, "  Operation: tx_test");
-    ESP_LOGCONFIG(TAG, "  TX test: mode=%s frame_length=%u interval=%ums tx_data_gpio=%u",
-                  listen_mode_to_string_(this->tx_test_mode_),
-                  (unsigned) this->tx_test_frame_length_,
-                  (unsigned) this->tx_test_interval_ms_,
-                  (unsigned) this->tx_test_data_gpio_);
-  } else {
-    ESP_LOGCONFIG(TAG, "  Operation: rx");
-  }
+  ESP_LOGCONFIG(TAG, "  Operation: rx (receive only - this component does not transmit)");
   const char *busy_mode = (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL) ? "normal"
                            : (this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::AGGRESSIVE) ? "aggressive"
                            : "adaptive";
@@ -248,6 +302,7 @@ void Radio::dump_config() {
   } else {
     ESP_LOGCONFIG(TAG, "  Busy ether mode: n/a (SX1276 only)");
   }
+  ESP_LOGCONFIG(TAG, "  Forward whitelist: %s", this->forward_whitelist_summary_().c_str());
   if (!this->diag_topic_.empty()) {
     ESP_LOGCONFIG(TAG, "  Diagnostics MQTT topic: %s", this->diag_topic_.c_str());
     ESP_LOGCONFIG(TAG, "  MQTT boot topic: %s/boot", this->diag_topic_.c_str());
@@ -261,6 +316,23 @@ void Radio::dump_config() {
 
 void Radio::loop() {
   const uint32_t loop_now_ms = (uint32_t) esphome::millis();
+
+  // Report where a frame's RSSI came from. The receive path records this but
+  // cannot log it - it runs in the receiver task, whose output only reaches
+  // UART, never the API log stream - so it is drained and printed here on the
+  // main task. Drivers report the first frame on each receive path and then go
+  // quiet, so this is a handful of lines per boot, not per frame.
+  if (this->radio != nullptr) {
+    // Drain every pending snapshot, not just one: a driver reports once per
+    // receive path, and both can be waiting after a single busy stretch.
+    RadioTransceiver::RssiDiag rssi_diag{};
+    while (this->radio->take_rssi_diag(rssi_diag)) {
+      ESP_LOGI(TAG,
+               "RSSI source / zrodlo RSSI: %s (path=%s RssiSync=0x%02X RssiAvg=0x%02X inflight=%ddBm) -> %ddBm",
+               rssi_diag.source, rssi_diag.path, (unsigned) rssi_diag.raw_sync,
+               (unsigned) rssi_diag.raw_avg, (int) rssi_diag.inflight, (int) rssi_diag.result);
+    }
+  }
 
 if (!this->boot_log_done_ && this->radio != nullptr) {
   if (loop_now_ms - this->boot_log_last_ms_ >= 10000) {
@@ -360,6 +432,14 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       this->radio->log_reg_status();
     }
 
+    // Repeated here on purpose. The same line is logged from setup(), but that
+    // happens before the network logger attaches, so over `esphome logs` it is
+    // never seen - exactly the reason the YAML sanity block lives here too.
+    // Logged in both states, so "no filter configured" is a positive statement
+    // rather than a missing line.
+    ESP_LOGI(TAG, "Forward whitelist / whitelista przekazywania: %s",
+             this->forward_whitelist_summary_().c_str());
+
     this->boot_log_last_ms_ = loop_now_ms;
     this->boot_log_count_++;
     this->boot_log_done_ = true;
@@ -397,18 +477,6 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              (unsigned) this->dev_err_after_, (unsigned) this->dev_err_after_);
     mqtt->publish(this->diag_topic_, payload);
     this->dev_err_cleared_pending_ = false;
-  }
-
-  if (this->tx_test_enabled_) {
-    if (this->radio != nullptr && (this->tx_test_last_ms_ == 0 || loop_now_ms - this->tx_test_last_ms_ >= this->tx_test_interval_ms_)) {
-      this->tx_test_last_ms_ = loop_now_ms;
-      const bool ok = this->radio->transmit_test_frame(this->tx_test_mode_, this->tx_test_frame_length_, this->tx_test_data_gpio_);
-      ESP_LOGI(TAG, "TX test frame / ramka testowa TX: mode=%s length=%u result=%s",
-               listen_mode_to_string_(this->tx_test_mode_),
-               (unsigned) this->tx_test_frame_length_,
-               ok ? "OK" : "FAIL");
-    }
-    return;
   }
 
   this->maybe_publish_health_(loop_now_ms);
@@ -545,26 +613,38 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       this->diag_dropped_++;
       this->diag_15m_dropped_++;
       this->diag_60min_dropped_++;
-      this->diag_rssi_drop_sum_ += (int32_t) p->get_rssi();
-      this->diag_rssi_drop_n_++;
-      this->diag_15m_rssi_drop_sum_ += (int32_t) p->get_rssi();
-      this->diag_15m_rssi_drop_n_++;
-      this->diag_60min_rssi_drop_sum_ += (int32_t) p->get_rssi();
-      this->diag_60min_rssi_drop_n_++;
+      // Packet counters always advance; the RSSI sums only take real readings,
+      // so an unmeasured frame does not drag the drop-side averages towards -127.
+      const int32_t drop_rssi = (int32_t) p->get_rssi();
+      const bool drop_rssi_ok = rssi_is_measured_((int) drop_rssi);
+      if (drop_rssi_ok) {
+        this->diag_rssi_drop_sum_ += drop_rssi;
+        this->diag_rssi_drop_n_++;
+        this->diag_15m_rssi_drop_sum_ += drop_rssi;
+        this->diag_15m_rssi_drop_n_++;
+        this->diag_60min_rssi_drop_sum_ += drop_rssi;
+        this->diag_60min_rssi_drop_n_++;
+      }
       if (mode_idx < this->diag_mode_dropped_.size()) {
         this->diag_mode_dropped_[mode_idx]++;
-        this->diag_mode_rssi_drop_sum_[mode_idx] += (int32_t) p->get_rssi();
-        this->diag_mode_rssi_drop_n_[mode_idx]++;
+        if (drop_rssi_ok) {
+          this->diag_mode_rssi_drop_sum_[mode_idx] += drop_rssi;
+          this->diag_mode_rssi_drop_n_[mode_idx]++;
+        }
       }
       if (mode_idx < this->diag_15m_mode_dropped_.size()) {
         this->diag_15m_mode_dropped_[mode_idx]++;
-        this->diag_15m_mode_rssi_drop_sum_[mode_idx] += (int32_t) p->get_rssi();
-        this->diag_15m_mode_rssi_drop_n_[mode_idx]++;
+        if (drop_rssi_ok) {
+          this->diag_15m_mode_rssi_drop_sum_[mode_idx] += drop_rssi;
+          this->diag_15m_mode_rssi_drop_n_[mode_idx]++;
+        }
       }
       if (mode_idx < this->diag_60min_mode_dropped_.size()) {
         this->diag_60min_mode_dropped_[mode_idx]++;
-        this->diag_60min_mode_rssi_drop_sum_[mode_idx] += (int32_t) p->get_rssi();
-        this->diag_60min_mode_rssi_drop_n_[mode_idx]++;
+        if (drop_rssi_ok) {
+          this->diag_60min_mode_rssi_drop_sum_[mode_idx] += drop_rssi;
+          this->diag_60min_mode_rssi_drop_n_[mode_idx]++;
+        }
       }
       auto bucket = bucket_for_reason_(p->drop_reason());
       this->diag_dropped_by_bucket_[bucket]++;
@@ -626,32 +706,46 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   this->diag_ok_++;
   this->diag_15m_ok_++;
   this->diag_60min_ok_++;
-  this->diag_rssi_ok_sum_ += (int32_t) frame->rssi();
-  this->diag_rssi_ok_n_++;
-  this->diag_15m_rssi_ok_sum_ += (int32_t) frame->rssi();
-  this->diag_15m_rssi_ok_n_++;
-  this->diag_60min_rssi_ok_sum_ += (int32_t) frame->rssi();
-  this->diag_60min_rssi_ok_n_++;
-  if (!this->recent_ok_rssi_valid_) {
-    this->recent_ok_rssi_avg_ = (int32_t) frame->rssi();
-    this->recent_ok_rssi_valid_ = true;
-  } else {
-    this->recent_ok_rssi_avg_ = ((this->recent_ok_rssi_avg_ * 7) + (int32_t) frame->rssi()) / 8;
+  // Frame counters always advance; the RSSI sums only take real readings. This
+  // matters most for recent_ok_rssi_avg_ below, which feeds the weak-signal
+  // thresholds in rf_runtime.cpp - a single -127 sentinel folded into that EMA
+  // would push the abort thresholds down for the next several frames.
+  const int32_t ok_rssi = (int32_t) frame->rssi();
+  const bool ok_rssi_measured = rssi_is_measured_((int) ok_rssi);
+  if (ok_rssi_measured) {
+    this->diag_rssi_ok_sum_ += ok_rssi;
+    this->diag_rssi_ok_n_++;
+    this->diag_15m_rssi_ok_sum_ += ok_rssi;
+    this->diag_15m_rssi_ok_n_++;
+    this->diag_60min_rssi_ok_sum_ += ok_rssi;
+    this->diag_60min_rssi_ok_n_++;
+    if (!this->recent_ok_rssi_valid_) {
+      this->recent_ok_rssi_avg_ = ok_rssi;
+      this->recent_ok_rssi_valid_ = true;
+    } else {
+      this->recent_ok_rssi_avg_ = ((this->recent_ok_rssi_avg_ * 7) + ok_rssi) / 8;
+    }
   }
   if (mode_idx < this->diag_mode_ok_.size()) {
     this->diag_mode_ok_[mode_idx]++;
-    this->diag_mode_rssi_ok_sum_[mode_idx] += (int32_t) frame->rssi();
-    this->diag_mode_rssi_ok_n_[mode_idx]++;
+    if (ok_rssi_measured) {
+      this->diag_mode_rssi_ok_sum_[mode_idx] += ok_rssi;
+      this->diag_mode_rssi_ok_n_[mode_idx]++;
+    }
   }
   if (mode_idx < this->diag_15m_mode_ok_.size()) {
     this->diag_15m_mode_ok_[mode_idx]++;
-    this->diag_15m_mode_rssi_ok_sum_[mode_idx] += (int32_t) frame->rssi();
-    this->diag_15m_mode_rssi_ok_n_[mode_idx]++;
+    if (ok_rssi_measured) {
+      this->diag_15m_mode_rssi_ok_sum_[mode_idx] += ok_rssi;
+      this->diag_15m_mode_rssi_ok_n_[mode_idx]++;
+    }
   }
   if (mode_idx < this->diag_60min_mode_ok_.size()) {
     this->diag_60min_mode_ok_[mode_idx]++;
-    this->diag_60min_mode_rssi_ok_sum_[mode_idx] += (int32_t) frame->rssi();
-    this->diag_60min_mode_rssi_ok_n_[mode_idx]++;
+    if (ok_rssi_measured) {
+      this->diag_60min_mode_rssi_ok_sum_[mode_idx] += ok_rssi;
+      this->diag_60min_mode_rssi_ok_n_[mode_idx]++;
+    }
   }
 
   this->collect_radio_rx_diag_();
@@ -664,6 +758,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   uint8_t dev = 0xFF;
   uint8_t ci = 0xFF;
   uint32_t id_val = 0;
+  uint32_t id_raw = 0;
 
   auto is_bcd = [](uint8_t b) -> bool {
     return ((b & 0x0F) <= 9) && (((b >> 4) & 0x0F) <= 9);
@@ -709,42 +804,64 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                d[base + 6], d[base + 5], d[base + 4], d[base + 3]);
     }
 
+    // Same four bytes in the same order the hex form above prints them, so a
+    // config entry copied straight out of the log matches. Unlike id_val this
+    // is available for every meter, BCD or not.
+    id_raw = ((uint32_t) d[base + 6] << 24) | ((uint32_t) d[base + 5] << 16) |
+             ((uint32_t) d[base + 4] << 8) | (uint32_t) d[base + 3];
+
     ver = d[base + 7];
     dev = d[base + 8];
     ci = d[base + 9];
   }
 
-  bool highlight = false;
-  if (id_val != 0 && !this->highlight_meter_ids_.empty()) {
-    highlight = std::binary_search(this->highlight_meter_ids_.begin(), this->highlight_meter_ids_.end(), id_val);
-  }
+  const bool highlight = meter_id_in_lists(this->highlight_meter_ids_, this->highlight_meter_raw_ids_,
+                                           id_val, id_raw);
 
   // Update per-meter statistics for highlighted meters, or for all meters in diagnostic_meter_stats: all.
-  if (id_val != 0 && (highlight || this->diag_meter_stats_all_)) {
+  // Keyed on id_raw, not id_val: it is unique per meter and, unlike id_val,
+  // non-zero for non-BCD meters too. Keying on id_val collapsed every such
+  // meter into one shared entry at key 0.
+  if (id_raw != 0 && (highlight || this->diag_meter_stats_all_)) {
     uint32_t now_ms = (uint32_t) esphome::millis();
     // Composite key keeps T1 and C1 streams separate for dual-mode meters.
-    const uint64_t stats_key = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
+    const uint64_t stats_key = ((uint64_t) id_raw << 8) | (uint8_t) frame->link_mode();
     auto &stats = this->highlight_meter_stats_[stats_key];
+    // Remember how this meter is printed; the key alone cannot reproduce it.
+    std::strncpy(stats.id_str, id_str, sizeof(stats.id_str) - 1);
     stats.count++;
-    stats.rssi_last = frame->rssi();
-    stats.rssi_sum += (int32_t) frame->rssi();
-    stats.rssi_n++;
+    // Packet counters always advance. rssi_last keeps the previous measured
+    // value when this frame carries no measurement, so last_rssi stays a real
+    // reading instead of flipping to the -127 sentinel; if the meter has never
+    // been measured it stays at its 0 initialiser, the same "no data" value
+    // win_avg_rssi already publishes for an empty window.
+    if (ok_rssi_measured) {
+      stats.rssi_last = ok_rssi;
+      stats.rssi_sum += ok_rssi;
+      stats.rssi_n++;
+    }
     // Independent windowed counters for time-trigger and count-trigger.
     stats.count_window_time++;
-    stats.rssi_sum_window_time += (int32_t) frame->rssi();
-    stats.rssi_n_window_time++;
+    if (ok_rssi_measured) {
+      stats.rssi_sum_window_time += ok_rssi;
+      stats.rssi_n_window_time++;
+    }
 
     // 60min window — reset only at summary_60min, never at summary_15min.
     stats.count_window_60min++;
-    stats.rssi_sum_window_60min += (int32_t) frame->rssi();
-    stats.rssi_n_window_60min++;
+    if (ok_rssi_measured) {
+      stats.rssi_sum_window_60min += ok_rssi;
+      stats.rssi_n_window_60min++;
+    }
 
     if (stats.count_window_count == 0) {
       stats.count_window_started_ms = now_ms;
     }
     stats.count_window_count++;
-    stats.rssi_sum_window_count += (int32_t) frame->rssi();
-    stats.rssi_n_window_count++;
+    if (ok_rssi_measured) {
+      stats.rssi_sum_window_count += ok_rssi;
+      stats.rssi_n_window_count++;
+    }
 
     if (stats.last_seen_ms != 0) {
       stats.last_interval_ms = now_ms - stats.last_seen_ms;
@@ -792,7 +909,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              ansi_suf);
 
     // Keep highlight_meters lightweight by default: local emphasis plus packet number only.
-    const uint64_t stats_key_ro = ((uint64_t) id_val << 8) | (uint8_t) frame->link_mode();
+    const uint64_t stats_key_ro = ((uint64_t) id_raw << 8) | (uint8_t) frame->link_mode();
     const auto &stats = this->highlight_meter_stats_[stats_key_ro];
     if (stats.count == 1) {
       ESP_LOGI(log_tag, "%s[id:%s] first packet / pierwszy pakiet (packet #1)",
@@ -811,7 +928,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
   }
 
-  this->maybe_forward_frame_(frame.value(), id_val, id_str, log_tag);
+  this->maybe_forward_frame_(frame.value(), id_val, id_raw, id_str, log_tag);
 
   for (auto &handler : this->handlers_)
     handler(&frame.value());

@@ -44,6 +44,15 @@ public:
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
   void set_publish_radio_raw(bool enabled) { this->publish_radio_raw_ = enabled; }
 
+  // Optional whitelist limiting which meters reach telegram_topic. Meters are
+  // provided as a CSV string in YAML (list is joined in python). An empty list
+  // forwards every decoded frame, which is the pre-existing behaviour.
+  void set_forward_meters_csv(const std::string &csv) { this->forward_meters_csv_ = csv; }
+  // True when the list was inherited from highlight_meters (forward_meters: true).
+  // Only affects logging, so a later edit to highlight_meters that silently changes
+  // what gets published is traceable in the boot log.
+  void set_forward_meters_inherited(bool inherited) { this->forward_meters_inherited_ = inherited; }
+
   // Optional log highlighting for selected meter IDs (configured from YAML).
   // Meters are provided as a CSV string in YAML (list is joined in python).
   void set_highlight_meters_csv(const std::string &csv) { this->highlight_meters_csv_ = csv; }
@@ -86,14 +95,6 @@ public:
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
   void set_diagnostic_mode_str(const std::string &mode) { this->diag_mode_str_ = mode; }
   void set_diagnostic_meter_stats_str(const std::string &mode) { this->meter_stats_str_ = mode; }
-  void set_tx_test_config(bool enabled, ListenMode mode, uint16_t frame_length, uint32_t interval_ms, uint8_t tx_data_gpio) {
-    this->tx_test_enabled_ = enabled;
-    this->tx_test_mode_ = mode;
-    this->tx_test_frame_length_ = frame_length;
-    this->tx_test_interval_ms_ = interval_ms < 1000 ? 1000 : interval_ms;
-    this->tx_test_data_gpio_ = tx_data_gpio;
-  }
-
   void set_receiver_task_stack_size(uint32_t stack_size) {
     // This configures the dedicated radio_recv FreeRTOS task created by
     // wmbus_radio. It does NOT change ESPHome's main loop task stack.
@@ -128,24 +129,27 @@ protected:
   // parse first, then filter by parser/CRC-selected final mode.
   bool listen_mode_filter_after_parse_{false};
 
-  bool tx_test_enabled_{false};
-  ListenMode tx_test_mode_{LISTEN_MODE_T1};
-  uint16_t tx_test_frame_length_{40};
-  uint32_t tx_test_interval_ms_{30000};
-  uint32_t tx_test_last_ms_{0};
-  uint8_t tx_test_data_gpio_{34};
-
   std::vector<std::function<void(Frame *)>> handlers_;
 
   // Per-meter reception statistics (only tracked for highlight_meters IDs)
   struct MeterStats {
+    // Meter ID exactly as the reception log prints it: eight decimal digits for
+    // a BCD meter, eight hex digits for one whose A-field is not BCD. Stored
+    // rather than derived from the map key, because the key holds the raw
+    // A-field value and rendering that as decimal produces a number that
+    // belongs to no meter.
+    char id_str[9]{};
     uint32_t last_seen_ms{0};      // millis() when last packet was received
     uint32_t last_interval_ms{0};  // elapsed ms since previous packet (0 = first seen)
     uint32_t interval_sum_ms{0};   // cumulative sum for average interval
     uint32_t interval_n{0};        // number of intervals recorded
     uint32_t count{0};             // total packets received (lifetime)
-    int32_t  rssi_last{0};         // RSSI of the last packet
-    int32_t  rssi_sum{0};          // cumulative RSSI sum (lifetime)
+    // RSSI of the last packet that carried a measurement. Frames the
+    // transceiver could not measure (-127 sentinel) leave this untouched, so it
+    // always holds a real reading; 0 means "never measured", the same value
+    // win_avg_rssi already publishes for a window with no samples.
+    int32_t  rssi_last{0};
+    int32_t  rssi_sum{0};          // cumulative RSSI sum (measured samples only)
     uint32_t rssi_n{0};            // number of RSSI samples (lifetime)
     // Independent windowed counters for time-based and count-based triggers.
     // They must not share state, otherwise one trigger resets the other.
@@ -198,9 +202,18 @@ protected:
   bool target_log_{true};
   bool publish_radio_raw_{false};
 
+  // Forwarding whitelist (sorted + deduplicated by the CSV parser, so lookups
+  // can use binary search). Both empty means "forward everything".
+  // _raw_ holds A-field values for meters whose ID is not BCD.
+  std::string forward_meters_csv_{};
+  std::vector<uint32_t> forward_meter_ids_{};
+  std::vector<uint32_t> forward_meter_raw_ids_{};
+  bool forward_meters_inherited_{false};
+
   // Highlight configuration
   std::string highlight_meters_csv_{};
   std::vector<uint32_t> highlight_meter_ids_{};
+  std::vector<uint32_t> highlight_meter_raw_ids_{};
   bool highlight_ansi_{false};
   std::string highlight_tag_{"wmbus_user"};
   std::string highlight_prefix_{"★ "};
@@ -367,7 +380,7 @@ protected:
 
   static DropBucket bucket_for_reason_(const std::string &reason);
   static StageBucket bucket_for_stage_(const std::string &stage);
-  bool meter_is_highlighted_(uint32_t meter_id) const;
+  bool meter_is_highlighted_(uint32_t meter_id, uint32_t meter_id_raw) const;
   void collect_radio_rx_diag_();
   uint32_t current_false_start_like_() const;
   bool sx1276_busy_ether_aggressive_now_() const;
@@ -376,7 +389,12 @@ protected:
   bool should_abort_t1_probe_start_(int rssi_dbm) const;
   bool should_attempt_raw_drain_(int rssi_dbm, size_t bytes_read, bool is_c_mode) const;
   std::string derived_target_topic_() const;
-  void maybe_forward_frame_(Frame &frame, uint32_t meter_id, const char *id_str, const char *log_tag);
+  bool forward_meter_allowed_(uint32_t meter_id, uint32_t meter_id_raw) const;
+  // One formatting place for the whitelist state, logged from setup(), from the
+  // delayed boot block and from dump_config().
+  std::string forward_whitelist_summary_() const;
+  void maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter_id_raw, const char *id_str,
+                            const char *log_tag);
   void maybe_publish_radio_raw_(Packet *packet, uint32_t now_ms);
   bool should_publish_packet_event_(const Packet *packet) const;
   void maybe_publish_diag_summary_(uint32_t now_ms);
@@ -437,6 +455,11 @@ protected:
   void maybe_publish_suggestion_(uint32_t now_ms);
   std::string diag_suggestion_topic_() const;
   static constexpr uint32_t SUGGESTION_THROTTLE_MS_ = 60U * 60U * 1000U; // 1 hour
+
+  // Silence required before NO_METERS_DETECTED may claim a wiring/config fault.
+  // wM-Bus meters transmit tens of seconds to several minutes apart, so the
+  // first summary window after boot is routinely empty on a healthy receiver.
+  static constexpr uint32_t NO_METERS_MIN_UPTIME_MS_ = 5U * 60U * 1000U; // 5 minutes
 
   static constexpr uint32_t DIAG_15MIN_INTERVAL_MS_ = 15U * 60U * 1000U;
   static constexpr uint32_t DIAG_60MIN_INTERVAL_MS_ = 60U * 60U * 1000U;

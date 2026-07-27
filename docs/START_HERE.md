@@ -41,7 +41,7 @@ Read:
 
 Recommended order for beginners:
 
-1. **XIAO ESP32-S3 + Wio-SX1262** — compact, no OLED, good practical target.
+1. **XIAO ESP32-S3 + Wio-SX1262** — compact, no OLED, good practical target. Needs `rf_sw_pin: GPIO38` — the module gates its antenna path, and without it the receiver runs roughly 30 dB deaf. The repo example already sets it; do not omit it if you write the YAML yourself.
 2. **Heltec WiFi LoRa 32 V4** — good SX1262 dev board, but V4 needs the correct FEM/RF-switch YAML.
 3. **Heltec WiFi LoRa 32 V2 / LilyGo T3-S3 SX1276** — usable SX1276 targets.
 4. **CC1101** — experimental, advanced/testing only. Requires `GDO0 + GDO2` and explicit YAML opt-in.
