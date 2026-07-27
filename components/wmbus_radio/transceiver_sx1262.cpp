@@ -105,6 +105,40 @@ static inline void u16_to_be(uint16_t v, uint8_t &msb, uint8_t &lsb) {
 }
 
 // ---------------------------------------------------------------------------
+// RSSI sentinel, identical to the SX1276 driver: "not measured for this frame".
+// Both consumers recognise it: the heuristics in rf_runtime.cpp bail out on it,
+// and rssi_is_measured_() in component.cpp keeps it out of the diagnostic and
+// per-meter averages. A frame whose level could not be sampled is therefore
+// reported as unknown rather than as a bogus near-floor reading.
+// ---------------------------------------------------------------------------
+static constexpr int8_t RSSI_NOT_MEASURED = -127;
+
+// Floor for a converted reading. This must stay *above* the whole "unusable"
+// band, not just above the sentinel: rf_runtime.cpp bails out on
+// `rssi_dbm <= -126` and component.cpp counts a sample as measured only when
+// `rssi_dbm > -126`. Clamping to -126 would push a genuine (if meaningless)
+// near-floor reading into that band and have it silently dropped, so the
+// measurement range and the no-data band are kept disjoint by construction.
+// Raw 250..255 maps to -125; those levels are below thermal noise anyway.
+static constexpr int8_t RSSI_MIN_VALID = -125;
+
+// ---------------------------------------------------------------------------
+// SX1261/2 datasheet Rev 2.2: RSSI [dBm] = -RssiRaw / 2.
+//
+// The old code spelled this as `-((int) raw) >> 1`. Unary minus binds tighter
+// than the shift, so it arithmetic-shifted a negative value, which floors
+// instead of truncating (raw=241 -> -121 dBm instead of -120.5 -> -120) and
+// only accidentally agreed with the datasheet for even raw values.
+//
+// A raw value of 0 means "register never written", not "0 dBm"; callers must
+// check for it before calling this.
+// ---------------------------------------------------------------------------
+static inline int8_t sx126x_rssi_dbm_(uint8_t raw) {
+  const int dbm = -((int) raw) / 2;
+  return (int8_t) (dbm < RSSI_MIN_VALID ? RSSI_MIN_VALID : dbm);
+}
+
+// ---------------------------------------------------------------------------
 // wait_while_busy_: poll BUSY pin until low (command accepted).
 // Bail out after 200 ms to avoid hanging on a broken SPI bus.
 // ---------------------------------------------------------------------------
@@ -217,11 +251,92 @@ void SX1262::read_buffer_(uint8_t offset, uint8_t *out, size_t out_len) {
   this->wait_while_busy_();
 }
 
+// ---------------------------------------------------------------------------
+// read_rssi_inst_dbm_: instantaneous RSSI of whatever is on the air *right now*.
+//
+// Only meaningful while the radio is in RX and the frame is still being
+// transmitted. Called after the frame it measures the empty channel, i.e. the
+// noise floor - see the comments in load_rx_buffer_() / capture_rx_stream_().
+// ---------------------------------------------------------------------------
 int8_t SX1262::read_rssi_inst_dbm_() {
-  // Semtech: rssi_dbm = -(rssi_raw >> 1)
   uint8_t rssi_raw = 0;
   this->cmd_read_(CMD_GET_RSSI_INST, {}, &rssi_raw, 1);
-  return (int8_t)(-((int) rssi_raw) >> 1);
+  if (rssi_raw == 0)
+    return RSSI_NOT_MEASURED;
+  return sx126x_rssi_dbm_(rssi_raw);
+}
+
+// ---------------------------------------------------------------------------
+// read_packet_status_rssi_: raw RssiSync / RssiAvg from GetPacketStatus.
+//
+// GFSK response layout (datasheet Rev 2.2, GetPacketStatus): RxStatus,
+// RssiSync, RssiAvg. Raw values are returned unconverted so the caller can tell
+// "0 = never latched" apart from a genuine reading, and so the diagnostic log
+// can show what the radio actually reported.
+//
+//   RssiSync - latched when the sync word matched, i.e. at the real start of
+//              the frame. This is the per-frame signal level we want.
+//   RssiAvg  - averaged over the whole RX window. The window is a fixed 255
+//              bytes (SetPacketParams above), so for a 134-byte WMBus frame
+//              more than half of it is post-transmission noise, which drags the
+//              average down towards the floor.
+// ---------------------------------------------------------------------------
+void SX1262::read_packet_status_rssi_(uint8_t &raw_sync, uint8_t &raw_avg) {
+  uint8_t ps[3]{};
+  this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
+  raw_sync = ps[1];
+  raw_avg = ps[2];
+}
+
+// ---------------------------------------------------------------------------
+// record_rssi_diag_: note which source the frame's RSSI came from.
+//
+// This runs in the receiver task, whose log output never reaches the API log
+// stream, so it must not report anything itself - it only parks a snapshot for
+// Radio::loop() to print from the main task (see take_rssi_diag()). The DEBUG
+// line below is therefore UART-only and exists for serial-console debugging.
+//
+// Each receive path is reported once. The two paths derive the level from
+// different registers, so seeing both is what makes the report worth having;
+// after that the radio goes quiet instead of narrating every frame.
+// ---------------------------------------------------------------------------
+void SX1262::record_rssi_diag_(RxPath path, uint8_t raw_sync, uint8_t raw_avg, int8_t inflight) {
+  const char *source = (this->last_rssi_dbm_ == RSSI_NOT_MEASURED) ? "none"
+                     : (inflight != RSSI_NOT_MEASURED && this->last_rssi_dbm_ == inflight) ? "inflight"
+                     : (raw_sync != 0 && this->last_rssi_dbm_ == sx126x_rssi_dbm_(raw_sync)) ? "sync"
+                     : "avg";
+  const char *path_str = (path == RxPath::STREAM) ? "stream" : "fifo";
+
+  ESP_LOGD(TAG, "RSSI %ddBm from %s (path=%s RssiSync=0x%02X RssiAvg=0x%02X inflight=%ddBm)",
+           (int) this->last_rssi_dbm_, source, path_str, (unsigned) raw_sync, (unsigned) raw_avg,
+           (int) inflight);
+
+  const uint8_t slot = (uint8_t) path;
+  if (this->rssi_diag_reported_[slot])
+    return;
+  // Claim the slot before filling it, so a second frame on this same path
+  // cannot start another write into it.
+  this->rssi_diag_reported_[slot] = true;
+
+  this->rssi_diag_[slot].path = path_str;
+  this->rssi_diag_[slot].source = source;
+  this->rssi_diag_[slot].raw_sync = raw_sync;
+  this->rssi_diag_[slot].raw_avg = raw_avg;
+  this->rssi_diag_[slot].inflight = inflight;
+  this->rssi_diag_[slot].result = this->last_rssi_dbm_;
+  // Published last: the main task treats this flag as "snapshot is complete".
+  this->rssi_diag_pending_[slot] = true;
+}
+
+bool SX1262::take_rssi_diag(RssiDiag &out) {
+  for (uint8_t slot = 0; slot < 2; slot++) {
+    if (!this->rssi_diag_pending_[slot])
+      continue;
+    out = this->rssi_diag_[slot];
+    this->rssi_diag_pending_[slot] = false;
+    return true;
+  }
+  return false;
 }
 
 
@@ -307,18 +422,30 @@ bool SX1262::load_rx_buffer_() {
   this->delegate_->end_transaction();
   this->wait_while_busy_();
 
-  // Cache RSSI while the packet context is still valid.
+  // ---------------------------------------------------------------------------
+  // Packet RSSI.
+  //
+  // This path only runs after RX_DONE, so the transmitter is already silent:
+  // an instantaneous GetRssiInst here measures the empty channel, not the
+  // frame. That fallback is what made every meter report the same near-floor
+  // level regardless of distance, so it is deliberately gone.
+  //
+  // RssiSync is latched at sync-word detection and is the only value that
+  // describes this frame; RssiAvg is only a fallback because the fixed 255-byte
+  // RX window mixes a long noise tail into the average. If the radio latched
+  // neither, report "not measured" rather than inventing a number.
+  // ---------------------------------------------------------------------------
   {
-    uint8_t ps[3]{};
-    this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    // For GFSK: ps[2] is RSSI_avg (raw). In some corner cases (packet context lost)
-    // GET_PACKET_STATUS may return zeros. Fall back to GET_RSSI_INST then.
-    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) >> 1);
-    if (rssi_avg == 0) {
-      this->last_rssi_dbm_ = this->read_rssi_inst_dbm_();
+    uint8_t raw_sync = 0, raw_avg = 0;
+    this->read_packet_status_rssi_(raw_sync, raw_avg);
+    if (raw_sync != 0) {
+      this->last_rssi_dbm_ = sx126x_rssi_dbm_(raw_sync);
+    } else if (raw_avg != 0) {
+      this->last_rssi_dbm_ = sx126x_rssi_dbm_(raw_avg);
     } else {
-      this->last_rssi_dbm_ = rssi_avg;
+      this->last_rssi_dbm_ = RSSI_NOT_MEASURED;
     }
+    this->record_rssi_diag_(RxPath::FIFO, raw_sync, raw_avg, RSSI_NOT_MEASURED);
   }
 
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
@@ -369,6 +496,10 @@ bool SX1262::capture_rx_stream_() {
   // Capture until RX_DONE/TIMEOUT (latched IRQ), then allow a short drain window.
   bool seen_end_irq = false;
 
+  // Peak-hold of the instantaneous RSSI sampled while bytes were arriving.
+  // See the RSSI block after the loop for why this is the primary source here.
+  int8_t rssi_inflight = RSSI_NOT_MEASURED;
+
   while (true) {
     const uint32_t now = millis();
 
@@ -399,6 +530,14 @@ bool SX1262::capture_rx_stream_() {
     this->write_register_(REG_RXTX_PAYLOAD_LEN, {(uint8_t) (current_index - 1)});
 
     if (avail != 0) {
+      // Sample RSSI before draining: bytes are arriving right now, so the
+      // transmitter is still on air and this is the frame's own signal level.
+      // Draining 200+ bytes over SPI takes long enough that a sample taken
+      // afterwards can already fall past the end of the transmission.
+      const int8_t inst = this->read_rssi_inst_dbm_();
+      if (inst != RSSI_NOT_MEASURED && inst > rssi_inflight)
+        rssi_inflight = inst;
+
       uint8_t tmp[256];
       const uint8_t off = state_index;
       const uint8_t first = (uint8_t) ((off + avail <= 256) ? avail : (256 - off));
@@ -436,18 +575,34 @@ bool SX1262::capture_rx_stream_() {
     }
   }
 
-  // Cache RSSI BEFORE stopping RX (standby), otherwise GetPacketStatus may return zeros.
-  // Prefer packet RSSI_avg when available; fall back to instantaneous RSSI.
-  {
-    uint8_t ps[3]{};
-    this->cmd_read_(CMD_GET_PACKET_STATUS, {}, ps, sizeof(ps));
-    const int8_t rssi_avg = (int8_t)(-((int) ps[2]) >> 1);
-    if (rssi_avg == 0) {
-      this->last_rssi_dbm_ = this->read_rssi_inst_dbm_();
-    } else {
-      this->last_rssi_dbm_ = rssi_avg;
-    }
+  // ---------------------------------------------------------------------------
+  // Packet RSSI for the streamed path. Must be read BEFORE stopping RX
+  // (standby), otherwise GetPacketStatus returns zeros.
+  //
+  // Here the packet engine is deliberately never allowed to finish - RxTxPldLen
+  // is pushed forward on every iteration - so GetPacketStatus may still hold
+  // values latched by an *older* frame, or nothing at all. The in-flight peak
+  // sampled while bytes were arriving is therefore the primary source; packet
+  // status only covers the case where the frame was already fully buffered
+  // before we got here (entry on RX_DONE rather than SYNC_WORD_VALID).
+  //
+  // Sampling GetRssiInst at this point instead - which is what the old code did
+  // whenever RssiAvg read back as 0 - measures the channel several tens of
+  // milliseconds after the transmission ended, i.e. the noise floor. That is
+  // why every meter reported the same level.
+  // ---------------------------------------------------------------------------
+  uint8_t raw_sync = 0, raw_avg = 0;
+  this->read_packet_status_rssi_(raw_sync, raw_avg);
+  if (rssi_inflight != RSSI_NOT_MEASURED) {
+    this->last_rssi_dbm_ = rssi_inflight;
+  } else if (raw_sync != 0) {
+    this->last_rssi_dbm_ = sx126x_rssi_dbm_(raw_sync);
+  } else if (raw_avg != 0) {
+    this->last_rssi_dbm_ = sx126x_rssi_dbm_(raw_avg);
+  } else {
+    this->last_rssi_dbm_ = RSSI_NOT_MEASURED;
   }
+  this->record_rssi_diag_(RxPath::STREAM, raw_sync, raw_avg, rssi_inflight);
 
   // Stop RX and clear IRQs.
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
@@ -550,6 +705,29 @@ void SX1262::setup() {
     this->fem_pa_pin_->setup();
     this->fem_pa_pin_->digital_write(false);
   }
+
+  // External gate of the module's internal RF switch.
+  //
+  // Some SX1262 modules do not connect the antenna unconditionally. The
+  // Seeed Wio-SX1262 brings the gate out on module pin 1 (RF_SW, "External IO
+  // control internal gate RF switch") and expects the host to hold it high;
+  // on the XIAO ESP32S3 kit that lands on GPIO38. This is separate from
+  // dio2_rf_switch: per the module datasheet the TX/RX *direction* is chosen
+  // by the SX1262's own DIO2 (high = TX, low = RX), while RF_SW decides
+  // whether the switch conducts at all.
+  //
+  // Leaving it unconfigured is not a soft degradation. The pin idles as a
+  // high-impedance input after reset, the antenna path never closes, and the
+  // receiver hears only leakage - measured at roughly 50 dB below an
+  // equivalent board, which looks exactly like a broken antenna.
+  if (this->rf_sw_pin_ != nullptr) {
+    this->rf_sw_pin_->setup();
+    this->rf_sw_pin_->digital_write(true);
+    delay(1);  // let the switch settle before the radio is brought up
+  }
+  ESP_LOGI(TAG, "RF switch gate / bramka przelacznika RF: %s",
+           (this->rf_sw_pin_ != nullptr) ? "driven high (rf_sw_pin) / sterowana"
+                                         : "not configured / nieskonfigurowana");
 
   this->reset();
   delay(10);
@@ -667,6 +845,7 @@ void SX1262::restart_rx() {
     this->rx_loaded_ = false;
     this->rx_idx_ = 0;
     this->rx_len_ = 0;
+    this->last_rssi_dbm_ = RSSI_NOT_MEASURED;
     return;
   }
 
@@ -697,6 +876,11 @@ void SX1262::restart_rx() {
   this->rx_loaded_ = false;
   this->rx_idx_ = 0;
   this->rx_len_ = 0;
+
+  // Drop the previous frame's level, exactly like the SX1276 driver does. A
+  // frame whose RSSI cannot be sampled must report "not measured" instead of
+  // silently inheriting an unrelated reading.
+  this->last_rssi_dbm_ = RSSI_NOT_MEASURED;
 }
 
 

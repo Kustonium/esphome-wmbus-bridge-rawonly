@@ -153,6 +153,20 @@ Porównuj:
 
 Nie oceniaj zmian RF tylko po globalnym `drop_pct`. Bardziej agresywny tryb może podnieść `drop_pct`, a jednocześnie odzyskać więcej ramek dla ważnych liczników.
 
+### Pola RSSI
+
+`last_rssi` to poziom ostatniej ramki, dla której udało się zmierzyć sygnał. `win_avg_rssi` to średnia z okna.
+
+Uśredniane są wyłącznie ramki z rzeczywistym pomiarem. Ramka, dla której radio nie oddało poziomu, jest raportowana jako **-127 dBm** („nie zmierzono") i **nie wchodzi do średnich** — inaczej zaniżałaby statystykę wartością, która nie jest siłą sygnału. Z tego samego powodu `last_rssi` zachowuje poprzedni zmierzony odczyt zamiast przeskakiwać na wartość znacznika.
+
+Konsekwencje przy czytaniu snapshotu:
+
+- `win_avg_rssi: 0` oznacza **brak zmierzonych próbek w oknie**, a nie 0 dBm. Okno może przy tym zawierać ramki — liczniki pakietów rosną niezależnie od pomiaru.
+- `last_rssi: 0` na liczniku, który dopiero się pojawił, oznacza to samo: żadna jego ramka nie miała jeszcze pomiaru.
+- Wartości `-126` i `-127` traktuj jako brak danych. Heurystyki RF w komponencie również je pomijają.
+
+Rozkład tych wartości między licznikami jest osobnym narzędziem diagnostycznym — patrz TROUBLESHOOTING, sekcja o wąskim paśmie RSSI.
+
 ## `listen_mode_filter_after_parse`
 
 Domyślnie:

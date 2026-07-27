@@ -153,6 +153,20 @@ Compare:
 
 Do not judge RF changes only by global `drop_pct`. A more aggressive mode can increase `drop_pct` but still recover more frames for meters that matter.
 
+### RSSI fields
+
+`last_rssi` is the level of the most recent frame whose signal could actually be measured. `win_avg_rssi` is the average over the window.
+
+Only frames carrying a real measurement are averaged. A frame for which the radio returned no level is reported as **-127 dBm** ("not measured") and is **kept out of the averages** - otherwise it would drag the statistic down with a value that is not a signal strength. For the same reason `last_rssi` keeps the previous measured reading instead of flipping to the sentinel.
+
+What this means when reading a snapshot:
+
+- `win_avg_rssi: 0` means **no measured samples in the window**, not 0 dBm. The window can still contain frames - packet counters advance independently of the measurement.
+- `last_rssi: 0` on a meter that has just appeared means the same: none of its frames carried a measurement yet.
+- Treat `-126` and `-127` as no data. The component's own RF heuristics skip them too.
+
+The distribution of these values across meters is a diagnostic tool in its own right - see TROUBLESHOOTING, the section on a narrow RSSI band.
+
 ## `listen_mode_filter_after_parse`
 
 Default:

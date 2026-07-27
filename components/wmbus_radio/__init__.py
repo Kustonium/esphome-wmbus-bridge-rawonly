@@ -47,6 +47,7 @@ CONF_TARGET_METER_ID = "target_meter_id"
 CONF_TARGET_TOPIC = "target_topic"
 CONF_TARGET_LOG = "target_log"
 CONF_PUBLISH_RADIO_RAW = "publish_radio_raw"
+CONF_FORWARD_METERS = "forward_meters"
 
 # SX1262 board helpers
 CONF_DIO2_RF_SWITCH = "dio2_rf_switch"
@@ -93,6 +94,12 @@ CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
 CONF_FEM_EN_PIN = "fem_en_pin"
 CONF_FEM_PA_PIN = "fem_pa_pin"
 
+# External gate of the module's internal RF switch (SX1262).
+# Needed by modules that do not connect the antenna unconditionally, such as the
+# Seeed Wio-SX1262 (module pin 1 RF_SW; GPIO38 on the XIAO ESP32S3 kit). Not the
+# same thing as dio2_rf_switch, which only selects the TX/RX direction.
+CONF_RF_SW_PIN = "rf_sw_pin"
+
 # CC1101 pins / safety gate (experimental, advanced users only)
 CONF_GDO0_PIN = "gdo0_pin"
 CONF_GDO2_PIN = "gdo2_pin"
@@ -126,6 +133,61 @@ def _validate_topic_name(value):
     if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
         raise cv.Invalid("topic_name may only contain letters, numbers, '_' and '-' / topic_name moze zawierac tylko litery, cyfry, '_' i '-'")
     return value
+
+
+_METER_ID_MAX_BCD = 99999999
+
+
+def _validate_meter_id(value):
+    """One meter ID: decimal for a BCD meter, hex for a meter whose A-field is not BCD.
+
+    The trap this guards against: YAML resolves an unquoted 0x417F0666 to the
+    integer 1098843750, which would silently be stored as a decimal ID and could
+    never match anything. Any all-digit value above the largest possible BCD ID
+    is therefore rejected, with the quoted hex form spelled out.
+    """
+    text = str(value).strip()
+    if not text:
+        raise cv.Invalid("meter ID cannot be empty / ID licznika nie moze byc puste")
+
+    body = text[2:] if text[:2].lower() == "0x" else text
+    if not body:
+        raise cv.Invalid(f"'{text}' is missing its hex digits / brakuje cyfr szesnastkowych")
+
+    is_hex = text[:2].lower() == "0x" or any(c in "abcdefABCDEF" for c in body)
+
+    if is_hex:
+        try:
+            raw = int(body, 16)
+        except ValueError:
+            raise cv.Invalid(
+                f"'{text}' is not a valid meter ID - use the value the log prints as id:, "
+                f"decimal (e.g. 12345678) or hex (e.g. \"0x417F0666\") / "
+                f"uzyj wartosci, ktora log wypisuje jako id:"
+            )
+        if raw > 0xFFFFFFFF:
+            raise cv.Invalid(f"'{text}' does not fit in a 4-byte meter ID / nie miesci sie w 4 bajtach")
+        return text
+
+    if not body.isdigit():
+        raise cv.Invalid(
+            f"'{text}' is not a valid meter ID - use decimal (e.g. 12345678) or hex "
+            f'(e.g. "0x417F0666") / uzyj zapisu dziesietnego albo szesnastkowego'
+        )
+
+    if int(body) > _METER_ID_MAX_BCD:
+        raise cv.Invalid(
+            f"meter ID {body} exceeds the largest possible BCD meter ID ({_METER_ID_MAX_BCD}). "
+            f'If this is the hex ID from the log, quote it so YAML keeps it as text: "0x{int(body):08X}" / '
+            f'Jesli to szesnastkowe ID z logu, ujmij je w cudzyslow: "0x{int(body):08X}"'
+        )
+
+    return text
+
+
+def _meters_csv(values):
+    """Join a YAML meter-ID list into the CSV string the C++ side parses."""
+    return ",".join([str(m).strip() for m in values if str(m).strip()])
 
 
 def _normalize_diagnostic_mode(mode):
@@ -186,6 +248,8 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_FEM_CTRL_PIN): pins.internal_gpio_output_pin_schema,
             cv.Optional(CONF_FEM_EN_PIN): pins.internal_gpio_output_pin_schema,
             cv.Optional(CONF_FEM_PA_PIN): pins.internal_gpio_output_pin_schema,
+            # External RF switch gate (optional, only makes sense for SX1262)
+            cv.Optional(CONF_RF_SW_PIN): pins.internal_gpio_output_pin_schema,
 
             cv.Optional(CONF_ON_FRAME): automation.validate_automation(
                 {
@@ -204,6 +268,13 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_TARGET_LOG, default=True): cv.boolean,
             # Internal/dev-only raw packet tap. Fixed MQTT topic: wmbus_bridge/raw.
             cv.Optional(CONF_PUBLISH_RADIO_RAW, default=False): cv.boolean,
+            # Whitelist of meter IDs allowed on the RAW telegram topic. Accepts
+            # either an explicit list, or `true` to reuse highlight_meters so the
+            # same IDs are not written twice. Empty (default) forwards every
+            # decoded frame, as before this option existed.
+            cv.Optional(CONF_FORWARD_METERS, default=[]): cv.Any(
+                cv.boolean, cv.ensure_list(_validate_meter_id)
+            ),
 
             # Diagnostics are opt-in by default. `diagnostic_mode` applies a preset
             # for MQTT publishing only; explicit detailed flags still override it.
@@ -235,7 +306,7 @@ BASE_CONFIG_SCHEMA = (
             ),
 
             # Optional log highlighting for selected meter IDs
-            cv.Optional(CONF_HIGHLIGHT_METERS, default=[]): cv.ensure_list(cv.string),
+            cv.Optional(CONF_HIGHLIGHT_METERS, default=[]): cv.ensure_list(_validate_meter_id),
             cv.Optional(CONF_HIGHLIGHT_ANSI, default=False): cv.boolean,
             cv.Optional(CONF_HIGHLIGHT_TAG, default="wmbus_user"): cv.string,
             cv.Optional(CONF_HIGHLIGHT_PREFIX, default="★ "): cv.string,
@@ -349,6 +420,11 @@ async def to_code(config):
         if CONF_FEM_PA_PIN in config:
             p = await cg.gpio_pin_expression(config[CONF_FEM_PA_PIN])
             cg.add(radio_var.set_fem_pa_pin(p))
+
+        # External RF switch gate (Wio-SX1262 pin 1 / RF_SW)
+        if CONF_RF_SW_PIN in config:
+            p = await cg.gpio_pin_expression(config[CONF_RF_SW_PIN])
+            cg.add(radio_var.set_rf_sw_pin(p))
 
 
     if config[CONF_RADIO_TYPE] == "SX1276" and CONF_TCXO_PIN in config:
@@ -498,6 +574,29 @@ async def to_code(config):
     cg.add(var.set_target_log(config.get(CONF_TARGET_LOG, True)))
     cg.add(var.set_publish_radio_raw(config.get(CONF_PUBLISH_RADIO_RAW, False)))
 
+    # forward_meters accepts an explicit list, or `true` meaning "reuse
+    # highlight_meters" so the same IDs do not have to be written twice.
+    forward_meters = config.get(CONF_FORWARD_METERS, [])
+    forward_meters_inherited = False
+    if forward_meters is True:
+        forward_meters_csv = _meters_csv(config.get(CONF_HIGHLIGHT_METERS, []))
+        forward_meters_inherited = True
+        if not forward_meters_csv:
+            # Filtering on an empty list would silence the whole RAW stream, so
+            # fall back to forwarding everything and say so loudly.
+            warnings.append(
+                "forward_meters: true but highlight_meters is empty - no filtering applied, "
+                "every frame is forwarded / forward_meters: true, ale highlight_meters jest puste - "
+                "filtr nie dziala, przekazywane sa wszystkie ramki."
+            )
+            forward_meters_inherited = False
+    elif forward_meters is False:
+        forward_meters_csv = ""
+    else:
+        forward_meters_csv = _meters_csv(forward_meters)
+    cg.add(var.set_forward_meters_csv(forward_meters_csv))
+    cg.add(var.set_forward_meters_inherited(forward_meters_inherited))
+
     diag_events_highlight_only = (
         config[CONF_DIAG_EVENTS_HIGHLIGHT_ONLY]
         if CONF_DIAG_EVENTS_HIGHLIGHT_ONLY in config
@@ -551,7 +650,7 @@ async def to_code(config):
 
     # Log highlight config
     meters = config.get(CONF_HIGHLIGHT_METERS, [])
-    meters_csv = ",".join([str(m).strip() for m in meters if str(m).strip()])
+    meters_csv = _meters_csv(meters)
     cg.add(var.set_highlight_meters_csv(meters_csv))
     cg.add(var.set_highlight_ansi(config.get(CONF_HIGHLIGHT_ANSI, False)))
     cg.add(var.set_highlight_tag(config.get(CONF_HIGHLIGHT_TAG, "wmbus_user")))

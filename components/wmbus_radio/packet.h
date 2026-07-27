@@ -69,6 +69,11 @@ public:
   // Works after successful decode and for some late-stage failures.
   bool try_get_meter_id(uint32_t &out_id) const;
 
+  // Raw A-field value, in the order the log prints it as id:XXXXXXXX. Unlike
+  // try_get_meter_id() this does not require the ID to be BCD, so it is the
+  // only form available for meters such as Diehl/IZAR.
+  bool try_get_meter_id_raw(uint32_t &out_id) const;
+
   // T1 (3-of-6) symbol diagnostics (only meaningful for LinkMode::T1)
   uint16_t t1_symbols_total() const { return this->t1_symbols_total_; }
   uint16_t t1_symbols_invalid() const { return this->t1_symbols_invalid_; }
@@ -121,6 +126,11 @@ public:
   std::string as_hex();
   std::string as_rtlwmbus();
   bool try_get_meter_id(uint32_t &out_id) const;
+
+  // Raw A-field value, as printed in the log (id:XXXXXXXX). Unlike
+  // try_get_meter_id() this does not require a BCD ID, so it is the only form
+  // available for meters such as Diehl/IZAR.
+  bool try_get_meter_id_raw(uint32_t &out_id) const;
 
   void mark_as_handled();
   uint8_t handlers_count();

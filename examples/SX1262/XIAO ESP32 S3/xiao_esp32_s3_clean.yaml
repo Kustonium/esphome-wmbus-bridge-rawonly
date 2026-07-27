@@ -6,10 +6,6 @@ esphome:
   name: ${devicename}
   friendly_name: ${friendly_name}
   min_version: 2026.1.3
-  on_boot:
-    priority: 900
-    then:
-      - output.turn_on: lora_rf_sw
 
 esp32:
   variant: esp32s3
@@ -51,11 +47,6 @@ ota:
 time:
   - platform: homeassistant
 
-output:
-  - platform: gpio
-    id: lora_rf_sw
-    pin: GPIO38
-
 spi:
   clk_pin: GPIO7
   miso_pin: GPIO8
@@ -69,6 +60,10 @@ wmbus_radio:
   irq_pin:
     number: GPIO39
     mode: input
+  # REQUIRED on this board. Wio-SX1262 pin 1 (RF_SW) gates the module's internal
+  # RF switch and must be held high; without it the antenna never connects and
+  # the receiver is ~50 dB deaf. Not the same as dio2_rf_switch.
+  rf_sw_pin: GPIO38
   has_tcxo: true
   rx_gain: boosted
   long_gfsk_packets: true

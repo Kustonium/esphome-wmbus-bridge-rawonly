@@ -14,12 +14,18 @@ esphome:
   friendly_name: ${friendly_name}
   min_version: 2026.1.3
 
-  # EN: This particular XIAO SX1262 build uses GPIO38 to enable RF switch power.
-  # PL: Ten wariant XIAO + SX1262 używa GPIO38 do włączenia zasilania toru RF.
-  on_boot:
-    priority: 900
-    then:
-      - output.turn_on: lora_rf_sw
+  # EN: GPIO38 gates this module's RF switch. It used to be driven from here with
+  #     an on_boot action on a gpio output; that is gone because it did not work.
+  #     on_boot priority 900 lands in the same setup bucket as the gpio output
+  #     component itself, so the order between them is decided by registration,
+  #     not by the config - and the write went out before the pin was an output.
+  #     wmbus_radio drives it directly now, see rf_sw_pin below.
+  # PL: GPIO38 otwiera bramkę przełącznika RF tego modułu. Wcześniej sterowano
+  #     nim stąd, akcją on_boot na wyjściu gpio; zostało to usunięte, bo nie
+  #     działało. on_boot z priorytetem 900 trafia do tego samego koszyka co sam
+  #     komponent gpio output, więc o kolejności decyduje rejestracja, a nie
+  #     konfiguracja - i zapis szedł, zanim pin stał się wyjściem. Teraz steruje
+  #     nim bezpośrednio wmbus_radio, patrz rf_sw_pin poniżej.
 
 esp32:
   variant: esp32s3
@@ -81,11 +87,6 @@ text_sensor:
     ssid:
       name: "WiFi SSID"
 
-output:
-  - platform: gpio
-    id: lora_rf_sw
-    pin: GPIO38
-
 spi:
   clk_pin: GPIO7
   miso_pin: GPIO8
@@ -98,13 +99,13 @@ wmbus_radio:
   #     module has a TCXO, and listen_mode. Everything else below is OPTIONAL —
   #     sane defaults apply if you delete it: frequency, rx_gain,
   #     long_gfsk_packets, listen_mode_filter_after_parse, topic_name,
-  #     diagnostic_* and highlight_meters.
+  #     diagnostic_*, highlight_meters and forward_meters.
   # PL: WYMAGANE tutaj: radio_type, piny płytki (cs/reset/busy/irq — lub
   #     gdo0/gdo2 + cc1101_allow_experimental dla CC1101), has_tcxo gdy moduł ma
   #     TCXO, oraz listen_mode. Cała reszta poniżej jest OPCJONALNA — po
   #     usunięciu działają sensowne domyślne: frequency, rx_gain,
   #     long_gfsk_packets, listen_mode_filter_after_parse, topic_name,
-  #     diagnostic_* oraz highlight_meters.
+  #     diagnostic_*, highlight_meters oraz forward_meters.
   # ─────────────────────────────────────────────────────────────────────────
   radio_type: SX1262
 
@@ -114,6 +115,27 @@ wmbus_radio:
   irq_pin:
     number: GPIO39
     mode: input
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # EN: REQUIRED on this board — do not delete it. Pin 1 of the Wio-SX1262
+  #     ("RF_SW", external IO control of the internal gate RF switch) has to be
+  #     held high or the antenna path never closes. On the XIAO ESP32S3 kit that
+  #     signal lands on GPIO38. This is NOT the same as dio2_rf_switch: DIO2
+  #     picks the TX/RX direction, RF_SW decides whether the switch conducts.
+  #     Symptom when missing: frames still decode, but every RSSI sits in a
+  #     narrow band just above the sensitivity floor and most meters are never
+  #     heard at all — measured ~50 dB below a Heltec on the same antenna.
+  # PL: WYMAGANE na tej płytce — nie usuwaj. Pin 1 modułu Wio-SX1262 ("RF_SW",
+  #     zewnętrzne sterowanie bramką wewnętrznego przełącznika RF) musi być w
+  #     stanie wysokim, inaczej tor antenowy się nie zamyka. W zestawie z XIAO
+  #     ESP32S3 sygnał ten trafia na GPIO38. To NIE jest to samo co
+  #     dio2_rf_switch: DIO2 wybiera kierunek TX/RX, a RF_SW decyduje, czy
+  #     przełącznik w ogóle przewodzi. Objaw braku: ramki nadal się dekodują,
+  #     ale każde RSSI leży tuż nad progiem czułości, a większości liczników
+  #     w ogóle nie słychać — zmierzone ~50 dB poniżej Hecteca na tej samej
+  #     antenie.
+  # ─────────────────────────────────────────────────────────────────────────
+  rf_sw_pin: GPIO38
 
   has_tcxo: true
   rx_gain: boosted
@@ -159,6 +181,19 @@ wmbus_radio:
   # highlight_tag: "wmbus_user"
   # highlight_prefix: "★ "
   # highlight_ansi: true
+
+  # EN: Optional whitelist — only these meters reach wmbus/<topic_name>/telegram.
+  #     Everything else is dropped on the ESP, which is the point in a dense block.
+  #     Use `forward_meters: true` instead of a list to reuse highlight_meters above.
+  #     Quote hex IDs, otherwise YAML turns 0x417F0666 into the number 1098843750.
+  # PL: Opcjonalna whitelista — na wmbus/<topic_name>/telegram trafiają tylko te liczniki.
+  #     Reszta jest odrzucana na ESP, o co chodzi w gęstej zabudowie.
+  #     Zamiast listy można dać `forward_meters: true` i użyć listy z highlight_meters.
+  #     ID szesnastkowe w cudzysłowie, inaczej YAML zamieni 0x417F0666 na 1098843750.
+  # forward_meters:
+  #   - "00089907"
+  #   - "0x417F0666"
+
   # diagnostic_publish_summary_15min: true
 
   # EN: This only filters detailed diagnostic events to highlighted IDs.

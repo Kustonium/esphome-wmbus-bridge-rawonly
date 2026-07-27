@@ -14,3 +14,17 @@ _bmad-output/
 /_bmad-output/
 /_bmad-custom-backup-temp/
 /CLAUDE.md
+/docslocal/
+/build/
+
+# Local working notes, not part of the published component
+/TODO-*.md
+
+# Stale nested copy of the whole tree that lives in the synced folder.
+# Root-anchored so it can never shadow a real path deeper in the repo.
+/esphome-wmbus-bridge-rawonly-dev/
+
+# Editor and tooling leftovers
+*.bak
+*.tmp
+*.tmp.*

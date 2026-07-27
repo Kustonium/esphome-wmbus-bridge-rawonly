@@ -238,7 +238,7 @@ long_gfsk_packets: true
 rx_gain: boosted
 ```
 
-For boards with an external FEM, also check the `fem_*` pins.
+For boards with an external FEM, also check the `fem_*` pins, and for modules that gate the antenna path, `rf_sw_pin` (see section 13). `dio2_rf_switch` only selects the TX/RX direction and does not replace that gate.
 
 For `SX1276`, normal boards do not need `tcxo_pin`. TCXO variants, for example LILYGO T3 V3.0 TCXO OLED LoRa32, need an explicit TCXO enable pin:
 
@@ -248,7 +248,57 @@ tcxo_pin: GPIO12
 
 The component does not detect board wiring. Check the schematic or vendor documentation.
 
-## 13. `task stack overflow` in logs (XIAO and similar boards)
+## 13. Frames arrive, but few of them - and every RSSI sits in a narrow band
+
+This one is deceptive because nothing looks broken. Frames decode, `dropped` is low, `DIAG hint` reports `GOOD`. There are just a handful of meters instead of dozens.
+
+What settles it is the **RSSI distribution, not the frame count**.
+
+Collect fifteen minutes and compare the strongest reading with the weakest:
+
+```text
+-93, -94, -95, -96, -97, -98 dBm      → 5 dB band, everything just above the floor
+-58, -64, -71, -76, -80, -87 dBm      → 29 dB spread, healthy path
+```
+
+SX1262 sensitivity at 100 kbps is on the order of -105 dBm. A narrow band glued to that floor does **not** mean there are few meters nearby - if that were so, the values would be scattered. It means only what barely clears the threshold is audible, and everything below vanishes without trace. That is the fingerprint of a receiver truncated by sensitivity.
+
+Check in this order:
+
+1. **The RF switch gate.** If the module needs one and nothing drives it, you lose about 30 dB. On XIAO ESP32S3 + Wio-SX1262:
+
+   ```yaml
+   rf_sw_pin: GPIO38
+   ```
+
+   The boot log states whether it is driven:
+
+   ```text
+   RF switch gate / bramka przelacznika RF: driven high (rf_sw_pin) / sterowana
+   ```
+
+   `not configured` on a board that needs it is your answer.
+
+2. **Do not drive that pin from YAML with an `on_boot` action.** The construction below validates, compiles, raises no warning and **does not work** - priority 900 lands in the same setup stage as the `gpio output` component itself, so the write happens before the pin becomes an output:
+
+   ```yaml
+   # NOT like this:
+   esphome:
+     on_boot:
+       priority: 900
+       then:
+         - output.turn_on: lora_rf_sw
+   ```
+
+   If your config has it, remove it together with the `output:` block - keeping it alongside `rf_sw_pin` makes ESPHome reject the config on a duplicate pin declaration.
+
+3. **FEM pins**, if the board has an external front end (Heltec V4: `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin`).
+
+4. **The antenna** - connector, pigtail, band. Check this after the above, not before.
+
+The control measurement after a fix is `meter_window.win_avg_interval_s` for a known meter: equal to the real transmit interval means no transmissions are being missed (see section 3).
+
+## 14. `task stack overflow` in logs (XIAO and similar boards)
 
 Symptom: a panic / FreeRTOS message like `Task stack overflow` appears in the serial log, typically after enabling heavier diagnostics or after upgrading to a build with more counters.
 
@@ -263,7 +313,7 @@ wmbus_radio:
 
 Default is `3072` bytes. Allowed range is `2048..16384`. If you see a stack overflow on XIAO or another small board, try `4096`, then `6144`, then `8192` — increase only as far as needed.
 
-## 14. MQTT is down, but radio should still work
+## 15. MQTT is down, but radio should still work
 
 MQTT problems are transport problems, not proof of RF failure.
 

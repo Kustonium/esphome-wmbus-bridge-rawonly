@@ -50,10 +50,17 @@ class SX1262 : public RadioTransceiver {
   void set_fem_en_pin(InternalGPIOPin *pin) { this->fem_en_pin_ = pin; }
   void set_fem_pa_pin(InternalGPIOPin *pin) { this->fem_pa_pin_ = pin; }
 
+  // Optional external gate of the module's internal RF switch, held high for as
+  // long as the radio is in use. Distinct from dio2_rf_switch: DIO2 selects the
+  // TX/RX direction, this enables the switch at all. See setup() for why a board
+  // that needs it is unusable without it.
+  void set_rf_sw_pin(InternalGPIOPin *pin) { this->rf_sw_pin_ = pin; }
+
   void setup() override;
   void restart_rx() override;
   optional<uint8_t> read() override;
   int8_t get_rssi() override;
+  bool take_rssi_diag(RssiDiag &out) override;
   const char *get_name() override;
   void log_reg_status() override;
 
@@ -68,8 +75,20 @@ class SX1262 : public RadioTransceiver {
   uint16_t get_irq_status_();
   void read_buffer_(uint8_t offset, uint8_t *out, size_t out_len);
 
-  // Instantaneous RSSI (works even when packet status context is lost)
+  // Instantaneous RSSI. Only valid while the frame is still being transmitted;
+  // after the frame it reads the noise floor.
   int8_t read_rssi_inst_dbm_();
+
+  // Raw RssiSync / RssiAvg from GetPacketStatus (0 = never latched).
+  void read_packet_status_rssi_(uint8_t &raw_sync, uint8_t &raw_avg);
+
+  // Which of the two receive paths produced a frame. Doubles as the index into
+  // rssi_diag_reported_, so the values must stay 0/1.
+  enum class RxPath : uint8_t { FIFO = 0, STREAM = 1 };
+
+  // Diagnostic: note which source the frame's RSSI came from, for Radio::loop()
+  // to report. Called from the receiver task; must not log at INFO itself.
+  void record_rssi_diag_(RxPath path, uint8_t raw_sync, uint8_t raw_avg, int8_t inflight);
 
   void set_rf_frequency_(uint32_t freq_hz);
   void set_sync_word_(uint8_t sync2);
@@ -113,15 +132,30 @@ class SX1262 : public RadioTransceiver {
   InternalGPIOPin *fem_en_pin_{nullptr};
   InternalGPIOPin *fem_pa_pin_{nullptr};
 
+  // Optional external RF switch gate (Wio-SX1262 pin 1, RF_SW).
+  InternalGPIOPin *rf_sw_pin_{nullptr};
+
   std::vector<uint8_t> rx_buffer_{};
   size_t rx_idx_{0};
   size_t rx_len_{0};
   bool rx_loaded_{false};
 
-  // Packet RSSI captured at the time the RX buffer was filled.
-  // In long-GFSK mode we stop RX (standby) after capture, so GetPacketStatus
-  // may return zeros later. Cache it here.
-  int8_t last_rssi_dbm_{0};
+  // Packet RSSI captured while the frame was on air (or latched at sync-word
+  // detection). In long-GFSK mode we stop RX (standby) after capture, so
+  // GetPacketStatus may return zeros later. Cache it here.
+  // -127 = not measured for this frame; rf_runtime.cpp ignores anything <= -126.
+  int8_t last_rssi_dbm_{-127};
+
+  // Mailbox handing the RSSI provenance of the first frame on each receive path
+  // to the main task, which is the only one that can log it. Written by the
+  // receiver task, drained by take_rssi_diag() from Radio::loop().
+  //
+  // One slot per path, indexed by RxPath. A single shared slot loses reports:
+  // the receiver task can take both paths within one Radio::loop() iteration,
+  // and the second snapshot then overwrites the first before anything reads it.
+  RssiDiag rssi_diag_[2]{};
+  bool rssi_diag_pending_[2]{};
+  bool rssi_diag_reported_[2]{};
 };
 
 }  // namespace wmbus_radio

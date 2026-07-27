@@ -100,6 +100,16 @@ wmbus_radio:
 
 At boot, the component prints a multiline SX1262 YAML sanity report. Missing `has_tcxo: true` on TCXO-based boards can still allow the radio to initialize, but RX may be completely silent. Disabled `long_gfsk_packets` in T1/both is reported as a risk for long T1 telegrams.
 
+Some modules gate their antenna path behind an external pin and stay roughly 30 dB deaf without it. The Seeed Wio-SX1262 is one of them - on the XIAO ESP32S3 kit that pin is `GPIO38`:
+
+```yaml
+wmbus_radio:
+  radio_type: SX1262
+  rf_sw_pin: GPIO38
+```
+
+This is not the same option as `dio2_rf_switch`, and both are needed: DIO2 selects the TX/RX direction inside the chip, `rf_sw_pin` decides whether the module's RF switch conducts at all. Heltec V3/V4/V4-R8 do not need it - they use the `fem_*` pins.
+
 #### SX1276
 
 Normal SX1276 boards do not need a TCXO option. Some boards expose a dedicated TCXO enable pin. Configure it explicitly only when your board documentation says so.
@@ -246,6 +256,16 @@ wmbus_radio:
 ```
 
 Podczas startu komponent wypisuje wieloliniowy raport sanity YAML dla SX1262. Brak `has_tcxo: true` na płytkach z TCXO może nadal pozwolić na inicjalizację radia, ale RX może być całkowicie martwy. Wyłączone `long_gfsk_packets` w T1/both jest raportowane jako ryzyko dla długich telegramów T1.
+
+Część modułów bramkuje swój tor antenowy zewnętrznym wyprowadzeniem i bez niego pracuje z czułością niższą o około 30 dB. Moduł Seeed Wio-SX1262 jest jednym z nich — w zestawie z XIAO ESP32-S3 tym wyprowadzeniem jest `GPIO38`:
+
+```yaml
+wmbus_radio:
+  radio_type: SX1262
+  rf_sw_pin: GPIO38
+```
+
+To nie jest ta sama opcja co `dio2_rf_switch` i potrzebne są obie: DIO2 wybiera kierunek TX/RX wewnątrz układu, a `rf_sw_pin` decyduje, czy przełącznik RF modułu w ogóle przewodzi. Płytki Heltec V3/V4/V4-R8 tej opcji nie wymagają — korzystają z wyprowadzeń `fem_*`.
 
 #### SX1276
 

@@ -238,7 +238,7 @@ long_gfsk_packets: true
 rx_gain: boosted
 ```
 
-Dla płytek z zewnętrznym FEM sprawdź również piny `fem_*`.
+Dla płytek z zewnętrznym FEM sprawdź również piny `fem_*`, a dla modułów bramkujących tor antenowy — `rf_sw_pin` (patrz sekcja 13). `dio2_rf_switch` odpowiada wyłącznie za kierunek TX/RX i nie zastępuje tej bramki.
 
 Dla `SX1276` zwykłe płytki nie wymagają `tcxo_pin`. Warianty TCXO, na przykład LILYGO T3 V3.0 TCXO OLED LoRa32, wymagają jawnego pinu TCXO enable:
 
@@ -248,7 +248,57 @@ tcxo_pin: GPIO12
 
 Komponent nie wykrywa okablowania płytki. Sprawdź schemat albo dokumentację producenta.
 
-## 13. `task stack overflow` w logach (XIAO i podobne płytki)
+## 13. Ramki są, ale mało — i wszystkie RSSI w wąskim paśmie
+
+Ten objaw jest podstępny, bo nic nie wygląda na zepsute. Ramki się dekodują, `dropped` jest niski, `DIAG hint` raportuje `GOOD`. Tylko liczników jest kilka zamiast kilkudziesięciu.
+
+Rozstrzyga **rozkład RSSI, a nie liczba ramek**.
+
+Zbierz kilkanaście minut i porównaj najsilniejszy odczyt z najsłabszym:
+
+```text
+-93, -94, -95, -96, -97, -98 dBm      → pas 5 dB, wszystko tuż nad progiem
+-58, -64, -71, -76, -80, -87 dBm      → rozrzut 29 dB, zdrowy tor
+```
+
+Czułość SX1262 przy 100 kbps to rząd -105 dBm. Wąski pas przyklejony do progu **nie** oznacza, że w okolicy jest mało liczników — gdyby tak było, wartości byłyby rozproszone. Oznacza, że słychać wyłącznie to, co ledwo przekracza granicę, a wszystko poniżej znika bez śladu. To jest odcisk palca odbiornika obciętego czułością.
+
+Kolejność sprawdzania:
+
+1. **Bramka przełącznika RF.** Jeśli moduł jej wymaga, a nie jest sterowana, tracisz około 30 dB. Na XIAO ESP32-S3 + Wio-SX1262:
+
+   ```yaml
+   rf_sw_pin: GPIO38
+   ```
+
+   Log startowy mówi wprost, czy jest sterowana:
+
+   ```text
+   RF switch gate / bramka przelacznika RF: driven high (rf_sw_pin) / sterowana
+   ```
+
+   `not configured / nieskonfigurowana` na płytce, która tego wymaga, jest odpowiedzią.
+
+2. **Nie steruj tego wyprowadzenia z YAML-a akcją `on_boot`.** Konstrukcja poniżej przechodzi walidację, kompiluje się, nie generuje ostrzeżenia i **nie działa** — priorytet 900 trafia w ten sam etap inicjalizacji co sam komponent `gpio output`, więc zapis wykonuje się, zanim wyprowadzenie stanie się wyjściem:
+
+   ```yaml
+   # NIE tak:
+   esphome:
+     on_boot:
+       priority: 900
+       then:
+         - output.turn_on: lora_rf_sw
+   ```
+
+   Jeśli masz to w konfiguracji, usuń wraz z blokiem `output:` — pozostawienie obok `rf_sw_pin` powoduje odrzucenie konfiguracji z powodu podwójnej deklaracji pinu.
+
+3. **Piny FEM**, jeśli płytka ma zewnętrzny front-end (Heltec V4: `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin`).
+
+4. **Antena** — złącze, pigtail, pasmo. Sprawdzaj po powyższych, nie przed.
+
+Miarą kontrolną po naprawie jest `meter_window.win_avg_interval_s` dla znanego licznika: równy rzeczywistemu interwałowi nadawania oznacza, że nie gubisz transmisji (patrz sekcja 3).
+
+## 14. `task stack overflow` w logach (XIAO i podobne płytki)
 
 Objaw: w logu serial pojawia się panic / komunikat FreeRTOS w stylu `Task stack overflow`, zwykle po włączeniu cięższej diagnostyki albo po aktualizacji do buildu z większą liczbą liczników.
 
@@ -263,7 +313,7 @@ wmbus_radio:
 
 Domyślnie `3072` bajty. Dozwolony zakres `2048..16384`. Jeśli widzisz stack overflow na XIAO lub innej małej płytce, spróbuj kolejno `4096`, `6144`, `8192` — zwiększaj tylko tyle, ile faktycznie potrzebne.
 
-## 14. MQTT leży, ale radio powinno dalej działać
+## 15. MQTT leży, ale radio powinno dalej działać
 
 Problemy MQTT są problemami transportu, a nie dowodem awarii RF.
 

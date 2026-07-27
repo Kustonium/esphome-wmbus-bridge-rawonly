@@ -75,6 +75,58 @@ diagnostic_topic: "..."
 
 ale są traktowane jako legacy/manual override i generują dwujęzyczny warning.
 
+## Whitelista przekazywania
+
+Domyślnie każda ramka, która się zdekodowała i przeszła DLL CRC, trafia na
+`wmbus/<device>/telegram`. W gęstej zabudowie to w większości liczniki sąsiadów.
+`forward_meters` pozwala publikować tylko własne:
+
+```yaml
+wmbus_radio:
+  forward_meters:
+    - 41551279
+    - 90830781
+```
+
+Jeżeli te same liczniki są już w `highlight_meters`, nie przepisuj ich drugi raz -
+`true` bierze listę stamtąd:
+
+```yaml
+wmbus_radio:
+  highlight_meters:
+    - 41551279
+    - 90830781
+  forward_meters: true
+```
+
+Pusta lista (domyślnie) albo `false` przepuszcza wszystko, więc istniejące konfiguracje
+działają bez zmian.
+
+Uwagi:
+
+- `forward_meters: true` przy pustym `highlight_meters` **nie** wycisza strumienia.
+  Filtr się nie włącza, a przy starcie leci ostrzeżenie - filtr dopasowujący do pustej
+  listy odrzuciłby każdą ramkę.
+- Log startowy pokazuje sparsowane ID i to, czy przyszły z `highlight_meters`;
+  `dump_config()` raportuje stan jako `Forward whitelist:`.
+
+- Filtr działa po dekodowaniu i sprawdzeniu DLL CRC, więc dopasowuje ID, które parser
+  już zweryfikował. Filtrowanie po surowym nagłówku byłoby teoretycznie tańsze, ale
+  zawodne: ID odczytane z ramki, która nie przeszła CRC, bywa przekłamane.
+- Wpisuj ID dokładnie tak, jak pokazuje log. Dziesiętne `id:41551279` zapisujesz jako
+  `- 41551279`; licznik z A-field poza BCD log pokazuje szesnastkowo (`id:417F0666`,
+  typowe dla Diehl/IZAR) i zapisujesz go jako `- "0x417F0666"`. Obie formy są dopasowywane.
+- **Wpisy szesnastkowe ujmuj w cudzysłów.** Bez niego YAML zamieni `0x417F0666` na liczbę
+  `1098843750`, która trafiłaby na listę dziesiętną i nigdy z niczym nie zrównała. Taki
+  przypadek jest wykrywany przy kompilacji, a nie pomijany po cichu.
+- Nie musisz wiedzieć, który licznik jest którego rodzaju. A-field poza BCD zawsze
+  zawiera półbajtówkę powyżej 9, więc jego zapis zawsze ma literę A-F, a ID w BCD nigdy
+  - wpis czysto cyfrowy znaczy „dziesiętny", wpis z literami „surowy". Forma `0x`
+  działa też dla liczników BCD (`"0x00089907"` to licznik `89907`).
+- Diagnostyka jest nietknięta: liczniki i statystyki RSSI powstają przed publikacją,
+  więc summary dalej obejmuje cały eter razem z sąsiadami. Obcinany jest sam strumień RAW.
+- `target_meter_id` ma własny topic i celowo nie podlega whiteliście.
+
 ## Szybki start
 
 Minimalny przykład:

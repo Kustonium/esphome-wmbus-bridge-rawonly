@@ -59,11 +59,18 @@ Radio::StageBucket Radio::bucket_for_stage_(const std::string &stage) {
 
 bool Radio::should_publish_packet_event_(const Packet *packet) const {
   if (packet == nullptr || !this->diag_publish_drop_events_) return false;
-  if (!this->diag_publish_highlight_only_ || this->highlight_meter_ids_.empty()) return true;
+  if (!this->diag_publish_highlight_only_ ||
+      (this->highlight_meter_ids_.empty() && this->highlight_meter_raw_ids_.empty()))
+    return true;
 
+  // Both forms, so a non-BCD meter listed in highlight_meters still gets its
+  // drop events published: try_get_meter_id() fails outright for those.
   uint32_t meter_id = 0;
-  if (!packet->try_get_meter_id(meter_id)) return false;
-  return this->meter_is_highlighted_(meter_id);
+  uint32_t meter_id_raw = 0;
+  packet->try_get_meter_id(meter_id);
+  packet->try_get_meter_id_raw(meter_id_raw);
+  if (meter_id == 0 && meter_id_raw == 0) return false;
+  return this->meter_is_highlighted_(meter_id, meter_id_raw);
 }
 
 void Radio::publish_rx_path_event_(const char *event, const char *stage, const char *detail, int rssi) {
@@ -144,22 +151,36 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
       ? ((this->diag_t1_symbols_invalid_ * 100U) / this->diag_t1_symbols_total_) : 0U;
 
   // ── STAGE 1: orientation ────────────────────────────────────────────────────
-  // No packets at all — user may have a wiring/config problem.
+  // An empty window says nothing on its own: `total` is diag_total_, which is a
+  // per-summary-window counter reset immediately after this call. A receiver
+  // that worked all day still reports total == 0 for any quiet window, and
+  // meters go quiet at night - telling that user to check their SPI wiring is
+  // simply wrong.
+  //
+  // Only a receiver that has never seen a single frame can plausibly have a
+  // wiring or radio-config fault, so gate on any_rx_, which is lifetime and
+  // never reset. The uptime floor additionally suppresses the first windows
+  // after boot, where silence carries no information at all.
+  //
+  // A receiver that used to work and went silent is a different diagnosis and
+  // belongs to the health pulse (sec_since_last_rx), not to this suggestion.
   if (total == 0) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
-        chip, "NO_METERS_DETECTED",
-        "listen_mode", "t1",
-        "listen_mode: t1",
-        "No wM-Bus frames received. Check antenna, SPI pins, listen_mode (t1/c1/s1/both) and radio_type.",
-        "Brak odebranych ramek wM-Bus. Sprawdź antenę, piny SPI, listen_mode (t1/c1/s1/both) i radio_type.");
-    return; // nothing more to suggest until we have data
+    if (!this->any_rx_ && now_ms >= NO_METERS_MIN_UPTIME_MS_) {
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+          chip, "NO_METERS_DETECTED",
+          "listen_mode", "t1",
+          "listen_mode: t1",
+          "No wM-Bus frames received since boot. Check antenna, SPI pins, listen_mode (t1/c1/s1/both) and radio_type.",
+          "Brak odebranych ramek wM-Bus od startu. Sprawdź antenę, piny SPI, listen_mode (t1/c1/s1/both) i radio_type.");
+    }
+    return; // window counters are all zero - nothing further to analyse
   }
 
   // Packets arriving but highlight_meters not configured — user doesn't know
   // which meter IDs they have. They need to check wmbusmeters first.
   // NOTE: check highlight_meter_ids_ (user config), not highlight_meter_stats_ (runtime),
   // because stats may be empty simply because the listed meters haven't been seen yet.
-  if (this->highlight_meter_ids_.empty()) {
+  if (this->highlight_meter_ids_.empty() && this->highlight_meter_raw_ids_.empty()) {
     publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
         chip, "ADD_HIGHLIGHT_METERS",
         "highlight_meters", "<meter_id>",
@@ -385,8 +406,8 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   const char *hint_pl = "wygląda dobrze";
   if (total == 0) {
     hint_code = "NO_DATA";
-    hint_en = "no packets received yet";
-    hint_pl = "brak odebranych ramek";
+    hint_en = "no packets in this window";
+    hint_pl = "brak ramek w tym oknie";
   } else {
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
@@ -745,8 +766,8 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   const char *hint_pl = "wygląda dobrze";
   if (total == 0) {
     hint_code = "NO_DATA";
-    hint_en = "no packets received yet";
-    hint_pl = "brak odebranych ramek";
+    hint_en = "no packets in this window";
+    hint_pl = "brak ramek w tym oknie";
   } else {
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
@@ -990,12 +1011,12 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   // Publish snapshot of all highlight meters alongside this summary (read-only, no window reset).
   if (this->diag_publish_summary_highlight_meters_ && !this->highlight_meter_stats_.empty()) {
     for (auto &kv : this->highlight_meter_stats_) {
-      const uint64_t key = kv.first; // uint64_t — meter_id can exceed uint32_t range when shifted
+      const uint64_t key = kv.first; // (raw A-field value << 8) | link mode
       MeterStats &st = kv.second;
-      const uint32_t meter_id = key >> 8;
       const uint8_t mode_byte = key & 0xFF;
-      char id_str[12];
-      snprintf(id_str, sizeof(id_str), "%08" PRIu32, meter_id);
+      // Only the mode is recoverable from the key. Rendering the upper bits as
+      // a decimal ID yields a number belonging to no meter.
+      const char *id_str = (st.id_str[0] != '\0') ? st.id_str : "????????";
       const char *mode_str = (mode_byte == (uint8_t) LinkMode::C1) ? "C1" : ((mode_byte == (uint8_t) LinkMode::S1) ? "S1" : "T1");
       const uint32_t st_elapsed_s = elapsed / 1000U;
       this->publish_meter_window_for_("summary_15min", st_elapsed_s, id_str, mode_str, st,
@@ -1110,8 +1131,8 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   const char *hint_pl = "wygląda dobrze";
   if (total == 0) {
     hint_code = "NO_DATA";
-    hint_en = "no packets received yet";
-    hint_pl = "brak odebranych ramek";
+    hint_en = "no packets in this window";
+    hint_pl = "brak ramek w tym oknie";
   } else {
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
@@ -1355,12 +1376,12 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   // Publish snapshot of all highlight meters alongside this summary (read-only, no window reset).
   if (this->diag_publish_summary_highlight_meters_ && !this->highlight_meter_stats_.empty()) {
     for (auto &kv : this->highlight_meter_stats_) {
-      const uint64_t key = kv.first; // uint64_t — meter_id can exceed uint32_t range when shifted
+      const uint64_t key = kv.first; // (raw A-field value << 8) | link mode
       MeterStats &st = kv.second;
-      const uint32_t meter_id = key >> 8;
       const uint8_t mode_byte = key & 0xFF;
-      char id_str[12];
-      snprintf(id_str, sizeof(id_str), "%08" PRIu32, meter_id);
+      // Only the mode is recoverable from the key. Rendering the upper bits as
+      // a decimal ID yields a number belonging to no meter.
+      const char *id_str = (st.id_str[0] != '\0') ? st.id_str : "????????";
       const char *mode_str = (mode_byte == (uint8_t) LinkMode::C1) ? "C1" : ((mode_byte == (uint8_t) LinkMode::S1) ? "S1" : "T1");
       const uint32_t st_elapsed_s = elapsed / 1000U;
       this->publish_meter_window_for_("summary_60min", st_elapsed_s, id_str, mode_str, st,
