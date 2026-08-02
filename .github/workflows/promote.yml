@@ -1,0 +1,375 @@
+name: promote-from-dev
+
+# Publishes the development tree (Kustonium/esphome-wmbus-bridge-rawonly-dev)
+# into this repository, then tags and releases it. It automates by hand what
+# PR #12 ("sync-from-dev-20260727") did manually: copy the component, docs and
+# examples over, open one PR, merge it, cut a release.
+#
+# WHY IT LIVES HERE AND NOT IN DEV: the receiving repository is the one that
+# needs write access to itself. Dev stays a plain repo that knows nothing about
+# publication, exactly like the Home Assistant add-on pair.
+#
+# WHAT IT DELIBERATELY NEVER TOUCHES (stable identity / repo infrastructure):
+#   .github/FUNDING.yml       - stable-only, dev has no copy; a sync would delete it
+#   .github/workflows/*       - except ci.yml; this very file must survive the sync
+#   .gitignore, .gitattributes - dev ignores its own working dirs (docslocal/,
+#                                build/, TODO-*.md, the nested stale copy)
+#   LICENSE, NOTICE identity   - LICENSE is identical in both and is left alone
+#
+# Everything else tracks dev verbatim. There is no version string in the source
+# (no config.yaml, no CHANGELOG.md): in this project the version exists only as
+# a git tag plus a GitHub Release, which is why the version is an input here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.12 (must not already exist as a tag)"
+        required: true
+        type: string
+      dry_run:
+        description: "Only report what would change - no push, no PR, no release"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: promote-from-dev
+  cancel-in-progress: false
+
+env:
+  DEV_REPO_URL: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly-dev.git
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    steps:
+      # PROMOTE_TOKEN is optional. Without it the job runs on GITHUB_TOKEN, which
+      # is enough for a content-only promote, but has two limits worth knowing:
+      #   1. it may not write .github/workflows/ - GitHub refuses the push with
+      #      "without `workflows` permission", so a changed ci.yml hard-fails
+      #      (guarded explicitly below, with the fix in the message);
+      #   2. pushes made with it do not trigger other workflows, so ci.yml will
+      #      not run on the resulting stable commit.
+      # A PAT with `repo` + `workflow` scope removes both. Same secret name as
+      # the Home Assistant add-on promote, so one token can serve both.
+      - name: Detect available token
+        id: tok
+        shell: bash
+        env:
+          PROMOTE_TOKEN: ${{ secrets.PROMOTE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${PROMOTE_TOKEN}" ]]; then
+            echo "has_pat=true" >> "$GITHUB_OUTPUT"
+            echo "Using PROMOTE_TOKEN (workflow files syncable, stable CI will run)."
+          else
+            echo "has_pat=false" >> "$GITHUB_OUTPUT"
+            echo "Using GITHUB_TOKEN (no workflow-file sync, stable CI will not auto-run)."
+          fi
+
+      - name: Check out stable repo
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          token: ${{ secrets.PROMOTE_TOKEN || github.token }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Validate version and check the tag is free
+        id: version
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # Tag history mixes two shapes - 1.1.9, 1.10.1 and 1.11 - so both
+          # X.Y and X.Y.Z are accepted; anything else is a typo, not a scheme.
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "ERROR: version '${VERSION}' is not X.Y or X.Y.Z"
+            exit 1
+          fi
+          git fetch --tags --quiet 2>/dev/null || true
+          if git tag | grep -qx "${VERSION}"; then
+            echo "ERROR: tag ${VERSION} already exists"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Releasing as ${VERSION}"
+
+      # Captured BEFORE the sync overwrites docs/. docs/RELEASE_NOTES.md is one
+      # running log shared by both repos, newest entry first; stable holds an
+      # older truncation of it. The stable top heading is therefore the exact
+      # water mark: everything above it in dev is what this release adds.
+      - name: Remember the stable release-notes water mark
+        id: watermark
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -s docs/RELEASE_NOTES.md ]]; then
+            echo "ERROR: docs/RELEASE_NOTES.md missing or empty in stable"
+            exit 1
+          fi
+          PREV="$(grep -m1 '^# ' docs/RELEASE_NOTES.md || true)"
+          if [[ -z "${PREV}" ]]; then
+            echo "ERROR: no '# ' heading found in stable docs/RELEASE_NOTES.md"
+            exit 1
+          fi
+          echo "Stable currently tops out at: ${PREV}"
+          printf '%s\n' "${PREV}" > /tmp/watermark.txt
+
+      - name: Clone dev repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Public repo - no credentials, and none inherited from the checkout.
+          git -c credential.helper= clone --depth 1 "${DEV_REPO_URL}" _dev
+          echo "dev HEAD: $(git -C _dev rev-parse --short HEAD)"
+          git -C _dev log -1 --pretty='%s'
+
+      - name: Build the release body from the new dev entries
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -s _dev/docs/RELEASE_NOTES.md ]]; then
+            echo "ERROR: _dev/docs/RELEASE_NOTES.md missing or empty"
+            exit 1
+          fi
+          PREV="$(cat /tmp/watermark.txt)"
+          export PREV
+
+          if ! grep -Fxq "${PREV}" _dev/docs/RELEASE_NOTES.md; then
+            echo "ERROR: the stable water mark is not present in the dev log:"
+            echo "  ${PREV}"
+            echo "The shared docs/RELEASE_NOTES.md has diverged - an entry was"
+            echo "edited or removed on one side. Reconcile the two files (or run"
+            echo "again with dry_run to inspect) before promoting."
+            exit 1
+          fi
+
+          # Everything above the water mark, with the trailing '---' separator
+          # and trailing blank lines trimmed. The heading travels through the
+          # environment, not through -v: awk expands backslash escapes in -v
+          # assignments, and a heading is arbitrary prose.
+          awk '$0 == ENVIRON["PREV"] { exit } { print }' \
+            _dev/docs/RELEASE_NOTES.md > /tmp/new-entries.md
+          awk 'BEGIN{n=0} {lines[n++]=$0} END{
+                 last=n-1
+                 while (last >= 0 && (lines[last] ~ /^[[:space:]]*$/ || lines[last] ~ /^-{3,}[[:space:]]*$/)) last--
+                 for (i=0; i<=last; i++) print lines[i]
+               }' /tmp/new-entries.md > /tmp/release-body.md
+
+          if ! grep -q '^# ' /tmp/release-body.md; then
+            echo "ERROR: no new entry in dev docs/RELEASE_NOTES.md above the stable"
+            echo "water mark - there is nothing to release. Add the release note in"
+            echo "dev first (notes travel with the code in this project)."
+            exit 1
+          fi
+
+          COUNT="$(grep -c '^# ' /tmp/release-body.md)"
+          TITLE="$(grep -m1 '^# ' /tmp/release-body.md | sed -E 's/^#[[:space:]]*//')"
+          echo "TITLE=${TITLE}" >> "$GITHUB_OUTPUT"
+          echo "COUNT=${COUNT}" >> "$GITHUB_OUTPUT"
+          echo "New entries: ${COUNT}"
+          echo "Release title: ${TITLE}"
+
+      - name: Sync the published tree from dev
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Whole directories: removed first, so a file deleted in dev also
+          # disappears here instead of lingering forever.
+          for item in components docs examples tests; do
+            if [[ -e "_dev/${item}" ]]; then
+              rm -rf "${item}"
+              cp -r "_dev/${item}" "${item}"
+              echo "synced dir:  ${item}"
+            else
+              echo "WARNING: _dev/${item} does not exist - left untouched"
+            fi
+          done
+
+          # Individual files. README/NOTICE/SUPPORT carry no dev-only banner in
+          # this project (checked: no DEV-ONLY markers, no dev URLs), so they are
+          # copied verbatim. ci.yml is a single named file on purpose - copying
+          # .github/workflows/ as a directory would delete this workflow and
+          # FUNDING.yml sits in the same tree.
+          for item in README.md NOTICE SUPPORT.md \
+                      .github/workflows/ci.yml \
+                      .github/ISSUE_TEMPLATE/bug_report.yml; do
+            if [[ -e "_dev/${item}" ]]; then
+              mkdir -p "$(dirname "${item}")"
+              cp "_dev/${item}" "${item}"
+              echo "synced file: ${item}"
+            else
+              echo "WARNING: _dev/${item} does not exist - left untouched"
+            fi
+          done
+
+          rm -rf _dev
+          find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+          # Assertions rather than trust. This workflow must survive its own run.
+          test -f .github/workflows/promote.yml || { echo "ERROR: promote.yml vanished"; exit 1; }
+
+          # Stable-only files must survive too. Checked as "whatever was here
+          # before the sync is still here", not as a fixed list: FUNDING.yml was
+          # added on 2026-07-07 and silently deleted on 2026-07-27 by the manual
+          # whole-tree copy this workflow replaces, precisely because dev has no
+          # copy of it. A hardcoded list would only have caught that one file.
+          missing=""
+          while IFS= read -r f; do
+            case "${f}" in
+              .github/workflows/ci.yml|.github/ISSUE_TEMPLATE/*) continue ;;  # synced on purpose
+            esac
+            [[ -e "${f}" ]] || missing="${missing} ${f}"
+          done < <(git ls-tree -r --name-only HEAD -- .github)
+          if [[ -n "${missing}" ]]; then
+            echo "ERROR: the sync removed stable-only repo files:${missing}"
+            echo "Nothing in the sync list should touch .github/ beyond ci.yml and"
+            echo "ISSUE_TEMPLATE/. Fix the sync list before promoting."
+            exit 1
+          fi
+
+      - name: Stage and report the result
+        id: staged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --staged --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes - stable already matches dev."
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --staged --stat | tee /tmp/diffstat.txt
+
+          # GITHUB_TOKEN is refused by the API when a push touches a workflow
+          # file. Catch it here with an actionable message instead of a raw
+          # "refusing to allow a GitHub App to create or update workflow" later.
+          if ! git diff --staged --quiet -- .github/workflows/ci.yml; then
+            if [[ "${{ steps.tok.outputs.has_pat }}" != "true" ]]; then
+              echo "ERROR: ci.yml differs from dev, but this run only has GITHUB_TOKEN,"
+              echo "which may not push workflow files. Add a PROMOTE_TOKEN secret"
+              echo "(PAT with repo + workflow scope) to this repository, or revert the"
+              echo "ci.yml difference if it was not meant to be published."
+              exit 1
+            fi
+            echo "ci.yml changes included (PROMOTE_TOKEN present)."
+          fi
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        shell: bash
+        # Through the environment rather than inlined into the script: TITLE is
+        # prose taken from a file, and inlined prose containing backticks or
+        # $(...) would be executed by the shell.
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TITLE: ${{ steps.notes.outputs.TITLE }}
+          COUNT: ${{ steps.notes.outputs.COUNT }}
+          CHANGED: ${{ steps.staged.outputs.changed }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Dry run - nothing was pushed"
+            echo
+            echo "Version that would be released: **${VERSION}**"
+            echo "Release title: ${TITLE}"
+            echo "New release-notes entries: ${COUNT}"
+            echo
+            if [[ "${CHANGED}" == "true" ]]; then
+              echo '### Files that would change'
+              echo '```'
+              cat /tmp/diffstat.txt
+              echo '```'
+            else
+              echo "No file differences - stable already matches dev."
+            fi
+            echo '### Release body'
+            echo '```markdown'
+            cat /tmp/release-body.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit, open the PR and merge it
+        id: pr
+        if: ${{ !inputs.dry_run && steps.staged.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTE_TOKEN || github.token }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          BRANCH="sync-from-dev-$(date -u +%Y%m%d)"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "sync: publish the current development tree" \
+                     -m "Promoted for release ${VERSION}."
+
+          # Force-push is safe and self-healing here: the branch is created by
+          # this workflow, deleted on merge, and only ever survives a run that
+          # already failed. The date-only name matches the manual convention.
+          git push --force origin "HEAD:${BRANCH}"
+
+          PR_URL="$(gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "sync: publish dev tree for ${VERSION}" \
+            --body "Automated promote of the development tree for release ${VERSION}.")"
+          echo "PR: ${PR_URL}"
+
+          # main is unprotected today, so a plain squash merge goes through;
+          # --admin is the fallback for the day it is protected.
+          gh pr merge "${PR_URL}" --squash --delete-branch \
+            || gh pr merge "${PR_URL}" --squash --delete-branch --admin
+
+          MERGE_SHA="$(gh pr view "${PR_URL}" --json mergeCommit -q .mergeCommit.oid)"
+          if [[ -z "${MERGE_SHA}" || "${MERGE_SHA}" == "null" ]]; then
+            echo "ERROR: PR did not report a merge commit - not releasing"
+            exit 1
+          fi
+          echo "MERGE_SHA=${MERGE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "PR_URL=${PR_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Tag and publish the release
+        if: ${{ !inputs.dry_run && steps.staged.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTE_TOKEN || github.token }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TITLE: ${{ steps.notes.outputs.TITLE }}
+          MERGE_SHA: ${{ steps.pr.outputs.MERGE_SHA }}
+          PR_URL: ${{ steps.pr.outputs.PR_URL }}
+          COUNT: ${{ steps.notes.outputs.COUNT }}
+        run: |
+          set -euo pipefail
+          # Targeting the merge commit, not the branch name: no race with anything
+          # else landing on main between the merge and this step.
+          gh release create "${VERSION}" \
+            --target "${MERGE_SHA}" \
+            --title "${TITLE}" \
+            --notes-file /tmp/release-body.md
+          {
+            echo "## Released ${VERSION}"
+            echo
+            echo "- ${TITLE}"
+            echo "- PR: ${PR_URL}"
+            echo "- commit: ${MERGE_SHA}"
+            echo "- release-notes entries: ${COUNT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Nothing to do
+        if: ${{ !inputs.dry_run && steps.staged.outputs.changed != 'true' }}
+        shell: bash
+        run: |
+          echo "Stable already matches dev - no PR, no release." >> "$GITHUB_STEP_SUMMARY"
