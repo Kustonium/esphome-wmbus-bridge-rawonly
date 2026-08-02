@@ -254,11 +254,20 @@ static inline void set_attempt_drop_(ParseAttemptResult &out, const char *stage,
 
 // Rough stage ordering used when both parsing attempts fail.
 // Higher rank means the parser got further and usually has a more useful reason.
+//
+// The s1_* stages are listed for completeness and cannot be reached today:
+// try_parse_s1_() runs only on the forced-S1 path, which returns before
+// pick_better_failure_() is ever consulted. That path is exclusive for a
+// physical reason, not just a code one - an S-mode frame cannot arrive on a
+// radio tuned to 868.95 MHz at 100 kbps. The ranks are here so the ordering
+// stays correct if an S1 result is ever compared against another attempt.
 static int stage_rank_(const std::string &stage) {
-  if (stage == "precheck" || stage == "c1_precheck") return 1;
-  if (stage == "c1_preamble" || stage == "c1_suffix" || stage == "t1_decode3of6") return 2;
-  if (stage == "t1_l_field" || stage == "c1_l_field") return 3;
-  if (stage == "t1_length_check" || stage == "c1_length_check") return 4;
+  if (stage == "precheck" || stage == "c1_precheck" || stage == "s1_precheck") return 1;
+  if (stage == "c1_preamble" || stage == "c1_suffix" || stage == "t1_decode3of6" ||
+      stage == "s1_manchester")
+    return 2;
+  if (stage == "t1_l_field" || stage == "c1_l_field" || stage == "s1_l_field") return 3;
+  if (stage == "t1_length_check" || stage == "c1_length_check" || stage == "s1_length_check") return 4;
   if (stage == "dll_crc_first" || stage == "dll_crc_mid" || stage == "dll_crc_final" ||
       stage == "dll_crc_b1" || stage == "dll_crc_b2") return 5;
   if (stage == "link_mode") return 0;

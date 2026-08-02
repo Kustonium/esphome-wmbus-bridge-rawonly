@@ -84,7 +84,12 @@ protected:
   size_t expected_size_ = 0;
 
   uint8_t l_field();
-  int8_t rssi_ = 0;
+  // -127 is the project-wide "not measured" sentinel; component.cpp keeps
+  // anything <= -126 out of averages and statistics. The default used to be 0,
+  // which is not a sentinel but a reading - and an impossible one, since no
+  // wM-Bus frame arrives at 0 dBm. A packet that never had its level set then
+  // reported a perfect signal instead of admitting it had none.
+  int8_t rssi_ = -127;
 
   LinkMode link_mode();
   LinkMode link_mode_ = LinkMode::UNKNOWN;
