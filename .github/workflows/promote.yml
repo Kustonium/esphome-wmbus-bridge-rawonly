@@ -110,8 +110,12 @@ jobs:
           else
             echo "(no OAuth scope header - this is a fine-grained PAT)"
           fi
+          # NB: this reports the ROLE OF THE ACCOUNT, not the grants of the
+          # token. A fine-grained PAT owned by the repo owner prints
+          # admin/push true here and is still refused the push when its
+          # Contents permission is Read-only. Treat it as "who", never as "may".
           gh api "repos/${GITHUB_REPOSITORY}" \
-            --jq '"permissions this token has on this repo: \(.permissions)"' || true
+            --jq '"role of the authenticated account (not the token grants): \(.permissions)"' || true
           echo "-----------------------------------"
           echo
           echo "ERROR: this run cannot push to the repository."
