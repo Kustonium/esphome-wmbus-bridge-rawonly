@@ -90,6 +90,8 @@ jobs:
       # answer, while creating nothing.
       - name: Verify the token may actually write here
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           if git push --dry-run origin "HEAD:refs/heads/promote-write-probe" 2>/tmp/probe.txt; then
@@ -97,6 +99,20 @@ jobs:
             exit 0
           fi
           cat /tmp/probe.txt
+          echo
+          # Which token is this, really? The secret holds a value, not an
+          # identity, and "I fixed the permissions" can easily mean a different
+          # token than the one stored here. None of this prints the token.
+          echo "--- what this token actually is ---"
+          gh api user --jq '"authenticated as: \(.login)"' || true
+          if gh api -i user 2>/dev/null | grep -i '^x-oauth-scopes:'; then
+            echo "(classic PAT - the scopes it carries are listed above; needs repo + workflow)"
+          else
+            echo "(no OAuth scope header - this is a fine-grained PAT)"
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}" \
+            --jq '"permissions this token has on this repo: \(.permissions)"' || true
+          echo "-----------------------------------"
           echo
           echo "ERROR: this run cannot push to the repository."
           if [[ "${{ steps.tok.outputs.has_pat }}" == "true" ]]; then
