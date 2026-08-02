@@ -33,6 +33,7 @@ class SX1276 : public RadioTransceiver {
   bool consume_rx_abort_request() override;
   uint32_t take_fifo_overrun_count() override;
   void log_reg_status() override;
+  void dump_debug_status(const char *reason) override;
 
  protected:
   uint32_t configured_frequency_hz_{868950000UL};
@@ -59,6 +60,27 @@ class SX1276 : public RadioTransceiver {
 
   // Drain one safe chunk or one safe tail byte if available.
   optional<uint8_t> drain_fifo_once_();
+
+  // Sample RSSI, RegAfc and RegFei once per frame, when its first bytes reach
+  // the FIFO. All three are only meaningful at that instant: RSSI measures the
+  // empty channel afterwards, and AFC/FEI are overwritten by the next preamble
+  // detection, noise included. Everything read here is kept for the diagnostic
+  // dump, which runs when nothing is arriving and so cannot sample them itself.
+  void latch_frame_metrics_();
+  uint8_t last_afc_msb_{0};
+  uint8_t last_afc_lsb_{0};
+  uint8_t last_fei_msb_{0};
+  uint8_t last_fei_lsb_{0};
+  int8_t last_frame_rssi_dbm_{-127};
+  // Timestamp of the latch, 0 = nothing received since boot. Not cleared by
+  // restart_rx(): the point is to report how old the last real reading is.
+  int64_t frame_metrics_us_{0};
+
+  // Whole FSK register bank as hex, once at boot under verbose diagnostics.
+  // Meant to be run in one listen mode and then the other, and the two logs
+  // diffed - reading the registers beats arguing from the setup sequence about
+  // which of them can possibly differ.
+  void dump_register_bank_();
 };
 
 }  // namespace wmbus_radio

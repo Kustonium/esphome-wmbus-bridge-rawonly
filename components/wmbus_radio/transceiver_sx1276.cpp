@@ -19,6 +19,51 @@ static constexpr uint8_t REG_FIFO_THRESH  = 0x35;
 static constexpr uint8_t REG_DIO_MAPPING1 = 0x40;
 static constexpr uint8_t REG_VERSION      = 0x42;
 
+// Read only by dump_debug_status(); the setup sequence writes them as literals
+// in datasheet order and the table above the setup() body is the key for those.
+static constexpr uint8_t REG_RX_CONFIG       = 0x0D;
+static constexpr uint8_t REG_RX_BW           = 0x12;
+static constexpr uint8_t REG_PREAMBLE_DETECT = 0x1F;
+static constexpr uint8_t REG_SYNC_CONFIG     = 0x27;
+static constexpr uint8_t REG_IRQ_FLAGS1      = 0x3E;
+static constexpr uint8_t REG_AFC_MSB         = 0x1B;
+static constexpr uint8_t REG_FEI_MSB         = 0x1D;
+
+// Frequency synthesiser step, FXOSC / 2^19 = 61.03515625 Hz. Both RegAfc and
+// RegFei count in these steps, as signed 16-bit values.
+//
+// Read in millihertz-free integer arithmetic: value * 61035 / 1000 gives Hz
+// with an error under 0.01 % over the whole 16-bit range, which is far below
+// anything worth reporting here.
+static int32_t sx1276_steps_to_hz_(uint8_t msb, uint8_t lsb) {
+  const int32_t raw = (int32_t) (int16_t) (((uint16_t) msb << 8) | (uint16_t) lsb);
+  return (int32_t) ((int64_t) raw * 61035 / 1000);
+}
+
+// RegIrqFlags1 bits, FSK/OOK mode. Only the two that answer "is anything
+// arriving at all" are named; the rest are printed as hex.
+//
+// ModeReady and RxReady are deliberately not named and not tested. On this chip
+// in FSK they read clear on a receiver that is demonstrably working - see the
+// note in dump_debug_status().
+static constexpr uint8_t FLAG1_PREAMBLE_DETECT = (1 << 1);
+static constexpr uint8_t FLAG1_SYNC_MATCH      = (1 << 0);
+
+// RegOpMode bits 2:0 in FSK/OOK mode. FSRX is the trap worth naming: the
+// synthesiser is locked to the receive frequency but the receiver itself is
+// off, so the chip looks configured and hears nothing.
+static const char *sx1276_mode_name_(uint8_t op_mode) {
+  switch (op_mode & 0x07) {
+    case 0x00: return "SLEEP";
+    case 0x01: return "STDBY";
+    case 0x02: return "FSTX";
+    case 0x03: return "TX";
+    case 0x04: return "FSRX";
+    case 0x05: return "RX";
+    default: return "?";
+  }
+}
+
 static constexpr uint8_t FLAG2_FIFO_EMPTY   = (1 << 6);
 static constexpr uint8_t FLAG2_FIFO_LEVEL   = (1 << 5);
 static constexpr uint8_t FLAG2_FIFO_OVERRUN = (1 << 4);
@@ -30,6 +75,38 @@ void SX1276::spi_read_burst_(uint8_t address, uint8_t *dst, size_t len) {
     dst[i] = this->delegate_->transfer(0x00);
   }
   this->delegate_->end_transaction();
+}
+
+// ---------------------------------------------------------------------------
+// latch_frame_metrics_: sample everything that describes THIS frame, once, at
+// the moment its first bytes reach the FIFO.
+//
+// RSSI has to be read here because after the transmission it measures the empty
+// channel. RegAfc and RegFei have the same problem for the opposite reason:
+// they are latched during the preamble/AFC phase, so by the time the first FIFO
+// byte arrives they already describe this frame - but they keep being
+// overwritten by every later preamble detection, including ones caused by noise.
+//
+// Reading them anywhere else produces numbers that look authoritative and
+// describe nothing. Measured 2026-08-01: a dump taken on a receive-wait timeout
+// reported +23.5 kHz two seconds before a frame, -17.6 kHz corrected with a
+// +68.5 kHz residual one minute later on a preamble that never matched sync,
+// and -16.1 kHz three seconds before the next frame - none of them from the
+// transmitter that was actually being decoded every 123 seconds.
+// ---------------------------------------------------------------------------
+void SX1276::latch_frame_metrics_() {
+  this->last_rssi_dbm_ = (int8_t) (-(int) this->spi_read(REG_RSSI_VALUE) / 2);
+  // Sticky copy: restart_rx() resets last_rssi_dbm_ to the not-measured
+  // sentinel on every re-arm, which is correct for the value handed to the
+  // packet but would leave the diagnostic reporting -127 for a frame it did
+  // measure.
+  this->last_frame_rssi_dbm_ = this->last_rssi_dbm_;
+  this->last_afc_msb_ = this->spi_read(REG_AFC_MSB);
+  this->last_afc_lsb_ = this->spi_read(REG_AFC_MSB + 1);
+  this->last_fei_msb_ = this->spi_read(REG_FEI_MSB);
+  this->last_fei_lsb_ = this->spi_read(REG_FEI_MSB + 1);
+  this->frame_metrics_us_ = esp_timer_get_time();
+  this->rssi_captured_ = true;
 }
 
 optional<uint8_t> SX1276::drain_fifo_once_() {
@@ -50,10 +127,8 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
 
   // Safe burst path: FifoLevel guarantees >= SX1276_CHUNK_SIZE bytes in FIFO.
   if (irq2 & FLAG2_FIFO_LEVEL) {
-    if (!this->rssi_captured_) {
-      this->last_rssi_dbm_ = (int8_t)(-(int) this->spi_read(REG_RSSI_VALUE) / 2);
-      this->rssi_captured_ = true;
-    }
+    if (!this->rssi_captured_)
+      this->latch_frame_metrics_();
 
     this->spi_read_burst_(REG_FIFO, this->chunk_buffer_.data(), SX1276_CHUNK_SIZE);
     this->chunk_len_ = SX1276_CHUNK_SIZE;
@@ -64,10 +139,8 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
 
   // Tail path: less than threshold left, so only a single-byte read is safe.
   if (!(irq2 & FLAG2_FIFO_EMPTY)) {
-    if (!this->rssi_captured_) {
-      this->last_rssi_dbm_ = (int8_t)(-(int) this->spi_read(REG_RSSI_VALUE) / 2);
-      this->rssi_captured_ = true;
-    }
+    if (!this->rssi_captured_)
+      this->latch_frame_metrics_();
 
     this->frame_active_ = true;
     return this->spi_read(REG_FIFO);
@@ -76,6 +149,36 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Register map used by setup() below. Addresses are written as raw literals to
+// keep the configuration sequence readable in datasheet order; this table is the
+// key. Source: Semtech SX1276/77/78/79 datasheet, FSK/OOK mode register table
+// (the LoRa-mode table maps the same addresses to different registers, so read
+// it in the FSK column).
+//
+//   0x02,0x03  RegBitrateMsb/Lsb     bit rate (100 kbps T1/C1, 32.768 kbps S1)
+//   0x04,0x05  RegFdevMsb/Lsb        frequency deviation (50 kHz T1, 45 kHz C1)
+//   0x06..0x08 RegFrfMsb/Mid/Lsb     carrier frequency, step = F_OSC / 2^19
+//   0x0C       RegLna                LNA gain + high-frequency LNA boost
+//   0x0D       RegRxConfig           AFC/AGC auto-on + RX trigger source
+//   0x0E       RegRssiConfig         RSSI smoothing
+//   0x12,0x13  RegRxBw / RegAfcBw    receiver and AFC bandwidth
+//   0x1F       RegPreambleDetect     detector on, size, tolerance
+//   0x24       RegOsc                CLKOUT divider (0b111 = CLKOUT off)
+//   0x25,0x26  RegPreambleMsb/Lsb    preamble length
+//   0x27       RegSyncConfig         sync on/off, fill condition, sync size
+//   0x28..0x2F RegSyncValue1..8      sync word bytes (0x54 0x3D T1, 0x54 0xCD C1)
+//   0x30       RegPacketConfig1      packet format, CRC, whitening (0 = raw)
+//   0x32       RegPayloadLength      0 with fixed-length = unlimited packet mode
+//   0x35       RegFifoThresh         FIFO level threshold driving DIO1
+//   0x3F       RegIrqFlags2          FIFO empty/level/overrun status bits
+//   0x40       RegDioMapping1        DIO1 function select
+//   0x42       RegVersion            silicon revision (0x11..0x13 expected)
+//   0x5D       RegBitrateFrac        fractional part of the bit rate divider
+//
+// The named constants above (REG_FIFO, REG_OP_MODE, ...) cover the registers
+// touched outside setup(); everything else is listed here rather than duplicated.
+// ---------------------------------------------------------------------------
 void SX1276::setup() {
   // Original driver used DIO1=FifoEmpty with falling edge.
   // Here DIO1 is remapped to FifoLevel, which is active-high, so wake on rising edge.
@@ -137,6 +240,22 @@ void SX1276::setup() {
   this->spi_write(0x25, {BYTE(preamble_length, 1), BYTE(preamble_length, 0)});
 
   this->spi_write(0x1F, (uint8_t) ((1 << 7) | (1 << 5) | 0x0A));
+
+  // RegLna: maximum gain (G1) with the high-frequency LNA boost on.
+  //
+  // 0x23 is Semtech's own value - it is what LoRaMac-node writes into RegLna in
+  // RADIO_INIT_REGISTERS_VALUE for every FSK board. This driver never wrote the
+  // register at all, so it ran on the reset default 0x20: same G1 gain, but
+  // LnaBoostHf = 00, boost off. Confirmed on hardware 2026-08-01, register dump
+  // of a LilyGO T3-S3 read back 0x0C = 0x20.
+  //
+  // The gain field is the less interesting half: AgcAutoOn is set on the next
+  // line, so the AGC drives LnaGain itself and whatever is written here is
+  // overridden as soon as a signal arrives. LnaBoostHf is the part that stays -
+  // it raises the LNA current by 50% for a better noise figure, applies only
+  // above 525 MHz, and is ignored at lower frequencies rather than harmful.
+  this->spi_write(0x0C, (uint8_t) 0x23);
+
   this->spi_write(0x0D, (uint8_t) ((1 << 4) | (1 << 3) | 0b110));
   this->spi_write(0x24, (uint8_t) 0b111);
 
@@ -182,6 +301,126 @@ void SX1276::log_reg_status() {
     ESP_LOGE(TAG, "SX1276 not responding over SPI / SX1276 nie odpowiada po SPI. "
                   "Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.");
   }
+
+  if (this->diag_verbose_)
+    this->dump_register_bank_();
+}
+
+// ---------------------------------------------------------------------------
+// dump_register_bank_: the whole FSK register bank, once, as hex.
+//
+// This exists because reasoning about which registers differ between two
+// listen modes turned out to be a poor substitute for reading them. The setup
+// sequence is a hundred lines of literals; deriving from it that "only the bit
+// rate and the sync length can differ" is an argument, and arguments have been
+// wrong repeatedly here. Dumping the bank in one mode and in the other and
+// diffing the two logs is not an argument.
+//
+// 0x00 is deliberately skipped: it is RegFifo, and reading it pops a byte off
+// the receive FIFO. Printed as "--" so the column alignment still matches the
+// datasheet's address grid.
+//
+// Runs from log_reg_status(), i.e. from the main task at boot, under verbose
+// diagnostics only. Five lines per boot.
+// ---------------------------------------------------------------------------
+void SX1276::dump_register_bank_() {
+  ESP_LOGI(TAG, "Register bank / bank rejestrow (FSK, 0x00-0x4F; 0x00 = RegFifo, not read):");
+  for (uint8_t base = 0x00; base < 0x50; base = (uint8_t) (base + 0x10)) {
+    char line[80];
+    int pos = snprintf(line, sizeof(line), "  %02X:", base);
+    for (uint8_t off = 0; off < 0x10; off++) {
+      const uint8_t addr = (uint8_t) (base + off);
+      if (addr == REG_FIFO) {
+        pos += snprintf(line + pos, sizeof(line) - pos, " --");
+        continue;
+      }
+      pos += snprintf(line + pos, sizeof(line) - pos, " %02X", this->spi_read(addr));
+    }
+    ESP_LOGI(TAG, "%s", line);
+  }
+  ESP_LOGI(TAG, "  5D: %02X  (RegBitrateFrac)", this->spi_read(0x5D));
+}
+
+// ---------------------------------------------------------------------------
+// dump_debug_status: re-read the receive chain while it is running.
+//
+// log_reg_status() runs once at boot, which is enough to prove the chip answers
+// over SPI and nothing else. When a node stops receiving, the questions are all
+// about the current state - is the radio in RX or did it stop at FSRX, is the
+// preamble detector seeing anything, is the sync word still the one that was
+// programmed - and a boot-time snapshot cannot answer any of them.
+//
+// Called from Radio::receive_frame() on an interrupt timeout when diagnostics
+// are verbose, so this prints roughly once a minute on a silent node and never
+// on a busy one.
+// ---------------------------------------------------------------------------
+void SX1276::dump_debug_status(const char *reason) {
+  const uint8_t op_mode  = this->spi_read(REG_OP_MODE);
+  const uint8_t irq1     = this->spi_read(REG_IRQ_FLAGS1);
+  const uint8_t irq2     = this->spi_read(REG_IRQ_FLAGS2);
+  const uint8_t rssi     = this->spi_read(REG_RSSI_VALUE);
+  const uint8_t rx_cfg   = this->spi_read(REG_RX_CONFIG);
+  const uint8_t rx_bw    = this->spi_read(REG_RX_BW);
+  const uint8_t pre_det  = this->spi_read(REG_PREAMBLE_DETECT);
+  const uint8_t sync_cfg = this->spi_read(REG_SYNC_CONFIG);
+  const uint8_t sync1    = this->spi_read(0x28);
+  const uint8_t sync2    = this->spi_read(0x29);
+  const uint8_t sync3    = this->spi_read(0x2A);
+
+  const int irq_level = (this->irq_pin_ != nullptr) ? (int) this->irq_pin_->digital_read() : -1;
+
+  ESP_LOGI(TAG,
+           "DEBUG [%s]: OpMode=0x%02X (%s) IrqFlags1=0x%02X IrqFlags2=0x%02X RssiValue=0x%02X (%ddBm) "
+           "RxConfig=0x%02X RxBw=0x%02X PreambleDetect=0x%02X SyncConfig=0x%02X Sync=%02X%02X%02X DIO1=%d",
+           reason != nullptr ? reason : "?", op_mode, sx1276_mode_name_(op_mode), irq1, irq2, rssi,
+           -((int) rssi) / 2, rx_cfg, rx_bw, pre_det, sync_cfg, sync1, sync2, sync3, irq_level);
+
+  // Frequency error, reported from the values latched by latch_frame_metrics_()
+  // when the last frame's first bytes arrived - deliberately NOT re-read here.
+  //
+  // RegFei is what the receiver measured; RegAfc is what the AFC corrected by.
+  // With AfcAutoOn set, that correction is work an SX126x cannot do at all: it
+  // has no AFC in GFSK, so whatever offset shows up here is error the other
+  // chip has to swallow whole.
+  //
+  // The age matters as much as the value. This dump runs on a receive-wait
+  // timeout, i.e. precisely when nothing has arrived for a minute, so a live
+  // read of these registers returns whatever noise last tripped the preamble
+  // detector. The age says how long ago the reading came from a real frame.
+  if (this->frame_metrics_us_ != 0) {
+    const long age_s = (long) ((esp_timer_get_time() - this->frame_metrics_us_) / 1000000LL);
+    ESP_LOGI(TAG,
+             "DEBUG [%s]: last frame %lds ago: RegAfc=%02X%02X (%ld Hz) RegFei=%02X%02X (%ld Hz) "
+             "RSSI=%ddBm / blad czestotliwosci ostatniej ramki",
+             reason != nullptr ? reason : "?", age_s,
+             this->last_afc_msb_, this->last_afc_lsb_,
+             (long) sx1276_steps_to_hz_(this->last_afc_msb_, this->last_afc_lsb_),
+             this->last_fei_msb_, this->last_fei_lsb_,
+             (long) sx1276_steps_to_hz_(this->last_fei_msb_, this->last_fei_lsb_),
+             (int) this->last_frame_rssi_dbm_);
+  } else {
+    ESP_LOGI(TAG, "DEBUG [%s]: no frame received since boot, no frequency error to report",
+             reason != nullptr ? reason : "?");
+  }
+
+  // The two bits that say whether anything is arriving, restated in words -
+  // they are one bit each in the middle of a hex byte.
+  //
+  // OpMode is printed above but deliberately not turned into a claim about
+  // whether the receiver is running. On the SX127x in FSK, RegOpMode reads back
+  // 0b100 (FSRX) after a successful write of 0b101 (RX), and IrqFlags1 reports
+  // ModeReady and RxReady clear at the same time. RadioLib works around exactly
+  // this - SX127x::setMode() masks the low mode bit out of its write
+  // verification for FSK RX, "as it sometimes seem to fail (#276)".
+  //
+  // Measured here 2026-08-01: a node reading OpMode=0x04 with ModeReady=no and
+  // RxReady=no decoded three T1 frames at -75, -91 and -95 dBm in the same
+  // second. An earlier version of this function called that state "not in RX -
+  // nothing can be received", which was false and was believed for hours.
+  ESP_LOGI(TAG, "DEBUG [%s]: preamble_detected=%s sync_matched=%s (OpMode/ModeReady unreliable in FSK RX)",
+           reason != nullptr ? reason : "?",
+           (irq1 & FLAG1_PREAMBLE_DETECT) ? "yes" : "no",
+           (irq1 & FLAG1_SYNC_MATCH) ? "yes" : "no");
 }
 
 optional<uint8_t> SX1276::read() {

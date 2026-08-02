@@ -287,24 +287,49 @@ void CC1101::apply_radio_profile_() {
   this->write_reg_(REG_IOCFG1, 0x2E);  // GDO1 high impedance, do not fight MISO/GDO1
   this->write_reg_(REG_IOCFG0, GDO_RXFIFO_THR);
 
-  // FIFO threshold: 0x07 means RX FIFO threshold around 32 bytes.
+  // Source: TI CC1101 datasheet, FIFOTHR.FIFO_THRESHOLD. 0x07 selects the
+  // 32-byte RX FIFO threshold that drives GDO0 (GDO_RXFIFO_THR above).
   this->write_reg_(REG_FIFOTHR, 0x07);
 
   this->set_frequency_(this->configured_frequency_hz_);
+  // wM-Bus T/C mode sync word 0x54 0x3D. C1 also exists with 0xCD as the second
+  // byte, which restart_rx() alternates between (see EXP_SYNC_T1 / EXP_SYNC_C1).
   this->write_reg_(REG_SYNC1, 0x54);
   this->write_reg_(REG_SYNC0, 0x3D);
   this->write_reg_(REG_PKTLEN, 0xFF);
   this->write_reg_(REG_PKTCTRL1, 0x00);  // no address check, no appended status
 
-  // Keep infinite packet mode. Szczepan main uses 0x00, but that would be a bad
-  // fit for this raw bridge because T1 3-of-6 raw packets can exceed 255 bytes.
+  // Source: TI CC1101 datasheet, PKTCTRL0.LENGTH_CONFIG — 0b10 = infinite packet
+  // length. This is the documented setting for receiving packets whose length is
+  // not known in advance; it is not a fork-specific discovery.
+  // Why it matters HERE: this bridge forwards raw T1 3-of-6, which can exceed the
+  // 255 bytes that fixed/variable length mode can express. Szczepan's component
+  // used 0x00 (fixed) until PR #407 (JarDol, merged 2026-07-19) changed it to
+  // 0x02 as well — his design decodes on the ESP, where frames are shorter, so
+  // fixed length looked adequate there until someone fed it a long telegram.
   this->write_reg_(REG_PKTCTRL0, 0x02);  // infinite packet length, CRC off, whitening off
   this->write_reg_(REG_ADDR, 0x00);
   this->write_reg_(REG_CHANNR, 0x00);
 
-  // Known-working 100 kbps 2-FSK-ish wM-Bus profile used as compatibility base.
-  // This replaces the previous profile that stayed in RX but never detected sync
-  // on hardware which worked with Szczepan's firmware.
+  // ---------------------------------------------------------------------------
+  // RF profile — PROVENANCE: inherited, not derived here.
+  //
+  // These values are the wM-Bus @868.95 MHz profile carried by the SzczepanLeon /
+  // kubasaw ESPHome components. Verified 2026-07-28: every register this bridge
+  // and SzczepanLeon/esphome-components@main both write holds an IDENTICAL value
+  // (39 of 39 common registers, zero differences) — so treat this block as a
+  // compatibility baseline taken from them, and do not claim it as original work.
+  // Register semantics: TI CC1101 datasheet (MDMCFG*, DEVIATN, AGCCTRL*, FSCAL*,
+  // FREND*, TEST* — the TEST/FSCAL/FREND group is the usual SmartRF Studio export
+  // block, which is why the individual bytes carry no independent rationale).
+  //
+  // It replaced an earlier hand-rolled profile that stayed in RX but never
+  // detected sync on hardware that worked with Szczepan's firmware — i.e. the
+  // reason to inherit was empirical, not theoretical.
+  //
+  // Deviations from that baseline are deliberate and are commented at the site
+  // that deviates (PKTCTRL0 above, dual-GDO IOCFG mapping further up).
+  // ---------------------------------------------------------------------------
   this->write_reg_(REG_FSCTRL1, 0x08);
   this->write_reg_(REG_FSCTRL0, 0x00);
   this->write_reg_(REG_MDMCFG4, 0x5C);
