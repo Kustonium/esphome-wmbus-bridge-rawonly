@@ -81,6 +81,40 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
+      # This repository is public, so a token with no write permission at all
+      # still passes checkout - reads need no credentials. The first real proof
+      # of write access therefore used to arrive at the push, after the clone,
+      # the notes extraction and the whole file sync had already run (that is
+      # exactly how run 30750271050 failed: "Permission to ... denied", 403).
+      # --dry-run asks git-receive-pack the same question and gets the same
+      # answer, while creating nothing.
+      - name: Verify the token may actually write here
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git push --dry-run origin "HEAD:refs/heads/promote-write-probe" 2>/tmp/probe.txt; then
+            echo "Write access confirmed."
+            exit 0
+          fi
+          cat /tmp/probe.txt
+          echo
+          echo "ERROR: this run cannot push to the repository."
+          if [[ "${{ steps.tok.outputs.has_pat }}" == "true" ]]; then
+            echo "PROMOTE_TOKEN authenticated but is not allowed to write. Fix the"
+            echo "token's permissions, then re-run:"
+            echo "  fine-grained PAT - select THIS repository and grant"
+            echo "    Contents: Read and write, Pull requests: Read and write,"
+            echo "    Workflows: Read and write"
+            echo "  classic PAT      - scopes: repo, workflow"
+            echo "Alternatively delete the PROMOTE_TOKEN secret: the built-in"
+            echo "GITHUB_TOKEN can do everything here except sync ci.yml and"
+            echo "trigger stable CI."
+          else
+            echo "GITHUB_TOKEN was refused - check that Actions has read/write"
+            echo "permissions under Settings > Actions > General."
+          fi
+          exit 1
+
       - name: Validate version and check the tag is free
         id: version
         shell: bash
