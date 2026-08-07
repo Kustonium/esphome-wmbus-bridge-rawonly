@@ -12,6 +12,23 @@
 namespace esphome {
 namespace wmbus_radio {
 enum ListenMode : uint8_t { LISTEN_MODE_BOTH = 0, LISTEN_MODE_T1 = 1, LISTEN_MODE_C1 = 2, LISTEN_MODE_S1 = 3 };
+
+// How long a notify wait blocks before the caller gives up on more bytes.
+//
+// Never set this to one tick. A FreeRTOS block time is counted in ticks and
+// expires at the *next* tick interrupt, not a full period later: a one-tick
+// wait issued just before that interrupt returns almost immediately. At
+// CONFIG_FREERTOS_HZ=1000 (what ESPHome sets) "1 ms" is therefore a random
+// draw from 0-1 ms, and the give-up path fires on tick phase rather than on
+// the radio having nothing to give. Two ticks guarantee one whole period.
+//
+// The byte loops below do not depend on this - each driver's read() first
+// polls the FIFO against a hardware-timer deadline, so this wait is the second
+// line, not the first. It is still the last place where a give-up could be
+// decided by a coin flip, which is why it is named and stated once here.
+// Diagnosis credit: IoTLabs-pl/esphome-components 72e76be (2026-08-05), which
+// hit the same quantization as a receive regression.
+static constexpr uint32_t WMBUS_NOTIFY_WAIT_MS = 2;
 class RadioTransceiver
     : public Component,
       public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW,
@@ -99,7 +116,7 @@ public:
 
   bool read_in_task(uint8_t *buffer, size_t length);
   bool read_in_task_partial(uint8_t *buffer, size_t max_length, size_t &out_read,
-                            uint32_t wait_ms = 1, uint8_t idle_rounds = 1);
+                            uint32_t wait_ms = WMBUS_NOTIFY_WAIT_MS, uint8_t idle_rounds = 1);
 
   void set_spi(spi::SPIDelegate *spi);
   void set_reset_pin(InternalGPIOPin *reset_pin);
