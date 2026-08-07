@@ -1024,7 +1024,7 @@ void Radio::receive_frame() {
     const size_t max_raw = WMBUS_RAW_DRAIN_MAX_BYTES;
     auto *raw = packet->append_space(max_raw);
     size_t got_raw = 0;
-    this->radio->read_in_task_partial(raw, max_raw, got_raw, 1, 3);
+    this->radio->read_in_task_partial(raw, max_raw, got_raw, WMBUS_NOTIFY_WAIT_MS, 3);
     packet->resize(got_raw);
     if (got_raw == 0) {
       this->diag_rx_path_.preamble_read_failed++;
@@ -1062,7 +1062,7 @@ void Radio::receive_frame() {
 
     auto *tail = packet->append_space(max_extra);
     size_t extra_read = 0;
-    this->radio->read_in_task_partial(tail, max_extra, extra_read, 1, 1);
+    this->radio->read_in_task_partial(tail, max_extra, extra_read, WMBUS_NOTIFY_WAIT_MS, 1);
     packet->resize(already_read + extra_read);
     this->diag_rx_path_.raw_drain_bytes += (uint32_t) extra_read;
     this->diag_15m_rx_path_.raw_drain_bytes += (uint32_t) extra_read;
@@ -1088,13 +1088,13 @@ void Radio::receive_frame() {
 
   auto *preamble = packet->append_space(WMBUS_PREAMBLE_SIZE);
   size_t got_preamble = 0;
-  this->radio->read_in_task_partial(preamble, WMBUS_PREAMBLE_SIZE, got_preamble, 1, 1);
+  this->radio->read_in_task_partial(preamble, WMBUS_PREAMBLE_SIZE, got_preamble, WMBUS_NOTIFY_WAIT_MS, 1);
 
   if (got_preamble < WMBUS_PREAMBLE_SIZE && radio_supports_preamble_retry_(this->radio)) {
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2))) {
       size_t got_retry = 0;
       this->radio->read_in_task_partial(preamble + got_preamble, WMBUS_PREAMBLE_SIZE - got_preamble,
-                                        got_retry, 1, 1);
+                                        got_retry, WMBUS_NOTIFY_WAIT_MS, 1);
       got_preamble += got_retry;
       if (got_preamble == WMBUS_PREAMBLE_SIZE) {
         this->diag_rx_path_.preamble_retry_recovered++;
@@ -1148,7 +1148,7 @@ void Radio::receive_frame() {
     const size_t extra = WMBUS_T1_LEN_PROBE_BYTES - WMBUS_PREAMBLE_SIZE;
     auto *hdr = packet->append_space(extra);
     size_t got_hdr = 0;
-    this->radio->read_in_task_partial(hdr, extra, got_hdr, 1, 1);
+    this->radio->read_in_task_partial(hdr, extra, got_hdr, WMBUS_NOTIFY_WAIT_MS, 1);
     already_read += got_hdr;
     if (got_hdr < extra) {
       this->diag_rx_path_.t1_header_read_failed++;

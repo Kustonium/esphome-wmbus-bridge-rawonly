@@ -19,7 +19,7 @@ bool RadioTransceiver::read_in_task(uint8_t *buffer, size_t length) {
       *buffer++ = *byte;
     else if (this->consume_rx_abort_request())
       return false;
-    else if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1)))
+    else if (!ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(WMBUS_NOTIFY_WAIT_MS)))
       return false;
     else
       wait_count++;

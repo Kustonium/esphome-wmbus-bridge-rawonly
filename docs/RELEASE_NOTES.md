@@ -1,3 +1,33 @@
+# Fix: a one-tick notify wait could expire before it had waited
+
+## EN
+
+### Fixed
+- While reading a frame, the receive path waited `pdMS_TO_TICKS(1)` for the next byte before concluding the radio had nothing more to give. A FreeRTOS block time is counted in ticks and expires at the *next* tick interrupt, not one full period later, so a one-tick wait issued shortly before that interrupt returns almost immediately. At `CONFIG_FREERTOS_HZ = 1000`, which is what ESPHome configures, "1 ms" was in practice a random draw from 0–1 ms, and the decision to stop reading could come from tick phase rather than from an empty FIFO. All six waits now use two ticks (`WMBUS_NOTIFY_WAIT_MS`), which guarantees one whole period.
+
+### Notes
+- This wait is the second line of the read path, not the first. Each driver's `read()` first polls the FIFO against a hardware-timer deadline (1000 µs on SX1276, 1800 µs on CC1101) that no tick rate or scheduler can shorten, so the floor was already a hardware-timed millisecond and a truncated notify wait cost the tail of it rather than the whole thing.
+- Cost: up to about 1 ms more on the paths that give up, up to about 3 ms for the S1 raw read, which allows three idle rounds. Nothing on a successful receive path gets slower.
+- Changing only the default argument would have been cosmetic — every caller passed `1` explicitly.
+- The same quantization surfaced elsewhere as an actual receive regression on ESPHome 2026.7.1 and later, in a component whose byte loop depends on this wait as its *first* line. That diagnosis (`IoTLabs-pl/esphome-components`, commit `72e76be`) is what prompted this audit, and the credit belongs there.
+
+### Not verified
+- Reasoned from FreeRTOS block-time semantics and the tick rate ESPHome sets, not from a before/after count of `payload_read_failed` on hardware. No misbehaviour was observed here that needed fixing; this removes a known way for a read to be abandoned early rather than a symptom that was reported.
+
+## PL
+
+### Naprawiono
+- Podczas odczytu ramki tor odbiorczy czekał na kolejny bajt przez `pdMS_TO_TICKS(1)`, zanim uznał, że radio nie ma już nic do oddania. Czas blokady w FreeRTOS liczony jest w tikach i wygasa na **następnym** przerwaniu tikowym, a nie po pełnym okresie — czekanie na jeden tik rozpoczęte tuż przed tym przerwaniem kończy się niemal natychmiast. Przy `CONFIG_FREERTOS_HZ = 1000`, które ustawia ESPHome, „1 ms" było w praktyce losową wartością z przedziału 0–1 ms, a decyzja o przerwaniu odczytu mogła wynikać z fazy tiku, a nie z pustego FIFO. Wszystkie sześć miejsc czeka teraz dwa tiki (`WMBUS_NOTIFY_WAIT_MS`), co gwarantuje jeden pełny okres.
+
+### Uwagi
+- To czekanie jest drugą, nie pierwszą linią toru odczytu. `read()` każdego sterownika najpierw odpytuje FIFO względem terminu opartego na timerze sprzętowym (1000 µs na SX1276, 1800 µs na CC1101), którego ani częstotliwość tiku, ani scheduler nie skrócą — podłoga była więc już wcześniej gwarantowana sprzętowo, a urwane czekanie kosztowało jej końcówkę, nie całość.
+- Koszt: do około 1 ms więcej na ścieżkach rezygnacji, do około 3 ms przy odczycie surowym S1, który dopuszcza trzy rundy bezczynności. Nic w torze udanego odbioru nie zwalnia.
+- Zmiana samego domyślnego parametru byłaby kosmetyczna — każde wywołanie przekazywało `1` jawnie.
+- Ta sama kwantyzacja ujawniła się gdzie indziej jako realny regres odbioru na ESPHome 2026.7.1 i nowszych, w komponencie, którego pętla bajtowa opiera się na tym czekaniu jako **pierwszej** linii. To tamta diagnoza (`IoTLabs-pl/esphome-components`, commit `72e76be`) skłoniła do tego przeglądu i to jej należy się autorstwo.
+
+### Czego nie zweryfikowano
+- Rzecz jest wywnioskowana z semantyki czasu blokady w FreeRTOS i z częstotliwości tiku ustawianej przez ESPHome, a nie z porównania liczników `payload_read_failed` na sprzęcie przed zmianą i po niej. Nie zaobserwowano tutaj nieprawidłowości wymagającej naprawy; zmiana usuwa znany sposób na przedwczesne porzucenie odczytu, a nie zgłoszony objaw.
+
 # Fix: CC1101 modules reporting VERSION 0x04 were refused at startup
 
 ## EN
