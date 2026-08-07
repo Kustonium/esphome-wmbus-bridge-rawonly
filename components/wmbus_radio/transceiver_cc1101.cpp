@@ -92,7 +92,14 @@ static constexpr uint8_t GDO_SYNC_WORD  = 0x06;  // sync detected / packet conte
 // critical registers differs, the user gets a clear verdict instead of a
 // cryptic hexadecimal dump.
 static constexpr uint8_t EXP_PARTNUM   = 0x00;
-static constexpr uint8_t EXP_VERSION   = 0x14;
+// The VERSION status register differs between CC1101 silicon revisions: 0x14 is
+// what the modules this component was developed against report, 0x04 is what
+// older dies - and a large part of the module market built around them - report.
+// Both are the same register map and the same radio, so the revision byte is
+// read and reported but never gates the receiver. What actually proves the chip
+// is a CC1101 is the register readback in validate_startup_config_(): no other
+// transceiver echoes the whole wM-Bus profile back from those addresses.
+static constexpr uint8_t KNOWN_VERSIONS[] = {0x04, 0x14};
 static constexpr uint8_t EXP_IOCFG2    = GDO_SYNC_WORD;
 static constexpr uint8_t EXP_IOCFG0    = GDO_RXFIFO_THR;
 static constexpr uint8_t EXP_FIFOTHR   = 0x07;
@@ -172,6 +179,17 @@ static const char *gdo_signal_name_(uint8_t value) {
 }
 
 static bool reg_ok_(uint8_t got, uint8_t expected) { return got == expected; }
+
+// 0x00 and 0xFF are the two values a silent SPI bus produces (MISO stuck low or
+// pulled high), so they mean "no chip answered", not "some other chip answered".
+static bool version_responds_(uint8_t version) { return version != 0x00 && version != 0xFF; }
+
+static bool version_known_(uint8_t version) {
+  for (uint8_t known : KNOWN_VERSIONS) {
+    if (version == known) return true;
+  }
+  return false;
+}
 
 static bool fscal3_config_ok_(uint8_t got, uint8_t expected) {
   // FSCAL3[7:4] contains configuration bits.
@@ -405,8 +423,22 @@ bool CC1101::validate_startup_config_() {
     log_expected_reg_(name, got, expected, meaning_en, meaning_pl);
   };
 
-  check("PARTNUM", partnum, EXP_PARTNUM, "CC1101 part number", "numer ukladu CC1101");
-  check("VERSION", version, EXP_VERSION, "CC1101 SPI response", "odpowiedz CC1101 po SPI");
+  // Chip identity is reported, not enforced. A revision byte the author has not
+  // seen is not a reason to refuse to receive - the register checks below are the
+  // identity test, and they are the ones that can actually explain a dead radio.
+  if (version_known_(version) && partnum == EXP_PARTNUM) {
+    ESP_LOGI(TAG,
+             "CC1101 check OK / test OK: PARTNUM=0x%02X VERSION=0x%02X "
+             "(known CC1101 revision / znana rewizja CC1101)",
+             partnum, version);
+  } else {
+    ESP_LOGW(TAG,
+             "CC1101 unknown revision / nieznana rewizja: PARTNUM=0x%02X VERSION=0x%02X "
+             "(known / znane: PARTNUM=0x00, VERSION=0x04 or/lub 0x14). Continuing - the register "
+             "self-check below decides / Kontynuuje - decyduje autotest rejestrow ponizej",
+             partnum, version);
+  }
+
   check("IOCFG2", iocfg2, EXP_IOCFG2, "GDO2 = sync detect IRQ", "GDO2 = przerwanie wykrycia sync");
   check("IOCFG0", iocfg0, EXP_IOCFG0, "GDO0 = RX FIFO threshold", "GDO0 = prog RX FIFO");
   check("FIFOTHR", fifothr, EXP_FIFOTHR, "FIFO threshold around 32 bytes", "prog FIFO okolo 32 bajtow");
@@ -488,9 +520,8 @@ void CC1101::dump_debug_status(const char *reason) {
 
   const bool after_setup = reason != nullptr && std::strcmp(reason, "after_setup") == 0;
 
-  const bool spi_ok = version != 0x00 && version != 0xFF;
-  const bool version_ok = version == EXP_VERSION;
-  const bool partnum_ok = partnum == EXP_PARTNUM;
+  const bool spi_ok = version_responds_(version);
+  const bool chip_id_known = version_known_(version) && partnum == EXP_PARTNUM;
   const bool rx_running = marc == 0x0D;
   const bool rx_recovering = marc == 0x0E || marc == 0x0F;
   const bool rx_state_ok = rx_running || rx_recovering;
@@ -517,7 +548,9 @@ void CC1101::dump_debug_status(const char *reason) {
       reg_ok_(agc1, EXP_AGCCTRL1) && reg_ok_(agc0, EXP_AGCCTRL0) &&
       reg_ok_(frend1, EXP_FREND1) && fscal3_config_ok_(fscal3, EXP_FSCAL3);
 
-  const bool config_ok = spi_ok && version_ok && partnum_ok && gdo2_cfg_ok && gdo0_cfg_ok &&
+  // chip_id_known is deliberately not part of config_ok: it says which CC1101
+  // revision answered, not whether the radio is configured to receive.
+  const bool config_ok = spi_ok && gdo2_cfg_ok && gdo0_cfg_ok &&
                          fifothr_ok && pktctrl1_ok && pktctrl0_ok && rf_profile_ok && sync_known;
 
   const char *diag_code = "UNKNOWN";
@@ -530,11 +563,6 @@ void CC1101::dump_debug_status(const char *reason) {
     diag_code = "SPI_FAIL";
     diag_en = "CC1101 does not respond on SPI. Check CS, MISO, MOSI, SCK and power.";
     diag_pl = "CC1101 nie odpowiada po SPI. Sprawdz CS, MISO, MOSI, SCK oraz zasilanie.";
-    severe = true;
-  } else if (!version_ok || !partnum_ok) {
-    diag_code = "UNEXPECTED_CHIP_ID";
-    diag_en = "SPI responds, but PARTNUM/VERSION is unexpected for CC1101.";
-    diag_pl = "SPI odpowiada, ale PARTNUM/VERSION nie pasuje do oczekiwanego CC1101.";
     severe = true;
   } else if (!gdo2_cfg_ok) {
     diag_code = "CONFIG_BAD_GDO2";
@@ -609,6 +637,15 @@ void CC1101::dump_debug_status(const char *reason) {
     ESP_LOGI(TAG, "CC1101 DIAG explanation / wyjasnienie: %s / %s", diag_en, diag_pl);
   }
 
+  if (spi_ok && !chip_id_known) {
+    ESP_LOGW(TAG,
+             "CC1101 chip id / identyfikator ukladu: PARTNUM=0x%02X VERSION=0x%02X is not a revision "
+             "seen here before (known / znane: PARTNUM=0x00, VERSION=0x04 or/lub 0x14). This alone "
+             "does not stop reception; read the config line above / To samo w sobie nie zatrzymuje "
+             "odbioru; patrz linia konfiguracji powyzej",
+             partnum, version);
+  }
+
   const char *rx_summary = rx_running ? "LISTENING" : (rx_overflow_state ? "FIFO_OVERFLOW" : marc_state_name_(marc));
   const char *data_summary = has_fifo_data ? "DATA_IN_FIFO" : "FIFO_EMPTY";
   const char *event_summary = sync_seen_now ? "SYNC_ACTIVE" : (fifo_threshold_now ? "FIFO_THRESHOLD_ACTIVE" : "NO_RF_EVENT_NOW");
@@ -673,12 +710,13 @@ void CC1101::setup() {
   ESP_LOGI(TAG, "Setup CC1101 experimental RX path: GDO2=sync IRQ, GDO0=FIFO threshold");
   this->reset_cc1101_();
   const uint8_t version = this->read_status_(REG_VERSION);
-  if (version == 0x00 || version == 0xFF) {
+  if (!version_responds_(version)) {
     ESP_LOGE(TAG, "Invalid CC1101 VERSION=0x%02X. Check SPI wiring / zly odczyt VERSION, sprawdz SPI", version);
     this->mark_failed();
     return;
   }
-  ESP_LOGI(TAG, "CC1101 VERSION=0x%02X", version);
+  ESP_LOGI(TAG, "CC1101 VERSION=0x%02X%s", version,
+           version_known_(version) ? "" : " (unknown revision, continuing / nieznana rewizja, kontynuuje)");
 
   this->apply_radio_profile_();
   char rf_buf[112];
