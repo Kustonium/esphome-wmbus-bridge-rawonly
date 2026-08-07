@@ -1,3 +1,39 @@
+# Fix: CC1101 modules reporting VERSION 0x04 were refused at startup
+
+## EN
+
+### Fixed
+- The CC1101 startup self-check compared the `VERSION` status register against a single value, `0x14`. A chip reporting `0x04` failed the check, which called `mark_failed()` — the radio never started, and `dump_debug_status()` labelled it `UNEXPECTED_CHIP_ID`, a verdict that pointed at the wrong thing. `0x04` and `0x14` are two silicon revisions of the same part; both are now recognised.
+- Reported by a user on Discussions running a CC1101 whose `VERSION` reads `0x04`.
+
+### Changed
+- The revision byte no longer gates the receiver at all. `PARTNUM`/`VERSION` are read and logged; a value outside the known set produces a warning and startup continues. `config_ok` in the diagnostic dump no longer includes chip identity, and the `UNEXPECTED_CHIP_ID` verdict is gone — with it out of the way the classifier reports the state that actually matters (GDO mapping, packet mode, RF profile, RX state) instead of stopping at the first byte it did not recognise.
+- A silent SPI bus still fails setup: `VERSION` reading `0x00` or `0xFF` is not a revision, it is a bus with nothing on it.
+
+### Why the check was safe to drop
+Chip identity was never what the self-check proved. Nineteen registers are read back and compared against the wM-Bus profile the component just wrote — GDO mapping, FIFO threshold, packet mode, sync word, modem, AGC, front end. Anything that echoes those values from those addresses is a CC1101; anything that does not is rejected on the register check, whatever it claims in `VERSION`.
+
+### Not verified
+The fix is reasoned from the register semantics and reviewed, not measured: the author has no `VERSION=0x04` part to test on. On `0x14` hardware the behaviour is unchanged apart from the log wording.
+
+## PL
+
+### Naprawiono
+- Autotest startowy CC1101 porównywał rejestr statusu `VERSION` z jedną wartością, `0x14`. Układ zgłaszający `0x04` nie przechodził testu, co kończyło się wywołaniem `mark_failed()` — radio w ogóle nie ruszało, a `dump_debug_status()` opisywał to jako `UNEXPECTED_CHIP_ID`, czyli werdyktem wskazującym nie na to, co trzeba. `0x04` i `0x14` to dwie rewizje tego samego układu; obie są teraz rozpoznawane.
+- Zgłoszone przez użytkownika w Discussions, u którego CC1101 zwraca `VERSION` równe `0x04`.
+
+### Zmieniono
+- Bajt rewizji przestał w ogóle blokować odbiornik. `PARTNUM`/`VERSION` są odczytywane i logowane; wartość spoza znanego zbioru daje ostrzeżenie, a start trwa dalej. `config_ok` w zrzucie diagnostycznym nie obejmuje już tożsamości układu, a werdykt `UNEXPECTED_CHIP_ID` zniknął — bez niego klasyfikator pokazuje stan, który naprawdę ma znaczenie (mapowanie GDO, tryb pakietu, profil RF, stan RX), zamiast zatrzymywać się na pierwszym nierozpoznanym bajcie.
+- Milcząca magistrala SPI nadal przerywa uruchomienie: `VERSION` równe `0x00` albo `0xFF` to nie rewizja, tylko szyna, na której nic nie odpowiada.
+
+### Dlaczego ten test można było usunąć bez straty
+Autotest nigdy nie dowodził tożsamości układu. Odczytywanych i porównywanych jest dziewiętnaście rejestrów z profilem wM-Bus, który komponent przed chwilą zapisał — mapowanie GDO, próg FIFO, tryb pakietu, słowo sync, modem, AGC, tor wejściowy. Cokolwiek zwraca te wartości spod tych adresów, jest CC1101; cokolwiek nie zwraca, odpada na teście rejestrów, niezależnie od tego, co deklaruje w `VERSION`.
+
+### Czego nie zweryfikowano
+Poprawka jest wyprowadzona z semantyki rejestrów i przejrzana, nie zmierzona: autor nie ma egzemplarza z `VERSION=0x04`, żeby ją sprawdzić. Na sprzęcie `0x14` zachowanie jest bez zmian poza brzmieniem logów.
+
+---
+
 # Change: halve the S1 capture budget once the header is known undecodable
 
 ## EN

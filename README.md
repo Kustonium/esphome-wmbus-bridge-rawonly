@@ -136,6 +136,8 @@ wmbus_radio:
   gdo2_pin: GPIOyy
 ```
 
+Silicon revisions: modules reporting `VERSION=0x14` and `VERSION=0x04` are both accepted. The revision byte is logged, but it does not gate startup — an unrecognised value produces a warning and the receiver still starts. What decides whether the radio is usable is the register self-check (GDO mapping, packet mode, RF profile), and a completely silent SPI bus (`VERSION` reading `0x00` or `0xFF`) still fails setup.
+
 ### Documentation
 
 Main documentation lives in `docs/`. Examples live in `examples/`.
@@ -292,6 +294,8 @@ wmbus_radio:
   gdo0_pin: GPIOxx
   gdo2_pin: GPIOyy
 ```
+
+Rewizje układu: akceptowane są moduły zgłaszające zarówno `VERSION=0x14`, jak i `VERSION=0x04`. Bajt rewizji trafia do logu, ale nie blokuje startu — nierozpoznana wartość daje ostrzeżenie, a odbiornik i tak rusza. O używalności radia decyduje autotest rejestrów (mapowanie GDO, tryb pakietu, profil RF), a całkowicie milcząca magistrala SPI (`VERSION` równe `0x00` albo `0xFF`) nadal przerywa uruchomienie.
 
 ### Dokumentacja
 
