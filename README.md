@@ -1,5 +1,36 @@
 # ESPHome wM-Bus Bridge RAW-only
 
+[![Release][release-shield]][releases]
+[![License][license-shield]][license]
+![Supports SX1262][sx1262-shield]
+![Supports SX1276][sx1276-shield]
+![Supports CC1101][cc1101-shield]
+
+[![CI][ci-shield]][ci]
+[![Commit activity][commits-shield]][commits]
+
+<!-- Every dynamic badge reads the stable repository, which is the one users
+     install from, and this README is copied to it verbatim by promote.yml — so
+     no badge here may point at the dev repository. The radio badges are static
+     but factual (see the compatibility section below). Deliberately absent:
+     shields.io "maintenance/yes/<year>", which flips itself to a red
+     "maintained: no!" as soon as the hard-coded year rolls over, and any badge
+     naming a specific ESPHome version, which would go stale silently — the CI
+     badge proves current compatibility instead, because CI builds against
+     unpinned ESPHome on a nightly schedule. -->
+
+[release-shield]: https://img.shields.io/github/v/release/Kustonium/esphome-wmbus-bridge-rawonly
+[releases]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases
+[license-shield]: https://img.shields.io/github/license/Kustonium/esphome-wmbus-bridge-rawonly
+[license]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/blob/main/LICENSE
+[sx1262-shield]: https://img.shields.io/badge/SX1262-yes-green.svg
+[sx1276-shield]: https://img.shields.io/badge/SX1276-yes-green.svg
+[cc1101-shield]: https://img.shields.io/badge/CC1101-experimental-yellow.svg
+[ci-shield]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml/badge.svg
+[ci]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml
+[commits-shield]: https://img.shields.io/github/commit-activity/y/Kustonium/esphome-wmbus-bridge-rawonly
+[commits]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/commits/main
+
 <a href="https://buymeacoffee.com/Kustonium"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="41"></a>
 
 🇬🇧 [English](#english) | 🇵🇱 [Polski](#polski)
