@@ -150,6 +150,21 @@ static std::vector<uint8_t> encode_s1_manchester(const std::vector<uint8_t> &dec
   return out;
 }
 
+static void make_manchester_erasure(std::vector<uint8_t> &raw, size_t decoded_bit) {
+  const size_t first_chip = decoded_bit * 2U;
+  for (size_t chip = first_chip; chip <= first_chip + 1U; chip++)
+    raw[chip >> 3U] &= (uint8_t) ~(0x80U >> (chip & 7U));  // invalid pair 00
+}
+
+static std::vector<size_t> one_bit_positions(const std::vector<uint8_t> &decoded,
+                                             size_t first_bit, size_t end_bit, size_t count) {
+  std::vector<size_t> out;
+  for (size_t bit = first_bit; bit < end_bit && out.size() < count; bit++)
+    if (((decoded[bit >> 3U] >> (7U - (bit & 7U))) & 1U) != 0) out.push_back(bit);
+  check(out.size() == count, "fixture contains enough one bits for erasures");
+  return out;
+}
+
 static std::vector<uint8_t> base_frame_body() {
   return {
       0x0B,  // L-field: 11 bytes follow, 12 bytes total including L-field.
@@ -351,6 +366,63 @@ static void test_packet_s1_invalid_manchester_is_rejected() {
   check(packet.t1_symbols_invalid() > 0, "S1 invalid Manchester records invalid symbols");
 }
 
+static void test_packet_s1_erasures_are_recovered_per_crc_block() {
+  const auto encoded = format_a_with_crc();
+  auto raw = encode_s1_manchester(encoded);
+  // Three erasures in the first block and two in the final block. All replace
+  // transmitted one bits with invalid 00 pairs, so the ordinary zero-
+  // substitution decoder necessarily fails CRC before recovery runs.
+  //
+  // The search starts after the L-field (bit 8), and that is a property of the
+  // feature, not a convenience: block-wise CRC recovery needs the frame length
+  // first, because the length is what says where the blocks end. Erase the
+  // L-field itself and the packet is dropped at s1_length_check before any
+  // recovery can run - there is nothing to recover into.
+  auto first = one_bit_positions(encoded, 8U, 12U * 8U, 3);
+  auto final = one_bit_positions(encoded, 12U * 8U, encoded.size() * 8U, 2);
+  for (size_t bit : first) make_manchester_erasure(raw, bit);
+  for (size_t bit : final) make_manchester_erasure(raw, bit);
+
+  Packet packet = make_packet(raw, -85, LinkMode::S1);
+  auto frame = packet.convert_to_frame();
+  check(frame.has_value(), "S1 erasures are resolved independently by Format-A CRC block");
+  if (frame) check(frame->as_raw() == base_frame_body(), "S1 erasure recovery restores exact frame");
+}
+
+static void test_packet_s1_too_many_erasures_are_rejected() {
+  const auto encoded = format_a_with_crc();
+  auto raw = encode_s1_manchester(encoded);
+  // Nine erasures in one block, one above the search cap of eight, and again
+  // past the L-field so the packet reaches the CRC stage at all.
+  auto first = one_bit_positions(encoded, 8U, 12U * 8U, 9);
+  for (size_t bit : first) make_manchester_erasure(raw, bit);
+
+  Packet packet = make_packet(raw, -89, LinkMode::S1);
+  auto frame = packet.convert_to_frame();
+  check(!frame.has_value(), "S1 block above the erasure search cap is rejected");
+  check(packet.drop_reason() == "dll_crc_failed", "S1 over-cap erasures retain CRC failure reason");
+}
+
+static void test_packet_s1_field_erasures_from_2026_08_14() {
+  const auto expected = hex_to_bytes(
+      "5444A51166067F4170077A550000000C13913456780C13A24567890C13B3567890"
+      "0C13C46789010C13D57890120C13E68901230C13F79012340C13080123450C1319"
+      "1234560C132A2345670C133B3456782F2F2F2F");
+  const char *captures[] = {
+      // RssiSync 0xA9 (-84.5 dBm): 7 erasures, blocks [3,1,0,3,0,0].
+      "6665654599665656496955696aaa65566a54556a69a555996ab9666655555555555555a5565a96565a6566696a9555a5565a99596566696a6a966695959655a5565a9a5a66696a95965555a5565aa565696a9596555655a5565aa666959996596a959655565955a5565aa96915965556595a55a5565aaa6a967556595a6555a595d9596a565a55955556595a656655a5565a569656595a65666955a5565a5999595a6566666a9656696a55a5565a5a9a5a6566696a9559aa59aa59aa59aa99a599aa",
+      // RssiSync 0xA7 (-83.5 dBm): 10 erasures, blocks [2,1,0,2,2,3].
+      "6665656599665656696955696aaa65566a55556a49a555196a99666655555555555555a5565a96565a6566696a9555a5565a99596566686a6a966695959655a5565a9a5a66696a95965555a5565aa565696a9596555655a5565aa666959996596a959655465955a5565aa96995965556595a55a4565aaa6a965556595a6555a59559596a565a55955556595a656655a5565a569656595a65666955a5565a5999590a6566666a9656696a55a5565a5a9a5a6566696a9559aa59aa59aa598299a519aa",
+  };
+
+  for (const char *capture : captures) {
+    Packet packet = make_packet(hex_to_bytes(capture), -84, LinkMode::S1);
+    auto frame = packet.convert_to_frame();
+    check(frame.has_value(), "real marginal S1 capture is recovered");
+    if (frame) check(frame->as_raw() == expected, "real marginal S1 capture restores exact fake frame");
+  }
+}
+
 // For a BCD meter the raw A-field value is simply its decimal digits read as
 // hex: meter 89907 is stored as the bytes that print 00089907. This pins the
 // byte order of the raw extraction, which is where a silent bug would live.
@@ -520,6 +592,9 @@ int main() {
   test_packet_t1_truncated_is_rejected();
   test_packet_c1_unknown_preamble_is_rejected();
   test_packet_s1_invalid_manchester_is_rejected();
+  test_packet_s1_erasures_are_recovered_per_crc_block();
+  test_packet_s1_too_many_erasures_are_rejected();
+  test_packet_s1_field_erasures_from_2026_08_14();
   test_non_bcd_meter_id();
   test_forward_meter_whitelist();
   test_real_golden_frames_round_trip();

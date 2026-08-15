@@ -69,7 +69,9 @@ static constexpr uint8_t GFSK_ADDRESS_FILT_OFF = 0x00;
 // With 16 bits the detector did start firing, but on noise: captures ran to the
 // 512-byte cap with first bytes that decode to no valid L/C, while the SX1276
 // used as reference received nothing at all in the same minutes. The shorter
-// word buys false starts, not missed meters, so the full word stays.
+// word buys false starts, not missed meters. An 18-bit native-sync experiment
+// on 2026-08-14 behaved the same way: with no S1 transmitter it repeatedly
+// triggered on noise and filled the 256-byte capture buffer. Keep 24 bits.
 static constexpr uint8_t S1_SYNC_WORD_BITS = 24;
 #define S1_SYNC_WORD_BITS_OR_DEFAULT(mode) \
   static_cast<uint8_t>((mode) == LISTEN_MODE_S1 ? S1_SYNC_WORD_BITS : 16)
@@ -122,6 +124,20 @@ static constexpr uint16_t REG_SYNC_WORD_0 = 0x06C0;
 static constexpr uint16_t REG_RX_GAIN = 0x08AC;
 static constexpr uint8_t RX_GAIN_POWER_SAVING = 0x94;
 static constexpr uint8_t RX_GAIN_BOOSTED = 0x96;
+
+// RSSI/AGC calibration registers (datasheet Rev 2.2, section 6.1.6). Their
+// boot values are logged for the Heltec V4 + GC1109 experiment; do not tune
+// them without a calibrated RF source.
+static constexpr uint16_t REG_AGC_RSSI_MEAS_CAL_H = 0x089C;
+static constexpr uint16_t REG_AGC_RSSI_MEAS_CAL_L = 0x089D;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_1_2 = 0x08F5;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_3_4 = 0x08F6;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_5_6 = 0x08F7;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_7_8 = 0x08F8;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_9_10 = 0x08F9;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_11_12 = 0x08FA;
+static constexpr uint16_t REG_AGC_GAIN_TUNE_13 = 0x08FB;
+static constexpr uint16_t REG_AGC_FIRST_POWER_THRESHOLD = 0x08B9;
 
 // Semtech AN1200.53 long-packet reception registers:
 //   REG_RX_ADDR_PTR      - current HW write pointer into the 256-byte circular buffer
@@ -244,6 +260,78 @@ static bool s1_decode_bytes_(const std::vector<uint8_t> &raw, size_t start_pair,
   return true;
 }
 
+// How the invalid pairs of one candidate frame spread over its CRC blocks.
+//
+// A total on its own ("38 invalid pairs") cannot say whether resolving erasures
+// against the CRC is worth building. An invalid Manchester pair is a *known*
+// error position, so a block holding k of them is 2^k substitutions to try, and
+// the blocks are checked independently: six erasures spread one per block are
+// six 2-try problems, the same six inside one block are 64 tries. Only the
+// distribution separates those, and it is not known which one real frames give.
+//
+// Format-A block layout, in decoded bytes: 10 data + 2 CRC, then 16 + 2 each,
+// the last block holding whatever is left + 2. Decoded bit i comes from pair i,
+// so decoded byte b spans pairs [b*8, b*8+8).
+//
+// Counted over the frame window only. `symbols_invalid` from the decode path is
+// counted over the whole capture, so at buffer_cap it is mostly the noise after
+// the frame - 246 B of noise contribute ~492 invalid pairs on their own, which
+// is how a ratio that looks like signal quality ends up describing the tail.
+static void s1_log_erasure_map_(const std::vector<uint8_t> &raw, size_t start_pair, bool polarity,
+                                uint8_t l_field, unsigned candidate) {
+  const size_t frame_len = (size_t) l_field + 1U;  // data bytes, L included, CRCs excluded
+
+  // An L-field of 255 gives 17 blocks; 18 is the ceiling, not an expected value.
+  uint16_t per_block[18]{};
+  size_t block_end[18]{};  // exclusive, in decoded bytes, CRCs included
+  size_t blocks = 0, decoded_bytes = 0, left = frame_len;
+  while (left > 0 && blocks < 18) {
+    const size_t data = (blocks == 0) ? 10U : 16U;
+    const size_t take = (left < data) ? left : data;
+    decoded_bytes += take + 2U;
+    left -= take;
+    block_end[blocks++] = decoded_bytes;
+  }
+
+  const size_t pairs = decoded_bytes * 8U;
+  size_t counted = 0, total = 0, block = 0;
+  uint16_t worst = 0;
+  for (size_t p = 0; p < pairs; p++) {
+    if (((start_pair + p) * 2U + 1U) >> 3 >= raw.size())
+      break;  // capture ended inside the frame
+    counted++;
+    const size_t byte = p / 8U;
+    while (block + 1U < blocks && byte >= block_end[block])
+      block++;
+    uint8_t v = 0;
+    if (!s1_chip_pair_(raw, start_pair + p, polarity, v)) {
+      per_block[block]++;
+      total++;
+      if (per_block[block] > worst)
+        worst = per_block[block];
+    }
+  }
+
+  char list[128];
+  size_t off = 0;
+  for (size_t i = 0; i < blocks && off + 8U < sizeof(list); i++) {
+    const int n = snprintf(list + off, sizeof(list) - off, "%s%u", i ? "," : "",
+                           (unsigned) per_block[i]);
+    if (n <= 0)
+      break;
+    off += (size_t) n;
+  }
+  list[sizeof(list) - 1] = '\0';
+
+  // The worst block sets the cost of the whole frame - blocks are resolved one
+  // at a time, so it is 2^worst substitutions, not 2^total.
+  ESP_LOGI(TAG,
+           "S1 erasure map %u: %u erasures in %u/%u frame pairs, per CRC block [%s], "
+           "worst block %u (2^%u tries)%s",
+           candidate, (unsigned) total, (unsigned) counted, (unsigned) pairs, list,
+           (unsigned) worst, (unsigned) worst, counted < pairs ? ", capture ended early" : "");
+}
+
 // Raw length of a complete format-A frame with DLL CRCs, from its L-field.
 static size_t s1_raw_len_from_l_(uint8_t l_field) {
   const size_t frame_len = (size_t) l_field + 1U;
@@ -353,6 +441,10 @@ void SX1262::log_s1_frame_start_(const std::vector<uint8_t> &raw) {
              (unsigned) (i + 1), (unsigned) hit_count, (unsigned) hits[i].chip,
              (unsigned) (hits[i].chip / 4U), (unsigned) hits[i].polarity, hits[i].l, hits[i].c,
              (unsigned) hits[i].l + 1U, (unsigned) hits[i].invalid, (unsigned) hits[i].checked);
+    // Per candidate, not for the top one only: the ranking is by invalid pairs
+    // per checked pair, and a coincidence over a short implied frame can still
+    // outrank the real header. Its erasure map is what gives it away.
+    s1_log_erasure_map_(raw, hits[i].chip, hits[i].polarity != 0, hits[i].l, (unsigned) (i + 1));
   }
 }
 
@@ -1383,6 +1475,16 @@ void SX1262::log_reg_status() {
   const uint8_t reg_sync0    = this->read_register8_(REG_SYNC_WORD_0);
   const uint8_t reg_sync1    = this->read_register8_(REG_SYNC_WORD_0 + 1);
   const uint8_t reg_sync2    = this->read_register8_(REG_SYNC_WORD_0 + 2);
+  const uint8_t agc_cal_h    = this->read_register8_(REG_AGC_RSSI_MEAS_CAL_H);
+  const uint8_t agc_cal_l    = this->read_register8_(REG_AGC_RSSI_MEAS_CAL_L);
+  const uint8_t agc_tune12   = this->read_register8_(REG_AGC_GAIN_TUNE_1_2);
+  const uint8_t agc_tune34   = this->read_register8_(REG_AGC_GAIN_TUNE_3_4);
+  const uint8_t agc_tune56   = this->read_register8_(REG_AGC_GAIN_TUNE_5_6);
+  const uint8_t agc_tune78   = this->read_register8_(REG_AGC_GAIN_TUNE_7_8);
+  const uint8_t agc_tune910  = this->read_register8_(REG_AGC_GAIN_TUNE_9_10);
+  const uint8_t agc_tune1112 = this->read_register8_(REG_AGC_GAIN_TUNE_11_12);
+  const uint8_t agc_tune13   = this->read_register8_(REG_AGC_GAIN_TUNE_13);
+  const uint8_t agc_first    = this->read_register8_(REG_AGC_FIRST_POWER_THRESHOLD);
 
   // sync_bits is printed because it is otherwise invisible from outside, and a
   // board running an unexpected value is exactly the kind of thing that gets
@@ -1390,6 +1492,12 @@ void SX1262::log_reg_status() {
   ESP_LOGI(TAG, "RegRxGain=0x%02X RegSyncWord[0]=0x%02X [1]=0x%02X [2]=0x%02X sync_bits=%u",
            reg_rx_gain, reg_sync0, reg_sync1, reg_sync2,
            (unsigned) S1_SYNC_WORD_BITS_OR_DEFAULT(this->listen_mode_));
+  ESP_LOGI(TAG,
+           "RSSI/AGC calibration snapshot: CalH=0x%02X CalL=0x%02X "
+           "Tune12=0x%02X Tune34=0x%02X Tune56=0x%02X Tune78=0x%02X "
+           "Tune910=0x%02X Tune1112=0x%02X Tune13=0x%02X FirstPow=0x%02X",
+           agc_cal_h, agc_cal_l, agc_tune12, agc_tune34, agc_tune56,
+           agc_tune78, agc_tune910, agc_tune1112, agc_tune13, agc_first);
 
   if (reg_rx_gain == 0x00 && reg_sync0 == 0x00 && reg_sync1 == 0x00 && reg_sync2 == 0x00) {
     ESP_LOGE(TAG, "SX1262 not responding over SPI / SX1262 nie odpowiada po SPI. "

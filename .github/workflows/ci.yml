@@ -23,6 +23,12 @@ jobs:
       - name: Python syntax check
         run: python -m py_compile components/wmbus_radio/__init__.py
 
+      # The commented options in the examples and the "Domyślnie" column of the
+      # reference tables are documentation of the schema; this holds them to it,
+      # so a changed default cannot leave ten example files quietly lying.
+      - name: Documented defaults match the schema
+        run: python tests/ci/check_example_defaults.py
+
       - name: Build host parser tests
         run: |
           mkdir -p build
@@ -58,6 +64,13 @@ jobs:
           # also the only entry that compiles that option.
           - name: SX1262 / XIAO esp32-s3 (Wio-SX1262, rf_sw_pin)
             config: examples/SX1262/XIAO ESP32 S3/xiao_esp32_s3_clean.yaml
+          # LR1121: the driver is behind a compile gate (USE_WMBUS_RADIO_LR1121)
+          # and no other config selects it, so without this entry the file is
+          # never compiled anywhere - not on anyone's board, not here. A driver
+          # nobody can build is worse than one that fails loudly. Same reasoning
+          # as the V4-R8 entry above: hardware-untested, compile-covered.
+          - name: LR1121 / esp32-s3 (Waveshare HF, HW-untested)
+            config: examples/LR1121/Waveshare ESP32-S3-LR1121-HF/LR1121_Waveshare_HF_clean.yaml
           # Not a board variant: this one exists to put forward_meters through
           # real ESPHome validation. The examples never set it, so without this
           # entry only the default (empty) path is ever compiled.

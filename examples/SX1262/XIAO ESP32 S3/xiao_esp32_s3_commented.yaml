@@ -138,7 +138,7 @@ wmbus_radio:
   rf_sw_pin: GPIO38
 
   has_tcxo: true
-  rx_gain: boosted
+  # rx_gain: boosted  # default: boosted
   long_gfsk_packets: true
 
   # EN: Receive mode. Available values: t1, c1, both, s1.
@@ -155,7 +155,7 @@ wmbus_radio:
 
   # EN: Stable default. Use true only for A/B testing with meter_snapshot.
   # PL: Stabilny domyślny tryb. true testuj tylko A/B przez meter_snapshot.
-  listen_mode_filter_after_parse: false
+  # listen_mode_filter_after_parse: false  # default: false
 
   # MQTT topics are generated automatically.
   # topic_name is optional; if omitted, esphome.name is used.
@@ -170,17 +170,29 @@ wmbus_radio:
   # EN: Lightweight diagnostics. Use explicit topic to keep devices separated.
   # PL: Lekka diagnostyka. Jawny topic rozdziela urządzenia.
   diagnostic_mode: normal
-  diagnostic_summary_interval: 60s
+  # diagnostic_summary_interval: 60s  # default: 60s
+
+  # EN: Publish the last measured RSSI for each forwarded meter as a retained
+  #     integer at wmbus/<topic_name>/rssi/<meter_id>. Frames without a real
+  #     RSSI measurement are skipped, so no placeholder value is ever sent.
+  #     The wMBus MQTT Bridge add-on turns it into one signal-strength entity
+  #     per receiving board, which is how two boards can be compared.
+  # PL: Publikuj ostatnie zmierzone RSSI każdego przekazanego licznika jako
+  #     zachowaną liczbę całkowitą na wmbus/<topic_name>/rssi/<meter_id>.
+  #     Ramki bez rzeczywistego pomiaru są pomijane, więc żadna wartość
+  #     zastępcza nie jest wysyłana. Dodatek wMBus MQTT Bridge robi z tego
+  #     osobną encję siły sygnału dla każdej płytki, co pozwala je porównać.
+  # publish_rssi: true  # default: false
 
   # EN: Optional 15-minute per-meter statistics for selected IDs.
   # PL: Opcjonalne 15-minutowe statystyki per licznik dla wybranych ID.
-  # highlight_meters:
+  # highlight_meters:  # default: []
   #   - "00089907"
   #   - "03534159"
   #   - "03528221"
-  # highlight_tag: "wmbus_user"
-  # highlight_prefix: "★ "
-  # highlight_ansi: true
+  # highlight_tag: "wmbus_user"  # default: wmbus_user
+  # highlight_prefix: "★ "  # default: "★ "
+  # highlight_ansi: true  # default: false
 
   # EN: Optional whitelist — only these meters reach wmbus/<topic_name>/telegram.
   #     Everything else is dropped on the ESP, which is the point in a dense block.
@@ -190,7 +202,7 @@ wmbus_radio:
   #     Reszta jest odrzucana na ESP, o co chodzi w gęstej zabudowie.
   #     Zamiast listy można dać `forward_meters: true` i użyć listy z highlight_meters.
   #     ID szesnastkowe w cudzysłowie, inaczej YAML zamieni 0x417F0666 na 1098843750.
-  # forward_meters:
+  # forward_meters:  # default: []
   #   - "00089907"
   #   - "0x417F0666"
 
@@ -203,4 +215,4 @@ wmbus_radio:
 
   # EN: Increase only if logs show receiver task stack problems.
   # PL: Zwiększaj tylko, gdy logi pokazują problem ze stosem taska odbiornika.
-  # receiver_task_stack_size: 6144
+  # receiver_task_stack_size: 6144  # default: 3072

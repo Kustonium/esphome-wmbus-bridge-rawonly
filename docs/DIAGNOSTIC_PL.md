@@ -167,6 +167,8 @@ Konsekwencje przy czytaniu snapshotu:
 
 Rozkład tych wartości między licznikami jest osobnym narzędziem diagnostycznym — patrz TROUBLESHOOTING, sekcja o wąskim paśmie RSSI.
 
+Te pola żyją wewnątrz payloadów diagnostycznych, więc wymagają trybu diagnostycznego. `publish_rssi` to osobna, niezależna opcja: publikuje poziom ostatniej ramki każdego licznika na `wmbus/<topic_name>/rssi/<meter_id>` **niezależnie od `diagnostic_mode`**, jako zwykłą liczbę całkowitą, a dla ramek bez pomiaru po prostu milczy, zamiast wysyłać znacznik. Pól diagnostycznych używaj do czytania obrazu RF płytki; `publish_rssi` — żeby dostać w Home Assistant osobną encję siły sygnału per licznik i per płytka. Pełny opis w CONFIG_REFERENCE_MINIMAL.
+
 ## `listen_mode_filter_after_parse`
 
 Domyślnie:

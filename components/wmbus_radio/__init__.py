@@ -47,6 +47,7 @@ CONF_TARGET_METER_ID = "target_meter_id"
 CONF_TARGET_TOPIC = "target_topic"
 CONF_TARGET_LOG = "target_log"
 CONF_PUBLISH_RADIO_RAW = "publish_radio_raw"
+CONF_PUBLISH_RSSI = "publish_rssi"
 CONF_FORWARD_METERS = "forward_meters"
 
 # SX1262 board helpers
@@ -106,6 +107,60 @@ CONF_GDO2_PIN = "gdo2_pin"
 CONF_CC1101_ALLOW_EXPERIMENTAL = "cc1101_allow_experimental"
 CONF_ALLOW_UNTESTED_FRAMEWORK = "allow_untested_framework"
 CONF_FREQUENCY = "frequency"
+
+# LR1121 (Waveshare ESP32-S3-LR1121-XF). Experimental in the strong sense:
+# written from datasheet + schematic + vendor package, never run against
+# hardware. Gated the same way CC1101 is.
+CONF_LR1121_ALLOW_EXPERIMENTAL = "lr1121_allow_experimental"
+CONF_TCXO_VOLTAGE = "tcxo_voltage"
+CONF_RX_BANDWIDTH = "rx_bandwidth"
+CONF_PREAMBLE_DETECTOR = "preamble_detector"
+CONF_PAYLOAD_LENGTH = "payload_length"
+CONF_RX_BOOSTED = "rx_boosted"
+CONF_BITRATE = "bitrate"
+CONF_DEVIATION = "deviation"
+
+# YAML value -> C++ enumerator suffix. Kept as plain maps so the schema and the
+# code generator cannot drift apart.
+LR1121_TCXO_VOLTAGES = {
+    "1.6v": "LR1121_TCXO_1_6V",
+    "1.7v": "LR1121_TCXO_1_7V",
+    "1.8v": "LR1121_TCXO_1_8V",
+    "2.2v": "LR1121_TCXO_2_2V",
+    "2.4v": "LR1121_TCXO_2_4V",
+    "2.7v": "LR1121_TCXO_2_7V",
+    "3.0v": "LR1121_TCXO_3_0V",
+    "3.3v": "LR1121_TCXO_3_3V",
+}
+
+LR1121_RX_BANDWIDTHS = {
+    "234300": "LR1121_BW_234300",
+    "312000": "LR1121_BW_312000",
+    "373600": "LR1121_BW_373600",
+    "467000": "LR1121_BW_467000",
+}
+
+LR1121_PREAMBLE_DETECTORS = {
+    "off": "LR1121_PREAMBLE_OFF",
+    "8": "LR1121_PREAMBLE_MIN_8B",
+    "16": "LR1121_PREAMBLE_MIN_16B",
+    "24": "LR1121_PREAMBLE_MIN_24B",
+    "32": "LR1121_PREAMBLE_MIN_32B",
+}
+
+# Schema defaults, repeated here so the validator can tell "user left it alone"
+# from "user set it on the wrong radio". Must match the cv.Optional defaults
+# below; a mismatch only ever turns into a confusing validation error, never
+# into a wrong binary.
+BASE_CONFIG_DEFAULTS_LR1121 = {
+    CONF_TCXO_VOLTAGE: "1.8v",
+    CONF_RX_BANDWIDTH: "234300",
+    CONF_PREAMBLE_DETECTOR: "16",
+    CONF_PAYLOAD_LENGTH: 128,
+    CONF_RX_BOOSTED: True,
+    CONF_BITRATE: 100000,
+    CONF_DEVIATION: 50000,
+}
 
 radio_ns = cg.esphome_ns.namespace("wmbus_radio")
 RadioComponent = radio_ns.class_("Radio", cg.Component)
@@ -244,6 +299,28 @@ BASE_CONFIG_SCHEMA = (
             # SX1276-specific board helper (for boards such as LilyGO T3 V3.0 TCXO).
             cv.Optional(CONF_TCXO_PIN): pins.internal_gpio_output_pin_schema,
 
+            # LR1121-specific tuning (ignored for other radios).
+            #
+            # Everything the RF path depends on is exposed here on purpose. The
+            # numbers this project measures come from one dense block of flats
+            # with ~29 meters; they are a good default and a bad law. Freezing
+            # them into the driver would repeat exactly the criticism this
+            # project makes of hardcoded bandwidths elsewhere.
+            cv.Optional(CONF_LR1121_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
+            cv.Optional(CONF_TCXO_VOLTAGE, default="1.8v"): cv.one_of(
+                *LR1121_TCXO_VOLTAGES, lower=True
+            ),
+            cv.Optional(CONF_RX_BANDWIDTH, default="234300"): cv.one_of(
+                *LR1121_RX_BANDWIDTHS, lower=True
+            ),
+            cv.Optional(CONF_PREAMBLE_DETECTOR, default="16"): cv.one_of(
+                *LR1121_PREAMBLE_DETECTORS, lower=True
+            ),
+            cv.Optional(CONF_PAYLOAD_LENGTH, default=128): cv.int_range(min=16, max=255),
+            cv.Optional(CONF_RX_BOOSTED, default=True): cv.boolean,
+            cv.Optional(CONF_BITRATE, default=100000): cv.int_range(min=600, max=300000),
+            cv.Optional(CONF_DEVIATION, default=50000): cv.int_range(min=1000, max=200000),
+
             # Heltec V4 FEM pins (optional, only makes sense for SX1262)
             cv.Optional(CONF_FEM_CTRL_PIN): pins.internal_gpio_output_pin_schema,
             cv.Optional(CONF_FEM_EN_PIN): pins.internal_gpio_output_pin_schema,
@@ -268,6 +345,9 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_TARGET_LOG, default=True): cv.boolean,
             # Internal/dev-only raw packet tap. Fixed MQTT topic: wmbus_bridge/raw.
             cv.Optional(CONF_PUBLISH_RADIO_RAW, default=False): cv.boolean,
+            # Publish the measured RSSI of each forwarded meter frame to
+            # wmbus/<topic_name>/rssi/<meter_id>. Disabled by default.
+            cv.Optional(CONF_PUBLISH_RSSI, default=False): cv.boolean,
             # Whitelist of meter IDs allowed on the RAW telegram topic. Accepts
             # either an explicit list, or `true` to reuse highlight_meters so the
             # same IDs are not written twice. Empty (default) forwards every
@@ -353,6 +433,31 @@ def _validate_radio_pins(config):
         if CONF_CC1101_ALLOW_EXPERIMENTAL in config and config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("cc1101_allow_experimental is only valid for radio_type: CC1101.")
 
+    if radio_type == "LR1121":
+        if not config.get(CONF_LR1121_ALLOW_EXPERIMENTAL, False):
+            raise cv.Invalid(
+                "LR1121 support has never been run against hardware - it was written from the datasheet, "
+                "the board schematic and the vendor package. Set lr1121_allow_experimental: true if you "
+                "intend to be the one who finds out. Expect to check tcxo_voltage first (see examples/LR1121/). / "
+                "Obsluga LR1121 nie byla nigdy uruchomiona na sprzecie - powstala z dokumentacji i schematu. "
+                "Ustaw lr1121_allow_experimental: true, jesli chcesz to sprawdzic jako pierwszy."
+            )
+        if CONF_BUSY_PIN not in config:
+            raise cv.Invalid(
+                "LR1121 requires busy_pin. Every command on this chip is framed by the BUSY handshake; "
+                "without that line the driver cannot tell 'not ready' from 'answered'."
+            )
+    else:
+        if config.get(CONF_LR1121_ALLOW_EXPERIMENTAL, False):
+            raise cv.Invalid("lr1121_allow_experimental is only valid for radio_type: LR1121.")
+        for key in (CONF_TCXO_VOLTAGE, CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR, CONF_PAYLOAD_LENGTH,
+                    CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION):
+            # Defaults are always present, so only an explicit non-default value
+            # is worth rejecting. Silently ignoring it would be worse: the user
+            # would think they had tuned something.
+            if key in config and config[key] != BASE_CONFIG_DEFAULTS_LR1121[key]:
+                raise cv.Invalid(f"{key} is only valid for radio_type: LR1121.")
+
     return config
 
 
@@ -426,6 +531,30 @@ async def to_code(config):
             p = await cg.gpio_pin_expression(config[CONF_RF_SW_PIN])
             cg.add(radio_var.set_rf_sw_pin(p))
 
+
+    if config[CONF_RADIO_TYPE] == "LR1121":
+        # The driver compiles only when a config asks for it. Without this flag
+        # transceiver_lr1121.cpp is an empty translation unit, so a board that
+        # works today cannot be broken by a driver nobody has run yet.
+        cg.add_build_flag("-DUSE_WMBUS_RADIO_LR1121")
+
+        LR1121TcxoVoltage = radio_ns.enum("LR1121TcxoVoltage")
+        LR1121RxBandwidth = radio_ns.enum("LR1121RxBandwidth")
+        LR1121PreambleDetector = radio_ns.enum("LR1121PreambleDetector")
+
+        cg.add(radio_var.set_tcxo_voltage(
+            getattr(LR1121TcxoVoltage, LR1121_TCXO_VOLTAGES[config[CONF_TCXO_VOLTAGE]])
+        ))
+        cg.add(radio_var.set_rx_bandwidth(
+            getattr(LR1121RxBandwidth, LR1121_RX_BANDWIDTHS[config[CONF_RX_BANDWIDTH]])
+        ))
+        cg.add(radio_var.set_preamble_detector(
+            getattr(LR1121PreambleDetector, LR1121_PREAMBLE_DETECTORS[config[CONF_PREAMBLE_DETECTOR]])
+        ))
+        cg.add(radio_var.set_payload_length(config[CONF_PAYLOAD_LENGTH]))
+        cg.add(radio_var.set_rx_boosted(config[CONF_RX_BOOSTED]))
+        cg.add(radio_var.set_bitrate(config[CONF_BITRATE]))
+        cg.add(radio_var.set_deviation(config[CONF_DEVIATION]))
 
     if config[CONF_RADIO_TYPE] == "SX1276" and CONF_TCXO_PIN in config:
         tcxo_pin = await cg.gpio_pin_expression(config[CONF_TCXO_PIN])
@@ -564,15 +693,18 @@ async def to_code(config):
     # ("ESP alive") and the ESP-flagged meter badge even when diagnostics are off.
     health_topic = f"wmbus/{topic_name}/health"
     meters_topic = f"wmbus/{topic_name}/meters"
+    rssi_topic = f"wmbus/{topic_name}/rssi"
 
     cg.add(var.set_diag_topic(diag_topic))
     cg.add(var.set_health_topic(health_topic))
     cg.add(var.set_meters_topic(meters_topic))
+    cg.add(var.set_rssi_topic(rssi_topic))
     cg.add(var.set_telegram_topic(telegram_topic))
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
     cg.add(var.set_target_topic(config.get(CONF_TARGET_TOPIC, "")))
     cg.add(var.set_target_log(config.get(CONF_TARGET_LOG, True)))
     cg.add(var.set_publish_radio_raw(config.get(CONF_PUBLISH_RADIO_RAW, False)))
+    cg.add(var.set_publish_rssi(config.get(CONF_PUBLISH_RSSI, False)))
 
     # forward_meters accepts an explicit list, or `true` meaning "reuse
     # highlight_meters" so the same IDs do not have to be written twice.

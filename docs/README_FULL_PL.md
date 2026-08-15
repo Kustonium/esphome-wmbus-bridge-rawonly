@@ -36,6 +36,7 @@ Zalecany schemat:
 
 ```text
 wmbus/<device>/telegram
+wmbus/<device>/rssi/<meter_id>      # tylko przy publish_rssi: true (domyślnie: false)
 wmbus/<device>/diag/summary
 wmbus/<device>/diag/summary_15min
 wmbus/<device>/diag/meter_snapshot

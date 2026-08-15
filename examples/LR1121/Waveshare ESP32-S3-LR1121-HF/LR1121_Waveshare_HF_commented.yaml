@@ -1,0 +1,213 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# =============================================================================
+# Waveshare ESP32-S3-LR1121-HF (SKU 34011) - wM-Bus T1/C1 receiver
+# =============================================================================
+#
+# STATUS: EXPERIMENTAL, AND NOT IN THE USUAL SENSE.
+#
+# The other radios in this project were tuned against meters in a real block of
+# flats. This one has never been powered on. The driver was written from the
+# LR1121 datasheet (Rev 2.1), the board schematic, the RichWave RTC6603SP
+# datasheet and the Waveshare resource package. Every register value below has
+# a documented source; none of them has an oscilloscope behind it.
+#
+# If you are the first person to run this, the two things most likely to be
+# wrong are (1) tcxo_voltage and (2) which antenna socket you plugged into.
+# Both are covered below.
+#
+# -----------------------------------------------------------------------------
+# BOARD
+# -----------------------------------------------------------------------------
+# MCU:     ESP32-S3, 4 MB flash, 2 MB PSRAM
+# Radio:   Semtech LR1121, TCXO on board
+# USB:     none on the board itself - the Kit includes a Type-C adapter and an
+#          FFC ribbon. Without them you cannot flash it.
+#
+# ANTENNA SOCKETS - CHECK THIS BEFORE ANYTHING ELSE.
+# The board carries more than one u.FL socket and they are not interchangeable:
+# one belongs to the ESP32's own WiFi front end, one to the LR1121's 2.4 GHz
+# port, and only one to the sub-GHz path through the RF switch. An antenna in
+# the wrong socket produces perfect silence with no error anywhere - identical
+# to a broken radio. Five minutes with a magnifier saves half a day.
+#
+# PINOUT (Waveshare wiki, src/wavesahre_lora_1121.h - the typo is theirs, and
+# confirmed against the schematic netlist):
+#   RESET GPIO39   MOSI GPIO45   MISO GPIO46   SCK GPIO40
+#   CS    GPIO42   BUSY GPIO41   IRQ  GPIO38
+#
+# GPIO45 and GPIO46 are ESP32-S3 strapping pins (VDD_SPI and boot mode). This
+# is expected to be harmless because the LR1121 releases MISO while CS is high
+# (datasheet 3.6.3), but if the board ever refuses to boot, suspect these first.
+# =============================================================================
+
+substitutions:
+  devicename: wmbus-lr1121
+  friendly_name: "wMBus Bridge LR1121"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+
+esp32:
+  variant: esp32s3
+  # 4 MB, with no 8/16 MB variant of this board. ESPHome with OTA fits, but
+  # there is less headroom than on an N16R8 - if a build overflows, the
+  # partition layout is the first thing to look at, not the component.
+  flash_size: 4MB
+  cpu_frequency: 160MHz
+  framework:
+    # esp-idf, not arduino. The component refuses arduino unless you opt in,
+    # because nothing here is built or tested against it.
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  # REQUIRED on this board, and the first thing to suspect if it comes up mute.
+  #
+  # The USB-C runs straight into the ESP32-S3's own USB pins (GPIO19/GPIO20,
+  # chip pins 25/26, through series resistors to the J3 header). There is no
+  # CP2102/CH340 on this board. ESPHome's default logger UART goes to pins that
+  # are not brought out here, so the default config produces a board that boots,
+  # works, and says nothing - which looks exactly like a board that is dead.
+  #
+  # Confirmed twice: the schematic netlist, and the vendor's own Meshtastic
+  # platformio.ini in the same package, which sets ARDUINO_USB_MODE=1 plus
+  # ARDUINO_USB_CDC_ON_BOOT=1 for the same reason.
+  #
+  # If USB_SERIAL_JTAG turns out not to enumerate, USB_CDC is the other
+  # peripheral sharing those two pins - try that before suspecting hardware.
+  hardware_uart: USB_SERIAL_JTAG
+  # Raise to debug while bringing the board up: the driver logs the chip
+  # version and the decoded boot errors, which is where a wrong tcxo_voltage
+  # shows up.
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  port: 1883
+  skip_cert_cn_check: true
+
+api:
+ota:
+  - platform: esphome
+time:
+  - platform: homeassistant
+
+spi:
+  clk_pin: GPIO40
+  miso_pin: GPIO46
+  mosi_pin: GPIO45
+
+wmbus_radio:
+  radio_type: LR1121
+
+  # Deliberate speed bump. Same idea as cc1101_allow_experimental: an unverified
+  # radio should not be reachable by copying a config off a forum.
+  lr1121_allow_experimental: true
+
+  cs_pin: GPIO42
+  reset_pin: GPIO39
+  irq_pin:
+    number: GPIO38
+    mode: input
+
+  # Mandatory on this chip, unlike SX1276. Every command is framed by the BUSY
+  # handshake: NSS falling raises BUSY, and BUSY falling means "ready for the
+  # next one". Reads are two transactions with a BUSY wait between them. Without
+  # this pin the driver cannot tell "not ready yet" from "answered".
+  busy_pin: GPIO41
+
+  # both = alternate the C-mode sync bytes 3:1 in favour of Format A (0x3D)
+  # while still catching Format B (0xCD). t1 pins it to 0x3D.
+  listen_mode: both  # pinned: the RF setup this board was validated with
+
+  # ---------------------------------------------------------------------------
+  # TCXO SUPPLY - THE OPEN QUESTION ON THIS BOARD
+  # ---------------------------------------------------------------------------
+  # The vendor package contradicts itself. All thirteen C example files set
+  # 3.0 V; the Meshtastic variant in the same package sets 1.8 V. Neither is a
+  # measurement of the part actually fitted: the 3.0 V value is traceable to
+  # Semtech's reference shield source (which fills the field even for a shield
+  # declared as having no TCXO at all), and the 1.8 V file carries comments
+  # about a different board entirely. The schematic labels Y2 only as
+  # "SMD TCXO 32 MHz (2.0x1.6)".
+  #
+  # The default here is the LOW value, because the failure modes are not
+  # symmetric:
+  #   too low  -> the oscillator does not start. The chip says so:
+  #               HF_XOSC_START appears in the boot error log. Loud, harmless,
+  #               fixable by changing this line.
+  #   too high -> it starts anyway, out of spec, silently, and you find out
+  #               months later as frequency drift.
+  #
+  # PROCEDURE: boot with 1.8v and read the log. If HF_XOSC_START is absent, the
+  # part is happy at 1.8 V and you are done. If it appears, change this to
+  # "3.0v" and reflash. No meter needed, no multimeter needed.
+  tcxo_voltage: "1.8v"  # pinned: the RF setup this board was validated with
+
+  # ---------------------------------------------------------------------------
+  # RF PARAMETERS
+  # ---------------------------------------------------------------------------
+  # Defaults are wM-Bus T1/C1 and should not need touching. They are options
+  # rather than constants on purpose: the measurements behind them come from one
+  # dense environment, and someone with three meters in a detached house is in a
+  # different situation. Hardcoding a neighbour's optimum is exactly the mistake
+  # this project criticises elsewhere.
+
+  # 868.950 MHz for T1/C1. S1 defaults to 868.300 when listen_mode is s1.
+  frequency: 868.950
+
+  # 100 kb/s chip rate, 50 kHz deviation -> modulation index 1.0.
+  bitrate: 100000  # pinned: the RF setup this board was validated with
+  deviation: 50000  # pinned: the RF setup this board was validated with
+
+  # Receiver bandwidth, double sideband. The signal needs 2*fdev + bitrate =
+  # 200 kHz, so 234300 is the tightest usable step and lets in the least noise.
+  # Widen to 312000 only if meters are missed in a way that looks like they sit
+  # off channel - the spectrum, not the guess, should decide that.
+  rx_bandwidth: "234300"  # pinned: the RF setup this board was validated with
+
+  # Preamble detector length in bits. Shorter catches weaker signals and fires
+  # more often on noise; longer is the opposite. 16 is the compromise.
+  preamble_detector: "16"  # pinned: the RF setup this board was validated with
+
+  # Fixed capture length in bytes.
+  #
+  # The packet engine cannot use variable length here: in T-mode the L field is
+  # itself 3-out-of-6 encoded, so the radio would read a nonsense length off the
+  # air. It captures a fixed run instead and the host trims the tail - which
+  # suits this project's architecture, where decoding happens off the device
+  # anyway. Raise this if long telegrams come out truncated.
+  payload_length: 128  # pinned: the RF setup this board was validated with
+
+  # +2 dB sensitivity for about 2 mA. On USB power there is no reason to say no.
+  rx_boosted: true  # pinned: the RF setup this board was validated with
+
+  topic_name: wmbus
+
+  # EN: Publish the last measured RSSI for each forwarded meter as a retained
+  #     integer at wmbus/<topic_name>/rssi/<meter_id>. Frames without a real
+  #     RSSI measurement are skipped, so no placeholder value is ever sent.
+  #     The wMBus MQTT Bridge add-on turns it into one signal-strength entity
+  #     per receiving board, which is how two boards can be compared.
+  # PL: Publikuj ostatnie zmierzone RSSI każdego przekazanego licznika jako
+  #     zachowaną liczbę całkowitą na wmbus/<topic_name>/rssi/<meter_id>.
+  #     Ramki bez rzeczywistego pomiaru są pomijane, więc żadna wartość
+  #     zastępcza nie jest wysyłana. Dodatek wMBus MQTT Bridge robi z tego
+  #     osobną encję siły sygnału dla każdej płytki, co pozwala je porównać.
+  # publish_rssi: true  # default: false

@@ -36,6 +36,7 @@ The recommended topic scheme is:
 
 ```text
 wmbus/<device>/telegram
+wmbus/<device>/rssi/<meter_id>      # only with publish_rssi: true (default: false)
 wmbus/<device>/diag/summary
 wmbus/<device>/diag/summary_15min
 wmbus/<device>/diag/meter_snapshot
