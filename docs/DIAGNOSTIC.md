@@ -167,6 +167,8 @@ What this means when reading a snapshot:
 
 The distribution of these values across meters is a diagnostic tool in its own right - see TROUBLESHOOTING, the section on a narrow RSSI band.
 
+These fields live inside the diagnostic payloads and therefore require a diagnostic mode. `publish_rssi` is a separate, independent option: it publishes the level of each meter's last frame to `wmbus/<topic_name>/rssi/<meter_id>` regardless of `diagnostic_mode`, as a plain integer, and stays silent for frames with no measurement instead of sending a sentinel. Use the diagnostic fields to read the RF picture of the board; use `publish_rssi` to get one signal-strength entity per meter and per board in Home Assistant. See CONFIG_REFERENCE_MINIMAL for the full description.
+
 ## `listen_mode_filter_after_parse`
 
 Default:

@@ -35,3 +35,4 @@ Ten katalog zawiera dokumentację projektu. Główny `README.md` w root jest tyl
 
 - [`README_FULL.md`](README_FULL.md) / [`README_FULL_PL.md`](README_FULL_PL.md)
 - [`BENCHMARKS.md`](BENCHMARKS.md) / [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)
+- [`S1_HELTEC_V4_TEST_2026-08-14_PL.md`](S1_HELTEC_V4_TEST_2026-08-14_PL.md) — wnioski z testów S1 Heltec V4 / SX1262

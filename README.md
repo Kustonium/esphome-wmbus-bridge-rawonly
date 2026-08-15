@@ -89,6 +89,7 @@ Recommended topic scheme:
 
 ```text
 wmbus/<device>/telegram
+wmbus/<device>/rssi/<meter_id>      # only with publish_rssi: true (default: false)
 wmbus/<device>/diag/summary
 wmbus/<device>/diag/summary_15min
 wmbus/<device>/diag/meter_snapshot
@@ -248,6 +249,7 @@ Zalecany schemat topiców:
 
 ```text
 wmbus/<device>/telegram
+wmbus/<device>/rssi/<meter_id>      # tylko przy publish_rssi: true (domyślnie: false)
 wmbus/<device>/diag/summary
 wmbus/<device>/diag/summary_15min
 wmbus/<device>/diag/meter_snapshot

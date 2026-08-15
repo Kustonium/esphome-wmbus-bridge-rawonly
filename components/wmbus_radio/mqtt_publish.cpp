@@ -91,6 +91,16 @@ void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter
   hex = frame.as_hex();
   if (want_all) {
     mqtt->publish(this->telegram_topic_, hex);
+
+    // Keep the telegram payload contract unchanged. RSSI is a separate,
+    // retained scalar and is published only when this frame carries a real
+    // radio measurement (-126/-127 are sentinels, not signal levels).
+    const int rssi_dbm = (int) frame.rssi();
+    if (this->publish_rssi_ && !this->rssi_topic_.empty() && id_str != nullptr && id_str[0] != '\0' &&
+        rssi_dbm >= -125 && rssi_dbm <= -1) {
+      const std::string topic = this->rssi_topic_ + "/" + id_str;
+      mqtt->publish(topic, std::to_string(rssi_dbm), static_cast<uint8_t>(0), true);
+    }
   }
 
   if (want_target) {

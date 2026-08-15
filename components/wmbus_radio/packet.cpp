@@ -459,8 +459,10 @@ static inline uint8_t bit_at_msb_(const std::vector<uint8_t> &raw, size_t bit_in
 // polarity=true : 01 -> 1, 10 -> 0
 static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool polarity,
                                       std::vector<uint8_t> &decoded,
-                                      uint16_t &symbols_total, uint16_t &symbols_invalid) {
+                                      uint16_t &symbols_total, uint16_t &symbols_invalid,
+                                      std::vector<uint16_t> &erasures) {
   decoded.clear();
+  erasures.clear();
   symbols_total = 0;
   symbols_invalid = 0;
   const size_t pairs = (raw.size() * 8U) / 2U;
@@ -482,6 +484,7 @@ static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool pola
       bit = polarity ? 0 : 1;
     } else {
       symbols_invalid++;
+      if (i <= UINT16_MAX) erasures.push_back((uint16_t) i);
       bit = 0;
     }
 
@@ -496,6 +499,90 @@ static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool pola
 
   // Ignore incomplete trailing byte; radio tail may stop mid-byte in raw-drain diagnostics.
   return !decoded.empty();
+}
+
+// Maximum ambiguity accepted inside one independently protected Format-A
+// block. Eight erasures cost 256 CRC checks; anything larger is deliberately
+// left as a normal CRC failure rather than allowing exponential work on the
+// receiver path.
+static constexpr size_t S1_MAX_ERASURES_PER_BLOCK = 8;
+
+static inline void set_msb_bit_(std::vector<uint8_t> &data, size_t bit, bool value) {
+  const uint8_t mask = (uint8_t) (0x80U >> (bit & 7U));
+  if (value)
+    data[bit >> 3U] |= mask;
+  else
+    data[bit >> 3U] &= (uint8_t) ~mask;
+}
+
+static bool format_a_block_crc_ok_(const std::vector<uint8_t> &data, size_t start,
+                                   size_t data_len, size_t crc_pos) {
+  if (crc_pos + 1U >= data.size()) return false;
+  const uint16_t calculated = wmbus_common::crc16_en13757(data.data() + start, data_len);
+  const uint16_t expected = (uint16_t) (((uint16_t) data[crc_pos] << 8U) | data[crc_pos + 1U]);
+  return calculated == expected;
+}
+
+struct S1ErasureRecovery {
+  bool ok{false};
+  uint16_t resolved{0};
+  uint16_t trials{0};
+  uint8_t worst_block{0};
+};
+
+// Resolve invalid Manchester pairs against each Format-A CRC independently.
+// The normal decoder substitutes zero at an invalid pair. Here that zero is
+// treated only as the starting value: every assignment for the known bit
+// positions in one block is tried, and the block is accepted only when exactly
+// one assignment satisfies its CRC. CRC bytes are part of the protected search
+// window as they can contain erasures too.
+static S1ErasureRecovery recover_s1_erasures_format_a_(std::vector<uint8_t> &data,
+                                                       const std::vector<uint16_t> &erasures) {
+  S1ErasureRecovery result;
+  if (data.size() < 12 || erasures.empty()) return result;
+
+  size_t start = 0;
+  while (start < data.size()) {
+    const size_t data_len = (start == 0) ? 10U : std::min<size_t>(16U, data.size() - start - 2U);
+    const size_t crc_pos = start + data_len;
+    if (data_len == 0 || crc_pos + 1U >= data.size()) return result;
+    const size_t block_end_bit = (crc_pos + 2U) * 8U;
+    const size_t block_start_bit = start * 8U;
+
+    std::vector<uint16_t> block_erasures;
+    for (uint16_t bit : erasures) {
+      if ((size_t) bit >= block_start_bit && (size_t) bit < block_end_bit)
+        block_erasures.push_back(bit);
+    }
+    result.resolved = (uint16_t) (result.resolved + block_erasures.size());
+    result.worst_block = std::max<uint8_t>(result.worst_block, (uint8_t) block_erasures.size());
+
+    if (!format_a_block_crc_ok_(data, start, data_len, crc_pos)) {
+      if (block_erasures.empty() || block_erasures.size() > S1_MAX_ERASURES_PER_BLOCK)
+        return result;
+
+      const std::vector<uint8_t> original(data.begin() + start, data.begin() + crc_pos + 2U);
+      std::vector<uint8_t> unique;
+      unsigned solutions = 0;
+      const unsigned combinations = 1U << block_erasures.size();
+      for (unsigned assignment = 0; assignment < combinations; assignment++) {
+        std::copy(original.begin(), original.end(), data.begin() + start);
+        for (size_t i = 0; i < block_erasures.size(); i++)
+          set_msb_bit_(data, block_erasures[i], ((assignment >> i) & 1U) != 0);
+        result.trials++;
+        if (!format_a_block_crc_ok_(data, start, data_len, crc_pos)) continue;
+        unique.assign(data.begin() + start, data.begin() + crc_pos + 2U);
+        if (++solutions > 1) break;
+      }
+      if (solutions != 1) return result;
+      std::copy(unique.begin(), unique.end(), data.begin() + start);
+    }
+
+    start = crc_pos + 2U;
+  }
+
+  result.ok = result.resolved > 0;
+  return result;
 }
 
 static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
@@ -518,8 +605,9 @@ static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
     out.raw_got_len = raw.size();
 
     std::vector<uint8_t> decoded;
+    std::vector<uint16_t> erasures;
     uint16_t total = 0, invalid = 0;
-    if (!manchester_decode_s_mode_(raw, pol != 0, decoded, total, invalid) || decoded.size() < 2) {
+    if (!manchester_decode_s_mode_(raw, pol != 0, decoded, total, invalid, erasures) || decoded.size() < 2) {
       char detail[160];
       snprintf(detail, sizeof(detail), "polarity=%d symbols_total=%u symbols_invalid=%u raw_len=%u",
                pol, (unsigned) total, (unsigned) invalid, (unsigned) raw.size());
@@ -562,10 +650,18 @@ static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
 
     wmbus_common::DLLCRCResult crc_diag;
     if (!wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
-      std::string detail = dll_crc_detail_(crc_diag) + " polarity=" + std::to_string(pol) +
-                           " symbols_invalid=" + std::to_string((unsigned) invalid);
-      set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", detail);
-      continue;
+      const auto recovery = recover_s1_erasures_format_a_(out.data, erasures);
+      if (!recovery.ok || !wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
+        std::string detail = dll_crc_detail_(crc_diag) + " polarity=" + std::to_string(pol) +
+                             " symbols_invalid=" + std::to_string((unsigned) invalid) +
+                             " erasure_worst=" + std::to_string((unsigned) recovery.worst_block) +
+                             " erasure_trials=" + std::to_string((unsigned) recovery.trials);
+        set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", detail);
+        continue;
+      }
+      ESP_LOGI(TAG, "S1 erasure recovery: resolved=%u worst_block=%u trials=%u polarity=%d",
+               (unsigned) recovery.resolved, (unsigned) recovery.worst_block,
+               (unsigned) recovery.trials, pol);
     }
 
     out.dll_crc_removed = crc_diag.removed_bytes;

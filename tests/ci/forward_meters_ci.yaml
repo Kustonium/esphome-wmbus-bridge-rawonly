@@ -78,6 +78,8 @@ wmbus_radio:
       - "00089907"
       - "0x417F0666"
     forward_meters: true
+    # Exercise the opt-in per-meter RSSI publishing code path in a real build.
+    publish_rssi: true
 
   # Explicit whitelist, independent of highlight_meters.
   - topic_name: ci_explicit

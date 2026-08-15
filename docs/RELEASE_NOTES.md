@@ -1,3 +1,81 @@
+# Feature: opt-in per-meter RSSI, and examples that state their defaults
+
+## EN
+
+- New option `publish_rssi` (**default `false`**). With it on, the board publishes the level of each forwarded meter's last frame as a retained integer to `wmbus/<topic_name>/rssi/<meter_id>`. Nothing changes for anyone who leaves it off — the topic simply never appears.
+- Only frames with a real measurement are published. A frame the radio gave no level for is skipped rather than sent as a sentinel, so a consumer never has to guess whether `0`, `1` or `-127` means "no signal" or "no reading".
+- The value is the one the driver already latched for that frame (SX1276 at the first byte, SX1262/LR1121 at sync word, CC1101 on read). Nothing new is measured, and the level is not re-read after RX_DONE, which would report an empty channel.
+- `forward_meters` applies as it does to telegrams: a meter that is filtered out publishes no RSSI either.
+- Independent of `diagnostic_mode`. The `last_rssi` / `win_avg_rssi` fields inside the diagnostic payloads are unchanged and remain the tool for reading the board's RF picture.
+- Paired with the wMBus MQTT Bridge add-on, each receiving board produces its own signal-strength entity for the same meter, which is what makes two boards comparable.
+- All `*_commented.yaml` examples now annotate every optional setting with `# default: <value>`, and `tests/ci/check_example_defaults.py` (wired into CI) holds those annotations and the `Domyślnie` column of `CONFIG_REFERENCE_MINIMAL.md` to the schema. A default changed in `__init__.py` now fails the build instead of quietly outdating ten files.
+- `CONFIG_REFERENCE_MINIMAL.md` gained the sixteen options that had a schema default but no entry, plus a section on what per-meter RSSI does and does not tell you.
+
+## PL
+
+- Nowa opcja `publish_rssi` (**domyślnie `false`**). Po włączeniu płytka publikuje poziom ostatniej ramki każdego przekazywanego licznika jako zachowaną liczbę całkowitą na `wmbus/<topic_name>/rssi/<meter_id>`. Kto jej nie włączy, nie zobaczy żadnej zmiany — temat po prostu nie powstaje.
+- Publikowane są wyłącznie ramki z rzeczywistym pomiarem. Ramka, dla której radio nie oddało poziomu, jest pomijana zamiast wysyłana jako znacznik, więc odbiorca nie musi zgadywać, czy `0`, `1` albo `-127` znaczy „brak sygnału", czy „brak odczytu".
+- Wartość to ta, którą sterownik zatrzasnął dla tej ramki (SX1276 przy pierwszym bajcie, SX1262/LR1121 na sync-word, CC1101 przy odczycie). Nic nie jest liczone od nowa i poziom nie jest doczytywany po RX_DONE, bo wtedy mierzyłby pusty kanał.
+- `forward_meters` obowiązuje tak samo jak dla telegramów: odfiltrowany licznik nie ma też publikowanego RSSI.
+- Niezależne od `diagnostic_mode`. Pola `last_rssi` / `win_avg_rssi` w payloadach diagnostycznych zostają bez zmian i dalej służą do czytania obrazu RF płytki.
+- W parze z dodatkiem wMBus MQTT Bridge każda płytka odbiorcza daje własną encję siły sygnału dla tego samego licznika — i to jest sens tej opcji.
+- Wszystkie przykłady `*_commented.yaml` mają teraz przy każdej opcjonalnej pozycji adnotację `# default: <wartość>`, a `tests/ci/check_example_defaults.py` (wpięty w CI) pilnuje zgodności tych adnotacji oraz kolumny `Domyślnie` w `CONFIG_REFERENCE_MINIMAL.md` ze schematem. Zmiana defaultu w `__init__.py` wywala build zamiast po cichu unieważniać dziesięć plików.
+- `CONFIG_REFERENCE_MINIMAL.md` dostał szesnaście opcji, które miały default w schemacie, a nie miały wpisu, oraz sekcję o tym, co RSSI per licznik mówi, a czego nie.
+
+# Fix: recover marginal S1 frames from Manchester erasures
+
+## EN
+
+- S1 now retains invalid Manchester-pair positions. When ordinary Format-A CRC validation fails, it tries both bit values independently per CRC block and accepts only a unique CRC-valid assignment.
+- The search is capped at eight erasures per block (256 assignments). Larger, unsolved, or ambiguous blocks remain `dll_crc_failed`; T1 and C1 are unchanged.
+- Measured on the two real 85-byte captures from 2026-08-14: maps `[3,1,0,3,0,0]` and `[2,1,0,2,2,3]` were restored byte-for-byte to the transmitted frame in 16 and 12 CRC trials.
+- Host regressions include multi-block recovery, rejection above the cap, and both real RAW captures.
+
+## PL
+
+- S1 zachowuje teraz pozycje niepoprawnych par Manchester. Gdy zwykła walidacja CRC formatu A zawiedzie, sprawdza obie wartości bitu niezależnie w każdym bloku CRC i przyjmuje wyłącznie jednoznaczne rozwiązanie zgodne z CRC.
+- Wyszukiwanie ma limit ośmiu erasure na blok (256 podstawień). Większe, nierozwiązywalne albo niejednoznaczne bloki pozostają `dll_crc_failed`; T1 i C1 są bez zmian.
+- Pomiar na dwóch rzeczywistych 85-bajtowych przechwyceniach z 2026-08-14: mapy `[3,1,0,3,0,0]` i `[2,1,0,2,2,3]` zostały odtworzone bajt w bajt do nadanej ramki odpowiednio w 16 i 12 próbach CRC.
+- Regresje hosta obejmują korekcję przez wiele bloków, odrzucenie powyżej limitu i oba rzeczywiste RAW.
+
+# Diagnostics: how the invalid pairs of an S1 frame spread over its CRC blocks
+
+## EN
+
+### Added
+- Under `diagnostic_verbose`, every S1 frame candidate the header search reports now also gets an erasure map: `S1 erasure map 1: 6 erasures in 776/776 frame pairs, per CRC block [1,1,1,1,1,1], worst block 1 (2^1 tries)`.
+
+### Why
+- An invalid Manchester pair (`00`/`11`) is a known error *position*, not an unknown bit. The decoder substitutes a zero and moves on, throwing that information away. Resolving one such position against the CRC means trying both values, and format A checks each block on its own — so the cost for a frame is 2^(worst block), never 2^(total). Six erasures spread one per block are six two-try problems; the same six inside one block are 64 tries. Which shape real receptions have is unknown, and the total that was already being logged cannot tell them apart. This measures it before anything is decided about the decoder.
+- Counted over the frame window only. `symbols_invalid` on the decode path is counted over the whole capture, so at the 512-byte cap it mostly describes the noise trailing the frame: 246 bytes of noise contribute roughly 492 invalid pairs by themselves.
+
+### Notes
+- Printed for every reported candidate, not for the top one alone. Candidates are ranked by invalid pairs per checked pair, so a coincidence over a short implied frame can outrank a real header; the erasure map is what separates them.
+- Verbose-only, and only on the SX1262 raw-capture path, which is a search over up to 512 chip offsets already. Nothing on a normal receive path changed.
+- The block walk was cross-checked against `s1_raw_len_from_l_` for every L-field value, and the bucketing exercised on synthetic Manchester captures with erasures at known byte positions: block boundaries, six clustered in one block, a frame starting away from chip 0, and a capture ending mid-frame.
+
+### Not verified
+- Nothing about decoding changed, and nothing here says erasure resolution would recover a frame. That is the open question this log line exists to answer. The expectation that it could be worth a few dB is arithmetic over substitution counts, not a measurement, and it collapses entirely if frames turn out to arrive either clean or with dozens of erasures and nothing in between.
+- Not yet run against a live capture.
+
+## PL
+
+### Dodano
+- Przy `diagnostic_verbose` każdy kandydat na ramkę S1 zgłoszony przez wyszukiwanie nagłówka dostaje teraz mapę erasure: `S1 erasure map 1: 6 erasures in 776/776 frame pairs, per CRC block [1,1,1,1,1,1], worst block 1 (2^1 tries)`.
+
+### Dlaczego
+- Niepoprawna para Manchester (`00`/`11`) to znana **pozycja** błędu, a nie nieznany bit. Dekoder podstawia zero i idzie dalej, wyrzucając tę informację. Rozstrzygnięcie takiej pozycji przeciw CRC oznacza sprawdzenie obu wartości, a format A sprawdza każdy blok osobno — koszt ramki to więc 2^(najgorszy blok), nigdy 2^(suma). Sześć erasure po jednym na blok to sześć problemów po dwie próby; te same sześć w jednym bloku to 64 próby. Nie wiadomo, którą postać mają realne odbiory, a logowana dotąd suma nie odróżnia jednej od drugiej. To jest pomiar przed decyzją o czymkolwiek w dekoderze.
+- Liczone wyłącznie w oknie ramki. `symbols_invalid` z toru dekodowania liczy się po całym przechwyceniu, więc przy limicie 512 bajtów opisuje głównie szum za ramką: same 246 bajtów szumu daje około 492 niepoprawnych par.
+
+### Uwagi
+- Wypisywane dla każdego zgłoszonego kandydata, nie tylko dla pierwszego. Kandydaci są szeregowani po liczbie niepoprawnych par na parę sprawdzoną, więc przypadkowe trafienie na krótkiej domniemanej ramce potrafi wyprzedzić prawdziwy nagłówek; mapa erasure jest tym, co je rozdziela.
+- Tylko w trybie verbose i tylko na torze surowego przechwytywania SX1262, który i tak jest przeszukiwaniem do 512 pozycji chipowych. W torze normalnego odbioru nic się nie zmienia.
+- Wyliczanie bloków zostało porównane z `s1_raw_len_from_l_` dla każdej wartości pola L, a przydział erasure do bloków przetestowany na syntetycznych przechwyceniach Manchester z błędami na znanych pozycjach: granice bloków, sześć skupionych w jednym bloku, ramka zaczynająca się nie od chipu 0 oraz przechwycenie urwane w środku ramki.
+
+### Czego nie zweryfikowano
+- Nic w dekodowaniu się nie zmieniło i nic tutaj nie twierdzi, że rozstrzyganie erasure odzyskałoby ramkę. To jest właśnie otwarte pytanie, na które ta linia logu ma odpowiedzieć. Oczekiwanie, że może to być warte kilka dB, jest arytmetyką na liczbie podstawień, nie pomiarem, i upada w całości, jeśli okaże się, że ramki przychodzą albo czyste, albo z kilkudziesięcioma erasure i nie ma nic pomiędzy.
+- Nie uruchomione jeszcze na żywym przechwyceniu.
+
 # Fix: a one-tick notify wait could expire before it had waited
 
 ## EN

@@ -221,6 +221,11 @@ void Radio::setup() {
     ESP_LOGI(TAG, "Internal radio RAW tap enabled / wlaczono wewnetrzny RAW tap: wmbus_bridge/raw");
   }
 
+  if (this->publish_rssi_) {
+    ESP_LOGI(TAG, "Per-meter RSSI publishing enabled / wlaczono publikacje RSSI per licznik: %s/<meter_id>",
+             this->rssi_topic_.c_str());
+  }
+
   // Both lists, or a config listing only non-BCD meters would skip the window
   // clamp below and log nothing.
   if (!this->highlight_meter_ids_.empty() || !this->highlight_meter_raw_ids_.empty()) {

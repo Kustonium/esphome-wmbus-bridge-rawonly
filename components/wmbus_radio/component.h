@@ -36,6 +36,7 @@ public:
   // the ESP-flagged meter badge from these, even when diagnostics are off.
   void set_health_topic(const std::string &topic) { this->health_topic_ = topic; }
   void set_meters_topic(const std::string &topic) { this->meters_topic_ = topic; }
+  void set_rssi_topic(const std::string &topic) { this->rssi_topic_ = topic; }
 
   // Optional built-in RAW forwarding to MQTT.
   void set_telegram_topic(const std::string &topic) { this->telegram_topic_ = topic; }
@@ -43,6 +44,7 @@ public:
   void set_target_topic(const std::string &topic) { this->target_topic_ = topic; }
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
   void set_publish_radio_raw(bool enabled) { this->publish_radio_raw_ = enabled; }
+  void set_publish_rssi(bool enabled) { this->publish_rssi_ = enabled; }
 
   // Optional whitelist limiting which meters reach telegram_topic. Meters are
   // provided as a CSV string in YAML (list is joined in python). An empty list
@@ -195,12 +197,14 @@ protected:
 
   // Optional RAW forwarding / target forwarding.
   std::string telegram_topic_{};
+  std::string rssi_topic_{};
   std::string target_meter_id_str_{};
   uint32_t target_meter_id_{0};
   bool target_meter_enabled_{false};
   std::string target_topic_{};
   bool target_log_{true};
   bool publish_radio_raw_{false};
+  bool publish_rssi_{false};
 
   // Forwarding whitelist (sorted + deduplicated by the CSV parser, so lookups
   // can use binary search). Both empty means "forward everything".

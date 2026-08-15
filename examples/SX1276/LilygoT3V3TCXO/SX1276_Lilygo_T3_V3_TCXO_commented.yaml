@@ -116,20 +116,32 @@ wmbus_radio:
   #     both oznacza tylko T1/C1. S1 jest osobny i nie łączy się z T1/C1.
   #     Domyślna częstotliwość: T1/C1/both = 868.950 MHz, S1 = 868.300 MHz.
   listen_mode: t1
-  listen_mode_filter_after_parse: false
+  # listen_mode_filter_after_parse: false  # default: false
 
   # EN: adaptive is the recommended default for dense RF environments on SX1276.
   # PL: adaptive to zalecany domyślny tryb dla SX1276 w gęstym eterze.
-  sx1276_busy_ether_mode: adaptive
+  # sx1276_busy_ether_mode: adaptive  # default: adaptive
 
   # EN: Diagnostic preset. Normal mode gives summary + 15min summary + highlighted meter snapshots.
   # PL: Preset diagnostyczny. Normal daje summary + summary 15 min + snapshot wyróżnionych liczników.
   diagnostic_mode: normal
-  diagnostic_summary_interval: 60s
+  # diagnostic_summary_interval: 60s  # default: 60s
+
+  # EN: Publish the last measured RSSI for each forwarded meter as a retained
+  #     integer at wmbus/<topic_name>/rssi/<meter_id>. Frames without a real
+  #     RSSI measurement are skipped, so no placeholder value is ever sent.
+  #     The wMBus MQTT Bridge add-on turns it into one signal-strength entity
+  #     per receiving board, which is how two boards can be compared.
+  # PL: Publikuj ostatnie zmierzone RSSI każdego przekazanego licznika jako
+  #     zachowaną liczbę całkowitą na wmbus/<topic_name>/rssi/<meter_id>.
+  #     Ramki bez rzeczywistego pomiaru są pomijane, więc żadna wartość
+  #     zastępcza nie jest wysyłana. Dodatek wMBus MQTT Bridge robi z tego
+  #     osobną encję siły sygnału dla każdej płytki, co pozwala je porównać.
+  # publish_rssi: true  # default: false
 
   # EN: Optional selected meters for meter_snapshot in diagnostic_mode: normal.
   # PL: Opcjonalne wyróżnione liczniki do meter_snapshot w diagnostic_mode: normal.
-  # highlight_meters:
+  # highlight_meters:  # default: []
   #   - "00089907"
   #   - "03534159"
 
@@ -141,6 +153,6 @@ wmbus_radio:
   #     Reszta jest odrzucana na ESP, o co chodzi w gęstej zabudowie.
   #     Zamiast listy można dać `forward_meters: true` i użyć listy z highlight_meters.
   #     ID szesnastkowe w cudzysłowie, inaczej YAML zamieni 0x417F0666 na 1098843750.
-  # forward_meters:
+  # forward_meters:  # default: []
   #   - "00089907"
   #   - "0x417F0666"
