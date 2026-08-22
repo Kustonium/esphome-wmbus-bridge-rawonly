@@ -3,25 +3,34 @@
 # Waveshare ESP32-S3-LR1121-HF (SKU 34011) - wM-Bus T1/C1 receiver
 # =============================================================================
 #
-# STATUS: EXPERIMENTAL, AND NOT IN THE USUAL SENSE.
+# STATUS: RECEIVING, AS OF 2026-08-19. Still young, no longer theoretical.
 #
-# The other radios in this project were tuned against meters in a real block of
-# flats. This one has never been powered on. The driver was written from the
-# LR1121 datasheet (Rev 2.1), the board schematic, the RichWave RTC6603SP
-# datasheet and the Waveshare resource package. Every register value below has
-# a documented source; none of them has an oscilloscope behind it.
+# The driver was written from the LR1121 datasheet (Rev 2.1), the board
+# schematic, the RichWave RTC6603SP datasheet and the Waveshare resource
+# package, with no board on the desk. It has since decoded real telegrams from
+# real meters on this exact hardware: BMT and NES devices, 17 good frames per
+# minute, RSSI -57..-96 dBm, no truncations.
 #
-# If you are the first person to run this, the two things most likely to be
-# wrong are (1) tcxo_voltage and (2) which antenna socket you plugged into.
-# Both are covered below.
+# What that does and does not mean:
+#   * The RF chain works end to end - switch table, calibration, GFSK setup,
+#     RSSI, the fixed-length capture and the 3-of-6 host decode.
+#   * C1 works too: one C1 A frame decoded alongside the T1 traffic.
+#   * S1 works as well - 85 bytes decoded from a bench transmitter, no streaming
+#     capture needed. Details at listen_mode below.
+#   * It has NOT run for days, S1 sensitivity at the margin is unmeasured, and
+#     no attempt has been made to compare its yield against an SX1262 in the
+#     same position.
+#
+# Two things that will still bite a newcomer: (1) tcxo_voltage and (2) which
+# antenna socket you plugged into. Both are covered below.
 #
 # -----------------------------------------------------------------------------
 # BOARD
 # -----------------------------------------------------------------------------
 # MCU:     ESP32-S3, 4 MB flash, 2 MB PSRAM
 # Radio:   Semtech LR1121, TCXO on board
-# USB:     none on the board itself - the Kit includes a Type-C adapter and an
-#          FFC ribbon. Without them you cannot flash it.
+# USB:     Type-C, wired straight to the ESP32-S3 native USB pins. No serial
+#          bridge chip - see the logger note below or the board stays mute.
 #
 # ANTENNA SOCKETS - CHECK THIS BEFORE ANYTHING ELSE.
 # The board carries more than one u.FL socket and they are not interchangeable:
@@ -103,10 +112,47 @@ mqtt:
   skip_cert_cn_check: true
 
 api:
+  # Keep the Native API available (Home Assistant, esphome logs, OTA over API)
+  # but do NOT let it reboot the board.
+  #
+  # Why: ESPHome defaults to reboot_timeout: 15min, and that timer restarts the
+  # device when no Native API CLIENT is connected. A board that only publishes
+  # to MQTT usually has no such client, so it reboots every 15 minutes forever.
+  # That was measured here on 2026-08-20/21: the RX metadata showed 51 distinct
+  # boot_id values per board in a single night, median 900 s between starts,
+  # while Home Assistant had no ESPHome device added at all. After setting 0s
+  # the same boards ran 14.1 h with one boot_id and a continuously rising seq.
+  #
+  # This is NOT mqtt.reboot_timeout - that one reacts to losing the broker and
+  # is a separate decision. Leave it alone unless you have measured a broker
+  # problem.
+  reboot_timeout: 0s
 ota:
   - platform: esphome
 time:
   - platform: homeassistant
+
+# Device telemetry, same block the XIAO example carries. These become Home
+# Assistant entities, which is what makes them reach InfluxDB and Grafana - the
+# wmbus diagnostics themselves go out over MQTT topics instead
+# (wmbus/<topic_name>/diag/...), so the two feeds are separate on purpose.
+#
+# Note for InfluxDB: the measurement name comes from the entity's unit, so
+# Uptime lands in `s` and WiFi RSSI in `dBm`. The two text_sensors have no unit
+# and fall back to entity_id - fine for a status panel, useless for a graph.
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "WiFi SSID"
 
 spi:
   clk_pin: GPIO40
@@ -134,7 +180,26 @@ wmbus_radio:
 
   # both = alternate the C-mode sync bytes 3:1 in favour of Format A (0x3D)
   # while still catching Format B (0xCD). t1 pins it to 0x3D.
-  listen_mode: both  # pinned: the RF setup this board was validated with
+  #
+  # MEASURED 2026-08-19 in `both`: T1 from BMT, NES and Techem, and one C1 A
+  # frame (Techem) - so the 3:1 sync-word cycling does catch C-mode on this
+  # chip. One frame is proof the path works, not a yield figure; C1 is rare at
+  # this location, and Format B (0xCD) has still never been seen here.
+  #
+  # s1 WORKS, measured 2026-08-19 against a bench transmitter: Format A frame,
+  # 85 bytes decoded out of a 255-byte capture, RSSI -59 dBm, three sent and
+  # three received. The mode sets 32768 b/s and sync 0x54 0x76 0x96 (24 bits)
+  # on top of the 868.300 MHz that listen_mode already selects.
+  #
+  # No streaming capture was needed: RX_DONE fires against the fixed length and
+  # the host trims, exactly as it does for T1. The SX1262 S1 path uses
+  # SYNC_WORD_VALID because it needs to know when to stop a stream - this driver
+  # does not stream, so it does not need to know.
+  #
+  # What is NOT established: sensitivity at the margin. The bench signal was
+  # strong. A weak real S1 transmitter is a different test - see
+  # docs/S1_HELTEC_V4_TEST_2026-08-14_PL.md.
+  listen_mode: both  # pinned: kept explicit while this radio is new
 
   # ---------------------------------------------------------------------------
   # TCXO SUPPLY - THE OPEN QUESTION ON THIS BOARD
@@ -147,18 +212,38 @@ wmbus_radio:
   # about a different board entirely. The schematic labels Y2 only as
   # "SMD TCXO 32 MHz (2.0x1.6)".
   #
-  # The default here is the LOW value, because the failure modes are not
-  # symmetric:
-  #   too low  -> the oscillator does not start. The chip says so:
-  #               HF_XOSC_START appears in the boot error log. Loud, harmless,
-  #               fixable by changing this line.
+  # The driver originally defaulted to the LOW value, because the failure modes
+  # are not symmetric:
+  #   too low  -> the oscillator does not start, and the chip says so with
+  #               HF_XOSC_START. Loud, harmless, fixable by editing one line.
   #   too high -> it starts anyway, out of spec, silently, and you find out
   #               months later as frequency drift.
+  # That ordering is what identified 3.0 V as the working value in a single
+  # boot, without a multimeter. The default is now 3.0 V because it is measured;
+  # the reasoning is kept because it is how the answer was reached.
   #
-  # PROCEDURE: boot with 1.8v and read the log. If HF_XOSC_START is absent, the
-  # part is happy at 1.8 V and you are done. If it appears, change this to
-  # "3.0v" and reflash. No meter needed, no multimeter needed.
-  tcxo_voltage: "1.8v"  # pinned: the RF setup this board was validated with
+  # MEASURED on this board, 2026-08-19: at 3.0 V the receiver decodes real BMT
+  # and NES telegrams (17 good frames per minute, RSSI -57..-96 dBm). At 1.8 V
+  # it did not run.
+  #
+  # EXPECT HF_XOSC_START IN THE BOOT LOG ANYWAY, AND DO NOT CHASE IT.
+  # The flag is latched while entering STDBY_XOSC, but both calibrations that
+  # follow come back clean (IMAGE=0x0000 ALL=0x0000) and reception works - so
+  # the reference is running and the bit is a startup transient, not a fault.
+  # The stage line in the boot report exists precisely to tell those apart:
+  #   Calibration stages: XOSC=0x0020 IMAGE=0x0000 ALL=0x0000   <- fine
+  # If IMAGE or ALL are also non-zero, that is a real dead clock, and only then
+  # are these two options worth changing.
+  tcxo_voltage: "3.0v"
+  tcxo_startup_ticks: 3000  # ~91.6 ms, in 32.768 kHz ticks - not milliseconds
+
+  # T1 is fixed-length at the packet engine because its L-field is 3-of-6
+  # encoded and cannot be used by the radio as an on-air length byte. Capture
+  # the maximum single-packet length (255 bytes) and let the host trim it. A
+  # real L=0x4C meter needs about 134 encoded bytes, so the former value 128
+  # truncated valid telegrams. Frames exceeding 255 encoded bytes will require
+  # a streaming FIFO path analogous to the SX1262 long-frame receiver.
+  payload_length: 255
 
   # ---------------------------------------------------------------------------
   # RF PARAMETERS
@@ -173,30 +258,26 @@ wmbus_radio:
   frequency: 868.950
 
   # 100 kb/s chip rate, 50 kHz deviation -> modulation index 1.0.
-  bitrate: 100000  # pinned: the RF setup this board was validated with
-  deviation: 50000  # pinned: the RF setup this board was validated with
+  bitrate: 100000  # measured on the 2026-08-19 receiving run
+  deviation: 50000  # measured on the 2026-08-19 receiving run
 
   # Receiver bandwidth, double sideband. The signal needs 2*fdev + bitrate =
   # 200 kHz, so 234300 is the tightest usable step and lets in the least noise.
   # Widen to 312000 only if meters are missed in a way that looks like they sit
   # off channel - the spectrum, not the guess, should decide that.
-  rx_bandwidth: "234300"  # pinned: the RF setup this board was validated with
+  rx_bandwidth: "234300"  # measured on the 2026-08-19 receiving run
 
   # Preamble detector length in bits. Shorter catches weaker signals and fires
   # more often on noise; longer is the opposite. 16 is the compromise.
-  preamble_detector: "16"  # pinned: the RF setup this board was validated with
+  preamble_detector: "16"  # measured on the 2026-08-19 receiving run
 
-  # Fixed capture length in bytes.
-  #
-  # The packet engine cannot use variable length here: in T-mode the L field is
-  # itself 3-out-of-6 encoded, so the radio would read a nonsense length off the
-  # air. It captures a fixed run instead and the host trims the tail - which
-  # suits this project's architecture, where decoding happens off the device
-  # anyway. Raise this if long telegrams come out truncated.
-  payload_length: 128  # pinned: the RF setup this board was validated with
+  # payload_length is set once, further up. It used to be repeated here with a
+  # different value (128), and since a later YAML key wins, this example would
+  # silently have run at 128 - truncating every NES telegram, which arrives as
+  # 245 raw bytes. Do not reintroduce a second copy.
 
   # +2 dB sensitivity for about 2 mA. On USB power there is no reason to say no.
-  rx_boosted: true  # pinned: the RF setup this board was validated with
+  rx_boosted: true  # measured: on during the 2026-08-19 receiving run
 
   topic_name: wmbus
 

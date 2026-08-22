@@ -36,14 +36,14 @@
 🇬🇧 [English](#english) | 🇵🇱 [Polski](#polski)
 
 ```text
-meter -> SX1262 / SX1276 / CC1101 -> ESPHome wmbus_radio -> MQTT RAW HEX -> backend / wmbusmeters / Home Assistant
+meter -> SX1262 / SX1276 / CC1101 / LR1121 -> ESPHome wmbus_radio -> MQTT RAW HEX -> backend / wmbusmeters / Home Assistant
 ```
 
 ---
 
 ## English
 
-RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262, SX1276 and experimental CC1101.
+RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262 and SX1276, with experimental CC1101 and LR1121 support.
 
 > ✅ **Verified on ESPHome 2026.7.0** — clean builds on all three test boards in CI.
 
@@ -170,6 +170,38 @@ wmbus_radio:
 
 Silicon revisions: modules reporting `VERSION=0x14` and `VERSION=0x04` are both accepted. The revision byte is logged, but it does not gate startup — an unrecognised value produces a warning and the receiver still starts. What decides whether the radio is usable is the register self-check (GDO mapping, packet mode, RF profile), and a completely silent SPI bus (`VERSION` reading `0x00` or `0xFF`) still fails setup.
 
+#### LR1121
+
+LR1121 support is experimental and requires explicit opt-in. It has decoded real
+T1, C1 and S1 traffic on the Waveshare ESP32-S3-LR1121-HF board (SKU 34011), but
+it has not run for weeks and has never been compared against another radio in the
+same position.
+
+```yaml
+wmbus_radio:
+  radio_type: LR1121
+  lr1121_allow_experimental: true
+  cs_pin: GPIO42
+  reset_pin: GPIO39
+  irq_pin: GPIO38
+  busy_pin: GPIO41
+  tcxo_voltage: 3.0v
+  payload_length: 255
+```
+
+`tcxo_voltage: 3.0v` is measured, not assumed: at `1.8v` the chip reports
+`HF_XOSC_START` and never reaches the receive path. `payload_length: 255` is
+needed because NES frames are 245 raw bytes.
+
+`HF_XOSC_START` in the boot log is normal and is not a fault — it latches when the
+chip enters `STDBY_XOSC`, both calibrations afterwards come back clean, and the
+driver explains this in the log.
+
+This board has no USB-serial bridge, so `logger:` needs
+`hardware_uart: USB_SERIAL_JTAG` or nothing will appear on the console. It also
+has more than one u.FL socket, and only one of them is the sub-GHz path — the
+wrong socket gives perfect silence with no error anywhere.
+
 ### Documentation
 
 Main documentation lives in `docs/`. Examples live in `examples/`.
@@ -203,7 +235,7 @@ Before opening an issue, read [`SUPPORT.md`](SUPPORT.md).
 
 ## Polski
 
-Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na SX1262, SX1276 oraz eksperymentalnie CC1101.
+Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na SX1262 i SX1276, z eksperymentalną obsługą CC1101 i LR1121.
 
 > ✅ **Zweryfikowano na ESPHome 2026.7.0** — czyste kompilacje na wszystkich trzech płytkach testowych w CI.
 
@@ -329,6 +361,38 @@ wmbus_radio:
 ```
 
 Rewizje układu: akceptowane są moduły zgłaszające zarówno `VERSION=0x14`, jak i `VERSION=0x04`. Bajt rewizji trafia do logu, ale nie blokuje startu — nierozpoznana wartość daje ostrzeżenie, a odbiornik i tak rusza. O używalności radia decyduje autotest rejestrów (mapowanie GDO, tryb pakietu, profil RF), a całkowicie milcząca magistrala SPI (`VERSION` równe `0x00` albo `0xFF`) nadal przerywa uruchomienie.
+
+#### LR1121
+
+Obsługa LR1121 jest eksperymentalna i wymaga jawnego włączenia. Na płytce
+Waveshare ESP32-S3-LR1121-HF (SKU 34011) zdekodowała realny ruch T1, C1 i S1, ale
+nie chodziła tygodniami i nigdy nie była porównana z innym radiem w tym samym
+miejscu.
+
+```yaml
+wmbus_radio:
+  radio_type: LR1121
+  lr1121_allow_experimental: true
+  cs_pin: GPIO42
+  reset_pin: GPIO39
+  irq_pin: GPIO38
+  busy_pin: GPIO41
+  tcxo_voltage: 3.0v
+  payload_length: 255
+```
+
+`tcxo_voltage: 3.0v` jest zmierzone, nie założone: przy `1.8v` układ zgłasza
+`HF_XOSC_START` i nie dochodzi do odbioru. `payload_length: 255` jest potrzebne,
+bo ramki NES mają 245 bajtów surowych.
+
+`HF_XOSC_START` w logu startowym jest normalny i nie jest usterką — zatrzaskuje się
+przy wejściu w `STDBY_XOSC`, obie kalibracje po nim wracają czyste, a sterownik
+tłumaczy to w logu.
+
+Płytka nie ma mostka USB-UART, więc `logger:` wymaga
+`hardware_uart: USB_SERIAL_JTAG`, inaczej na konsoli nie pojawi się nic. Ma też
+więcej niż jedno gniazdo u.FL, a torem sub-GHz jest tylko jedno z nich — złe
+gniazdo daje idealną ciszę bez żadnego błędu.
 
 ### Dokumentacja
 

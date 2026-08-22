@@ -13,7 +13,7 @@ This is **not** an all-in-one ESPHome meter decoder.
 The ESP device is only a Wireless M-Bus RF receiver and MQTT publisher.
 
 ```text
-meter -> SX1262/SX1276/CC1101 -> ESPHome wmbus_radio -> MQTT -> backend/wmbusmeters -> Home Assistant
+meter -> SX1262/SX1276/CC1101/LR1121 -> ESPHome wmbus_radio -> MQTT -> backend/wmbusmeters -> Home Assistant
 ```
 
 The ESP does not:
@@ -45,6 +45,7 @@ Recommended order for beginners:
 2. **Heltec WiFi LoRa 32 V4** — good SX1262 dev board, but V4 needs the correct FEM/RF-switch YAML.
 3. **Heltec WiFi LoRa 32 V2 / LilyGo T3-S3 SX1276** — usable SX1276 targets.
 4. **CC1101** — experimental, advanced/testing only. Requires `GDO0 + GDO2` and explicit YAML opt-in.
+5. **Waveshare ESP32-S3-LR1121-HF** — experimental, and the newest addition. It receives T1, C1 and S1 on this hardware, but it has not been proven over time. Requires `lr1121_allow_experimental: true`, `tcxo_voltage: 3.0v` and `logger: hardware_uart: USB_SERIAL_JTAG`.
 
 Important: do not copy YAML between Heltec V2/V3/V4 blindly. V4 is not a drop-in replacement for older boards.
 
@@ -66,6 +67,7 @@ examples/SX1276/HeltecV2/
 examples/SX1276/LilygoT3S3/
 examples/SX1276/LilygoT3V3TCXO/
 examples/CC1101/
+examples/LR1121/Waveshare ESP32-S3-LR1121-HF/
 ```
 
 For normal use, keep:
@@ -237,6 +239,7 @@ Use these files depending on the question:
 | What radio options exist? | [`docs/RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) |
 | What changed in releases? | [GitHub Releases](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases) |
 | How does SX1262 compare with SX1276? | [`BENCHMARKS.md`](BENCHMARKS.md) |
+| Which radio should I buy, and which one for S1? | [`CHIP_SELECTION.md`](CHIP_SELECTION.md) |
 | What is the project scope/support rule? | [`SUPPORT.md`](../SUPPORT.md) |
 
 ## 10. Where to ask

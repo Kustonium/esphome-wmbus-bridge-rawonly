@@ -7,7 +7,7 @@ RAW-only wireless M-Bus radio bridge for ESPHome.
 The ESP receives and validates wM-Bus telegrams, then publishes validated RAW HEX to MQTT. Meter decoding stays outside the ESP, for example in Home Assistant / Linux / `wmbusmeters`.
 
 ```text
-meter -> SX1262/SX1276 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
+meter -> SX1262/SX1276/CC1101/LR1121 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
 ```
 
 ## Start here
@@ -286,7 +286,7 @@ Compare this option using `meter_snapshot` for the meters that matter, not only 
 - SX1276 can work well, especially in T1-only and quieter environments.
 - For mixed T1/C1 environments, two dedicated receivers are usually better than one receiver in `both`.
 
-`busy_ether_state` is SX1276-only. For SX1262 and CC1101 it is reported as:
+`busy_ether_state` is SX1276-only. For SX1262, CC1101 and LR1121 it is reported as:
 
 ```json
 "busy_ether_state": "n/a"
@@ -295,6 +295,14 @@ Compare this option using `meter_snapshot` for the meters that matter, not only 
 ## CC1101
 
 CC1101 support is available in the component, but it is still experimental. It requires explicit YAML opt-in and proper GDO0/GDO2 wiring.
+
+## LR1121
+
+LR1121 support is experimental too. It requires `lr1121_allow_experimental: true`,
+a `busy_pin`, and on the Waveshare HF board `tcxo_voltage: 3.0v` plus
+`payload_length: 255`. It has decoded T1, C1 and S1 on that board. See
+[`CHIP_SELECTION.md`](CHIP_SELECTION.md) for where it stands against the others,
+and [`RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) for the wiring.
 
 ## Documentation
 

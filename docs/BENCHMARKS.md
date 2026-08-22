@@ -10,6 +10,13 @@ These notes summarize real-world comparisons between `SX1276` and `SX1262` in th
 
 They are not synthetic lab benchmarks. They are practical field results.
 
+**`CC1101` and `LR1121` are not benchmarked here.** The comparison below relies on
+both radios standing in the same physical location; no such run has been done for
+those two. Numbers collected while boards stood in different rooms measure the
+room, so they are deliberately not presented as a chip comparison. What is known
+about those radios is in [`CHIP_SELECTION.md`](CHIP_SELECTION.md), with its
+limits stated there.
+
 ## Test environment
 
 - same physical location for both radios,

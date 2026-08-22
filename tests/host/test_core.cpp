@@ -9,6 +9,7 @@
 #include "dll_crc.h"
 #include "meter_filter.h"
 #include "packet.h"
+#include "rx_metadata.h"
 
 using esphome::wmbus_common::crc16_en13757;
 using esphome::wmbus_common::trim_dll_crc_format_a;
@@ -21,6 +22,7 @@ using esphome::wmbus_radio::decode3of6;
 using esphome::wmbus_radio::encoded_size;
 using esphome::wmbus_radio::meter_id_allowed;
 using esphome::wmbus_radio::meter_id_in_lists;
+using esphome::wmbus_radio::frame_crc32;
 
 static int failures = 0;
 
@@ -239,6 +241,22 @@ static void test_decode3of6_round_trip() {
   check(encoded_size(1) == 2, "encoded_size(1)");
   check(encoded_size(2) == 3, "encoded_size(2)");
   check(encoded_size(3) == 5, "encoded_size(3)");
+}
+
+static void test_rx_metadata_primitives() {
+  const std::string standard = "123456789";
+  check(frame_crc32(reinterpret_cast<const uint8_t *>(standard.data()), standard.size()) == 0xCBF43926U,
+        "RX metadata uses standard IEEE CRC-32");
+
+  auto payload = format_a_with_crc();
+  std::vector<uint8_t> raw = {0x54, 0xCD};
+  raw.insert(raw.end(), payload.begin(), payload.end());
+  Packet packet = make_packet(raw, -65);
+  packet.set_rx_task_wakeup_us(123456789ULL);
+  auto frame = packet.convert_to_frame();
+  check(frame.has_value(), "RX timestamp fixture converts to a frame");
+  if (frame.has_value())
+    check(frame->rx_task_wakeup_us() == 123456789ULL, "RX task wake timestamp survives packet conversion");
 }
 
 static void test_decode3of6_invalid_symbol() {
@@ -581,6 +599,7 @@ static void test_real_golden_frames_round_trip() {
 }
 
 int main() {
+  test_rx_metadata_primitives();
   test_decode3of6_round_trip();
   test_decode3of6_invalid_symbol();
   test_dll_crc_format_a();

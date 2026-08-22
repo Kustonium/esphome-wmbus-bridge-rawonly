@@ -128,7 +128,7 @@ Important fields:
 - `hint_code`,
 - `busy_ether_state`.
 
-For SX1262 and CC1101:
+For SX1262, CC1101 and LR1121:
 
 ```json
 "busy_ether_state": "n/a"

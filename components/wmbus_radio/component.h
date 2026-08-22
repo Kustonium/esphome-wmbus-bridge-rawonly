@@ -40,6 +40,7 @@ public:
 
   // Optional built-in RAW forwarding to MQTT.
   void set_telegram_topic(const std::string &topic) { this->telegram_topic_ = topic; }
+  void set_rx_topic(const std::string &topic) { this->rx_topic_ = topic; }
   void set_target_meter_id_str(const std::string &meter_id) { this->target_meter_id_str_ = meter_id; }
   void set_target_topic(const std::string &topic) { this->target_topic_ = topic; }
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
@@ -197,7 +198,10 @@ protected:
 
   // Optional RAW forwarding / target forwarding.
   std::string telegram_topic_{};
+  std::string rx_topic_{};
   std::string rssi_topic_{};
+  uint32_t rx_boot_id_{0};
+  uint32_t rx_publish_seq_{0};
   std::string target_meter_id_str_{};
   uint32_t target_meter_id_{0};
   bool target_meter_enabled_{false};
@@ -403,6 +407,7 @@ protected:
   std::string forward_whitelist_summary_() const;
   void maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter_id_raw, const char *id_str,
                             const char *log_tag);
+  void publish_rx_metadata_(Frame &frame, const char *id_str);
   void maybe_publish_radio_raw_(Packet *packet, uint32_t now_ms);
   bool should_publish_packet_event_(const Packet *packet) const;
   void maybe_publish_diag_summary_(uint32_t now_ms);

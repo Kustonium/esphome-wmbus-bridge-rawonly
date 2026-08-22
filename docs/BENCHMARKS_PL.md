@@ -10,6 +10,13 @@ Ten dokument streszcza realne porównania `SX1276` i `SX1262` w środowisku blok
 
 To nie są syntetyczne benchmarki laboratoryjne. To są praktyczne wyniki z pola.
 
+**`CC1101` i `LR1121` nie są tu zmierzone.** Poniższe porównanie opiera się na tym,
+że oba radia stały w tym samym miejscu; dla tamtych dwóch takiego biegu nie było.
+Liczby zebrane, gdy płytki stoją w różnych pokojach, mierzą pokój — dlatego
+świadomie nie są tu podawane jako porównanie układów. To, co o tych radiach
+wiadomo, jest w [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md), razem z granicami
+tej wiedzy.
+
 ## Środowisko testowe
 
 - oba radia w tym samym miejscu fizycznym,

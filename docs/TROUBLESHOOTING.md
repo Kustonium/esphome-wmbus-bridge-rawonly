@@ -329,3 +329,57 @@ MQTT unavailable / MQTT niedostepny: skip telegram publish ... radio reception c
 TLS, certificates, fingerprints and remote broker details belong to ESPHome's standard `mqtt:` section. They are not configured in `wmbus_radio`.
 
 If local `Have data` lines are visible but the backend receives nothing, debug MQTT first. If there are no `Have data` lines, debug radio/board configuration first.
+
+## 16. LR1121 board looks dead, or S1 is worse than expected
+
+Three failures on this board produce silence with no error at all, so check them
+before suspecting the driver:
+
+- **Wrong u.FL socket.** The Waveshare HF board has more than one: the ESP32 WiFi
+  front end, the LR1121 2.4 GHz port, and the sub-GHz path through the RF switch.
+  Only the last one receives wM-Bus.
+- **No console output.** There is no USB-serial bridge on the board — the USB-C
+  goes straight to the ESP32-S3 native USB pins. `logger:` needs
+  `hardware_uart: USB_SERIAL_JTAG`.
+- **`tcxo_voltage: 1.8v`.** The chip then reports `HF_XOSC_START` and never
+  reaches the receive path. Use `3.0v`; that value is measured on this board.
+
+`HF_XOSC_START` alone in the boot log is **not** a fault. It latches when the chip
+enters `STDBY_XOSC`; if the calibration lines afterwards read
+`XOSC=0x0020 IMAGE=0x0000 ALL=0x0000`, the radio is fine and the driver says so.
+
+Frames arriving but truncated: raise `payload_length` — NES frames are 245 raw
+bytes, so `255` is the working value.
+
+For S1 specifically, remember the ranking is different from T1: `SX1276` is the
+radio proven at the S1 noise floor. See [`CHIP_SELECTION.md`](CHIP_SELECTION.md).
+
+## 17. The board reboots every 15 minutes
+
+Symptom: reception works, then stops and starts again on a regular cycle. Uptime
+never passes a quarter of an hour, and counters that reset at boot look absurd.
+
+Cause, if the YAML has a bare `api:` and the board publishes over MQTT: ESPHome
+defaults to `api.reboot_timeout: 15min`, and that timer restarts the device when
+no Native API *client* is connected. A standalone MQTT receiver normally has no
+such client, so it restarts forever.
+
+Fix — every example in this repo now ships it:
+
+```yaml
+api:
+  reboot_timeout: 0s
+```
+
+`api:` stays, so Native API and `time: platform: homeassistant` keep working;
+only the watchdog is disabled.
+
+How to confirm rather than assume: with the RX metadata topic enabled, read
+`boot_id` and `seq` from `wmbus/<topic_name>/rx`. A board that is restarting
+shows a new `boot_id` roughly every 900 s; a healthy one keeps one `boot_id`
+while `seq` rises across the 15- and 30-minute marks. Measured here on
+2026-08-20/21: 51 distinct `boot_id` per board in one night before the change,
+one `boot_id` over 14.1 h after it.
+
+`mqtt.reboot_timeout` is a different mechanism that reacts to losing the broker.
+Do not change it as part of this fix.

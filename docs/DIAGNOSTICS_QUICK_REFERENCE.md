@@ -27,7 +27,7 @@ Uwagi:
 
 - `summary_60min` jest tylko dla `dev`, chyba że wymusisz stare flagi ręcznie.
 - `meter_snapshot` ma sens głównie z `highlight_meters`.
-- `busy_ether_state` dotyczy SX1276. Dla SX1262/CC1101 traktuj jako `n/a`.
+- `busy_ether_state` dotyczy SX1276. Dla SX1262/CC1101/LR1121 traktuj jako `n/a`.
 - Stare opcje `diagnostic_publish_*` zostały jako kompatybilne/zaawansowane, ale nie są zalecane.
 
 ## EN
@@ -46,5 +46,5 @@ Notes:
 
 - `summary_60min` belongs to `dev`, unless old flags are forced manually.
 - `meter_snapshot` is mainly useful with `highlight_meters`.
-- `busy_ether_state` is SX1276-only. For SX1262/CC1101 treat it as `n/a`.
+- `busy_ether_state` is SX1276-only. For SX1262/CC1101/LR1121 treat it as `n/a`.
 - Old `diagnostic_publish_*` options remain compatible/advanced, but are not recommended.

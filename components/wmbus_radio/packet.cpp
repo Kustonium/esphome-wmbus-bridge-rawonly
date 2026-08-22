@@ -793,7 +793,8 @@ std::optional<Frame> Packet::convert_to_frame() {
 
 Frame::Frame(Packet *packet)
     : data_(std::move(packet->data_)), link_mode_(packet->link_mode_),
-      rssi_(packet->rssi_), format_(packet->frame_format_) {}
+      rssi_(packet->rssi_), format_(packet->frame_format_),
+      rx_task_wakeup_us_(packet->rx_task_wakeup_us_) {}
 
 std::vector<uint8_t> &Frame::data() { return this->data_; }
 LinkMode Frame::link_mode() { return this->link_mode_; }

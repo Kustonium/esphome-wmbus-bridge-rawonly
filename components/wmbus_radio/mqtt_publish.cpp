@@ -8,6 +8,7 @@
 #include "component.h"
 #include "meter_filter.h"
 #include "wmbus_radio_internal.h"
+#include "rx_metadata.h"
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
@@ -78,19 +79,27 @@ void Radio::maybe_publish_radio_raw_(Packet *packet, uint32_t now_ms) {
 
 void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter_id_raw, const char *id_str,
                                  const char *log_tag) {
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
-  if (mqtt == nullptr || !mqtt->is_connected()) return;
-
-  std::string hex;
   const bool want_all = !this->telegram_topic_.empty() && this->forward_meter_allowed_(meter_id, meter_id_raw);
   // target_meter_id keeps its own topic and is deliberately not filtered by the
   // whitelist: it is an explicit per-meter selection the user already made.
   const bool want_target = this->target_meter_enabled_ && meter_id == this->target_meter_id_;
   if (!want_all && !want_target) return;
 
-  hex = frame.as_hex();
+  // Count every validated, whitelist-eligible frame, including frames received
+  // while MQTT is disconnected. The next published sequence number then makes
+  // that outage visible instead of silently compressing time.
+  if (want_all) {
+    this->rx_publish_seq_++;
+    if (this->rx_publish_seq_ == 0) this->rx_publish_seq_ = 1;
+  }
+
+  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  if (mqtt == nullptr || !mqtt->is_connected()) return;
+
+  std::string hex = frame.as_hex();
   if (want_all) {
     mqtt->publish(this->telegram_topic_, hex);
+    this->publish_rx_metadata_(frame, id_str);
 
     // Keep the telegram payload contract unchanged. RSSI is a separate,
     // retained scalar and is published only when this frame carries a real
@@ -115,6 +124,30 @@ void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter
       mqtt->publish(topic, hex);
     }
   }
+}
+
+void Radio::publish_rx_metadata_(Frame &frame, const char *id_str) {
+  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  if (mqtt == nullptr || !mqtt->is_connected() || this->rx_topic_.empty() ||
+      id_str == nullptr || id_str[0] == '\0')
+    return;
+
+  const auto &data = frame.data();
+  const uint32_t crc = frame_crc32(data.data(), data.size());
+  const int rssi = (int) frame.rssi();
+  const std::string rssi_json = (rssi >= -125 && rssi <= -1) ? std::to_string(rssi) : "null";
+
+  char payload[320];
+  snprintf(payload, sizeof(payload),
+           "{\"schema\":1,\"boot_id\":\"%08lX\",\"seq\":%lu,"
+           "\"rx_task_wakeup_us\":%llu,\"meter_id\":\"%s\",\"mode\":\"%s\","
+           "\"rssi_dbm\":%s,\"frame_crc32\":\"%08lX\",\"frame_length\":%u}",
+           (unsigned long) this->rx_boot_id_, (unsigned long) this->rx_publish_seq_,
+           (unsigned long long) frame.rx_task_wakeup_us(), id_str,
+           link_mode_name(frame.link_mode()), rssi_json.c_str(),
+           (unsigned long) crc, (unsigned) data.size());
+
+  mqtt->publish(this->rx_topic_, std::string(payload), static_cast<uint8_t>(1), false);
 }
 
 std::string Radio::diag_summary_topic_() const {
