@@ -2,9 +2,10 @@
 #
 # Waveshare ESP32-S3-LR1121-HF (SKU 34011) - wM-Bus T1/C1 receiver.
 #
-# EXPERIMENTAL: this radio has never been run against hardware. Read
+# Receiving real meters as of 2026-08-19 (BMT + NES, T1). Read
 # LR1121_Waveshare_HF_commented.yaml first - especially the tcxo_voltage note
-# and the warning about which antenna socket is the sub-GHz one.
+# (HF_XOSC_START in the boot log is expected and harmless here) and the warning
+# about which antenna socket is the sub-GHz one.
 
 substitutions:
   devicename: wmbus-lr1121
@@ -50,10 +51,30 @@ mqtt:
   skip_cert_cn_check: true
 
 api:
+  # A standalone MQTT receiver must not reboot because no Native API client is
+  # connected. ESPHome's default is reboot_timeout: 15min, which restarted these
+  # boards every 15 minutes (measured 2026-08-20/21: 51 distinct boot_id per
+  # board in one night, median 900 s apart). 0s disables that watchdog only -
+  # Native API and time: platform: homeassistant keep working.
+  reboot_timeout: 0s
 ota:
   - platform: esphome
 time:
   - platform: homeassistant
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+  - platform: wifi_signal
+    name: "WiFi RSSI"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+    ssid:
+      name: "WiFi SSID"
 
 spi:
   clk_pin: GPIO40
@@ -70,5 +91,7 @@ wmbus_radio:
     number: GPIO38
     mode: input
   listen_mode: both
-  tcxo_voltage: "1.8v"
+  tcxo_voltage: "3.0v"
+  tcxo_startup_ticks: 3000
+  payload_length: 255
   diagnostic_mode: normal

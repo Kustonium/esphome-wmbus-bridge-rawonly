@@ -113,6 +113,10 @@ CONF_FREQUENCY = "frequency"
 # hardware. Gated the same way CC1101 is.
 CONF_LR1121_ALLOW_EXPERIMENTAL = "lr1121_allow_experimental"
 CONF_TCXO_VOLTAGE = "tcxo_voltage"
+# Second TCXO knob. HF_XOSC_START does not distinguish "wrong voltage" from
+# "did not settle in time", so both have to be reachable from YAML.
+# 300 RTC ticks at 32.768 kHz is ~9.2 ms, the vendor value.
+CONF_TCXO_STARTUP_TICKS = "tcxo_startup_ticks"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
 CONF_PREAMBLE_DETECTOR = "preamble_detector"
 CONF_PAYLOAD_LENGTH = "payload_length"
@@ -148,15 +152,22 @@ LR1121_PREAMBLE_DETECTORS = {
     "32": "LR1121_PREAMBLE_MIN_32B",
 }
 
-# Schema defaults, repeated here so the validator can tell "user left it alone"
-# from "user set it on the wrong radio". Must match the cv.Optional defaults
-# below; a mismatch only ever turns into a confusing validation error, never
-# into a wrong binary.
+# Schema defaults, and the SINGLE SOURCE for them: the cv.Optional entries below
+# read their default straight out of this dict.
+#
+# They used to be written twice. On 2026-08-19 the schema was updated to the
+# measured values (3.0v / 3000 / 255) and this dict was not, which broke every
+# non-LR1121 board: the validator compares a config value against this dict to
+# decide "did the user set an LR1121 option on the wrong radio", and a
+# schema-injected default that disagrees with the dict looks exactly like a user
+# setting it. CC1101, SX1262 and SX1276 configs were all rejected with a message
+# about tcxo_voltage. Keeping one copy makes that class of bug impossible.
 BASE_CONFIG_DEFAULTS_LR1121 = {
-    CONF_TCXO_VOLTAGE: "1.8v",
+    CONF_TCXO_VOLTAGE: "3.0v",
+    CONF_TCXO_STARTUP_TICKS: 3000,
     CONF_RX_BANDWIDTH: "234300",
     CONF_PREAMBLE_DETECTOR: "16",
-    CONF_PAYLOAD_LENGTH: 128,
+    CONF_PAYLOAD_LENGTH: 255,
     CONF_RX_BOOSTED: True,
     CONF_BITRATE: 100000,
     CONF_DEVIATION: 50000,
@@ -307,19 +318,20 @@ BASE_CONFIG_SCHEMA = (
             # them into the driver would repeat exactly the criticism this
             # project makes of hardcoded bandwidths elsewhere.
             cv.Optional(CONF_LR1121_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
-            cv.Optional(CONF_TCXO_VOLTAGE, default="1.8v"): cv.one_of(
+            cv.Optional(CONF_TCXO_VOLTAGE, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_TCXO_VOLTAGE]): cv.one_of(
                 *LR1121_TCXO_VOLTAGES, lower=True
             ),
-            cv.Optional(CONF_RX_BANDWIDTH, default="234300"): cv.one_of(
+            cv.Optional(CONF_TCXO_STARTUP_TICKS, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_TCXO_STARTUP_TICKS]): cv.int_range(min=1, max=16777215),
+            cv.Optional(CONF_RX_BANDWIDTH, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_RX_BANDWIDTH]): cv.one_of(
                 *LR1121_RX_BANDWIDTHS, lower=True
             ),
-            cv.Optional(CONF_PREAMBLE_DETECTOR, default="16"): cv.one_of(
+            cv.Optional(CONF_PREAMBLE_DETECTOR, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_PREAMBLE_DETECTOR]): cv.one_of(
                 *LR1121_PREAMBLE_DETECTORS, lower=True
             ),
-            cv.Optional(CONF_PAYLOAD_LENGTH, default=128): cv.int_range(min=16, max=255),
-            cv.Optional(CONF_RX_BOOSTED, default=True): cv.boolean,
-            cv.Optional(CONF_BITRATE, default=100000): cv.int_range(min=600, max=300000),
-            cv.Optional(CONF_DEVIATION, default=50000): cv.int_range(min=1000, max=200000),
+            cv.Optional(CONF_PAYLOAD_LENGTH, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_PAYLOAD_LENGTH]): cv.int_range(min=16, max=255),
+            cv.Optional(CONF_RX_BOOSTED, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_RX_BOOSTED]): cv.boolean,
+            cv.Optional(CONF_BITRATE, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_BITRATE]): cv.int_range(min=600, max=300000),
+            cv.Optional(CONF_DEVIATION, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_DEVIATION]): cv.int_range(min=1000, max=200000),
 
             # Heltec V4 FEM pins (optional, only makes sense for SX1262)
             cv.Optional(CONF_FEM_CTRL_PIN): pins.internal_gpio_output_pin_schema,
@@ -450,8 +462,8 @@ def _validate_radio_pins(config):
     else:
         if config.get(CONF_LR1121_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("lr1121_allow_experimental is only valid for radio_type: LR1121.")
-        for key in (CONF_TCXO_VOLTAGE, CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR, CONF_PAYLOAD_LENGTH,
-                    CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION):
+        for key in (CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS, CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR,
+                    CONF_PAYLOAD_LENGTH, CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION):
             # Defaults are always present, so only an explicit non-default value
             # is worth rejecting. Silently ignoring it would be worse: the user
             # would think they had tuned something.
@@ -545,6 +557,7 @@ async def to_code(config):
         cg.add(radio_var.set_tcxo_voltage(
             getattr(LR1121TcxoVoltage, LR1121_TCXO_VOLTAGES[config[CONF_TCXO_VOLTAGE]])
         ))
+        cg.add(radio_var.set_tcxo_startup_ticks(config[CONF_TCXO_STARTUP_TICKS]))
         cg.add(radio_var.set_rx_bandwidth(
             getattr(LR1121RxBandwidth, LR1121_RX_BANDWIDTHS[config[CONF_RX_BANDWIDTH]])
         ))
@@ -694,11 +707,13 @@ async def to_code(config):
     health_topic = f"wmbus/{topic_name}/health"
     meters_topic = f"wmbus/{topic_name}/meters"
     rssi_topic = f"wmbus/{topic_name}/rssi"
+    rx_topic = f"wmbus/{topic_name}/rx"
 
     cg.add(var.set_diag_topic(diag_topic))
     cg.add(var.set_health_topic(health_topic))
     cg.add(var.set_meters_topic(meters_topic))
     cg.add(var.set_rssi_topic(rssi_topic))
+    cg.add(var.set_rx_topic(rx_topic))
     cg.add(var.set_telegram_topic(telegram_topic))
     cg.add(var.set_target_meter_id_str(config.get(CONF_TARGET_METER_ID, "")))
     cg.add(var.set_target_topic(config.get(CONF_TARGET_TOPIC, "")))

@@ -1,3 +1,41 @@
+# Fix: examples no longer reboot a standalone MQTT receiver every 15 minutes
+
+## EN
+
+- Every example YAML that pairs `mqtt:` with `api:` now sets `api.reboot_timeout: 0s`, with a comment explaining why. ESPHome's default is `15min`, and that timer restarts the board whenever no Native API *client* is connected - which is the normal state of a receiver that only publishes to MQTT.
+- Measured, not deduced: the `/rx` metadata for the night of 2026-08-20/21 showed **51 distinct `boot_id` per board, median 900 s apart**, while Home Assistant had no ESPHome device added. After the change the same boards ran **14.1 h on one `boot_id`** with `seq` rising continuously.
+- `api:` is kept, so Native API and `time: platform: homeassistant` still work; only the watchdog is off. `mqtt.reboot_timeout` is a separate mechanism for broker loss and is deliberately left alone.
+- `TROUBLESHOOTING{,_PL}.md` gained a section for the symptom, including how to confirm it from `boot_id` and `seq` instead of guessing from telegram counts.
+
+## PL
+
+- Każdy przykład YAML łączący `mqtt:` z `api:` ustawia teraz `api.reboot_timeout: 0s` wraz z komentarzem wyjaśniającym powód. Domyślną wartością ESPHome jest `15min`, a ten licznik restartuje płytkę zawsze, gdy nie jest podłączony żaden *klient* Native API - czyli w normalnym stanie odbiornika publikującego wyłącznie do MQTT.
+- Zmierzone, nie wywnioskowane: metadane `/rx` z nocy 2026-08-20/21 pokazały **51 różnych `boot_id` na płytkę, mediana odstępu 900 s**, przy braku jakiegokolwiek urządzenia ESPHome dodanego w Home Assistant. Po zmianie te same płytki przepracowały **14,1 h na jednym `boot_id`**, a `seq` rósł bez przerwy.
+- `api:` zostaje, więc Native API i `time: platform: homeassistant` nadal działają; wyłączony jest tylko watchdog. `mqtt.reboot_timeout` to osobny mechanizm na utratę brokera i celowo nie jest ruszany.
+- `TROUBLESHOOTING{,_PL}.md` dostały sekcję o tym objawie, razem ze sposobem potwierdzenia go przez `boot_id` i `seq`, zamiast zgadywania z liczby telegramów.
+
+# Docs: the fourth radio, and the S1 answer, are now in the documentation
+
+## EN
+
+- `CHIP_SELECTION.md` covers all four supported radios (`CC1101`, `SX1276`, `SX1262`, `LR1121`) instead of two, and gained an **S1 section**: `SX1262` decodes S1 to about -82 dBm and fails at -85, while `SX1276` decoded the same real transmission in the same second at -99/-100 dBm. The practical rule — `SX1276` for S1, `SX1262` for T1 — was measured on 2026-08-01 and 2026-08-14 but had never reached the document people read before buying a board.
+- `LR1121` is now present where a reader looks for it: `README.md`, `START_HERE`, `RADIO_OPTIONS_MINIMAL.md`, `README_FULL`, `TROUBLESHOOTING` (a new section for the three failures that look like dead hardware), and the `busy_ether_state: n/a` lists in the diagnostics docs. `radio_type` in `CONFIG_REFERENCE_MINIMAL.md` lists it as a valid value.
+- The LR1121 example README states the measured weakest decode as **-114 dBm**, read from the `/api/esp-rx` export over a 14.1 h run on 2026-08-21, replacing the earlier -100 dBm. The same run produced 1401 frames at -105 dBm or below. Its "S1 untested" caveat is gone, because S1 was verified on 2026-08-19.
+- `BENCHMARKS.md` states explicitly that `CC1101` and `LR1121` are **not** benchmarked: that comparison depends on both radios standing in the same place, and no such run exists for them.
+- `RX_PIPELINE_PL.md` documents the companion `/rx` topic, which only the English version had.
+- `diagnostic_publish_suggestion` was the one schema option with no entry in the reference; it has one now.
+- Both `CHIP_SELECTION` files now say what the numbers cannot support: RSSI is not comparable between boards (an external LNA/FEM reads 13-15 dB higher), and frame counts only compare boards standing in the same position.
+
+## PL
+
+- `CHIP_SELECTION_PL.md` obejmuje wszystkie cztery obsługiwane radia (`CC1101`, `SX1276`, `SX1262`, `LR1121`) zamiast dwóch i zyskał **sekcję o S1**: `SX1262` dekoduje S1 mniej więcej do -82 dBm i zawodzi przy -85, a `SX1276` zdekodował tę samą rzeczywistą emisję w tej samej sekundzie przy -99/-100 dBm. Zasada praktyczna — `SX1276` do S1, `SX1262` do T1 — była zmierzona 2026-08-01 i 2026-08-14, ale nigdy nie trafiła do dokumentu czytanego przed zakupem płytki.
+- `LR1121` jest teraz tam, gdzie czytelnik go szuka: `README.md`, `START_HERE_PL`, `RADIO_OPTIONS_MINIMAL.md`, `README_FULL_PL`, `TROUBLESHOOTING_PL` (nowa sekcja o trzech usterkach, które wyglądają jak martwy sprzęt) oraz listy `busy_ether_state: n/a` w dokumentach diagnostycznych. `radio_type` w `CONFIG_REFERENCE_MINIMAL.md` wymienia go jako dopuszczalną wartość.
+- README przykładu LR1121 podaje zmierzony najsłabszy odbiór **-114 dBm**, odczytany z eksportu `/api/esp-rx` w biegu 14,1 h dnia 2026-08-21, w miejsce wcześniejszych -100 dBm. Ten sam bieg dał 1401 ramek na poziomie -105 dBm i niżej. Zastrzeżenie „S1 niesprawdzone" znika, bo S1 zostało sprawdzone 2026-08-19.
+- `BENCHMARKS_PL.md` mówi wprost, że `CC1101` i `LR1121` **nie** są tam zmierzone: tamto porównanie opiera się na tym, że oba radia stoją w tym samym miejscu, a dla tych dwóch takiego biegu nie ma.
+- `RX_PIPELINE_PL.md` opisuje towarzyszący temat `/rx`, który miała dotąd wyłącznie wersja angielska.
+- `diagnostic_publish_suggestion` był jedyną opcją schematu bez wpisu w referencji; teraz go ma.
+- Oba pliki `CHIP_SELECTION` mówią też, czego liczby nie udźwigną: RSSI nie jest porównywalne między płytkami (zewnętrzny LNA/FEM czyta 13-15 dB wyżej), a liczby ramek porównują tylko płytki stojące w tym samym miejscu.
+
 # Feature: opt-in per-meter RSSI, and examples that state their defaults
 
 ## EN

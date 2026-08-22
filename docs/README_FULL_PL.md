@@ -276,7 +276,7 @@ Porównuj tę opcję po `meter_snapshot` dla ważnych liczników, a nie po samym
 - SX1276 może działać dobrze, szczególnie w T1-only i spokojniejszym eterze.
 - W środowisku mieszanym T1/C1 zwykle lepsze są dwa dedykowane odbiorniki niż jeden odbiornik w `both`.
 
-`busy_ether_state` dotyczy tylko SX1276. Dla SX1262 i CC1101 raportowane jest:
+`busy_ether_state` dotyczy tylko SX1276. Dla SX1262, CC1101 i LR1121 raportowane jest:
 
 ```json
 "busy_ether_state": "n/a"
@@ -285,6 +285,14 @@ Porównuj tę opcję po `meter_snapshot` dla ważnych liczników, a nie po samym
 ## CC1101
 
 Obsługa CC1101 jest dostępna w komponencie, ale nadal ma status eksperymentalny. Wymaga jawnego włączenia w YAML oraz poprawnego podłączenia linii GDO0/GDO2.
+
+## LR1121
+
+Obsługa LR1121 też jest eksperymentalna. Wymaga `lr1121_allow_experimental: true`,
+linii `busy_pin`, a na płytce Waveshare HF dodatkowo `tcxo_voltage: 3.0v` oraz
+`payload_length: 255`. Na tej płytce zdekodował T1, C1 i S1. Gdzie stoi wobec
+pozostałych radiów — [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md); okablowanie —
+[`RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md).
 
 ## Dokumentacja
 

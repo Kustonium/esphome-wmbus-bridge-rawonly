@@ -133,10 +133,21 @@ class LR1121 : public RadioTransceiver {
   // --- SPI plumbing --------------------------------------------------------
 
   // Blocks until BUSY falls, or gives up after a bounded wait. Returns false on
-  // timeout so callers can log rather than hang: on this chip a BUSY that never
-  // falls means either the TCXO did not start or SPI is not connected, and both
-  // deserve a message instead of a watchdog reboot.
-  bool wait_while_busy_();
+  // timeout so callers can log rather than hang.
+  //
+  // A false here is NOT treated as fatal, and that is deliberate. There are two
+  // very different worlds behind "BUSY stayed high": the chip is dead, or the
+  // BUSY line is not telling us the truth (wrong pin, floating input, board
+  // revision). They are told apart by asking the chip something over SPI
+  // anyway - which only works if a stuck BUSY does not gag the driver first.
+  bool wait_while_busy_(uint32_t timeout_ms = 100);
+
+  // NSS pulse. The vendor HAL wakes the chip by driving CS low for ~1 ms and
+  // releasing it, and calls this immediately after reset. ESPHome owns the CS
+  // pin through the SPI delegate, so the pulse is produced by performing a real
+  // one-byte transaction: an empty begin/end pair is not guaranteed to move CS
+  // at all, which is exactly the bug this replaces.
+  void wake_pulse_();
 
   void cmd_write_(uint16_t opcode, std::initializer_list<uint8_t> args);
   void cmd_write_buf_(uint16_t opcode, const uint8_t *args, size_t len);
@@ -147,6 +158,7 @@ class LR1121 : public RadioTransceiver {
   uint16_t get_errors_();
   uint32_t get_irq_status_();
   void set_sync_word_(uint8_t sync2);
+  void set_s1_sync_word_();
   void configure_gfsk_();
   bool load_rx_buffer_();
 
@@ -165,10 +177,10 @@ class LR1121 : public RadioTransceiver {
   uint32_t deviation_hz_{50000UL};
   LR1121RxBandwidth rx_bandwidth_{LR1121_BW_234300};
   LR1121PreambleDetector preamble_detector_{LR1121_PREAMBLE_MIN_16B};
-  uint8_t payload_length_{128};
+  uint8_t payload_length_{255};
   bool rx_boosted_{true};
-  LR1121TcxoVoltage tcxo_voltage_{LR1121_TCXO_1_8V};
-  uint32_t tcxo_startup_ticks_{300};  // ~9.2 ms at 32.768 kHz
+  LR1121TcxoVoltage tcxo_voltage_{LR1121_TCXO_3_0V};
+  uint32_t tcxo_startup_ticks_{3000};  // ~91.6 ms at 32.768 kHz
 
   // --- state ---------------------------------------------------------------
   uint8_t sync_cycle_{0};
@@ -186,7 +198,18 @@ class LR1121 : public RadioTransceiver {
   uint8_t boot_type_{0};
   uint16_t boot_fw_{0};
   uint16_t boot_errors_{0};
+  uint16_t errors_after_xosc_{0};
+  uint16_t errors_after_image_{0};
+  uint16_t errors_after_calibrate_{0};
   bool boot_ok_{false};
+
+  // Set when BUSY never fell during boot. Kept so the state is reported once,
+  // and so per-command waits stop re-logging the same thing forever.
+  bool busy_line_suspect_{false};
+
+  // S1 probe: reported once, so a sync-without-packet condition is stated and
+  // then stops repeating for every detector trigger.
+  bool s1_sync_seen_{false};
 
   // One provenance snapshot per boot, same contract as the SX1262 driver:
   // written by the receiver task, drained by Radio::loop() on the main task.

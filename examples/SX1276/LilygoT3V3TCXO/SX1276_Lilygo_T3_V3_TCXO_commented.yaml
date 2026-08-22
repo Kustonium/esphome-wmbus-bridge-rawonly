@@ -52,6 +52,21 @@ mqtt:
   skip_cert_cn_check: true
 
 api:
+  # Keep the Native API available (Home Assistant, esphome logs, OTA over API)
+  # but do NOT let it reboot the board.
+  #
+  # Why: ESPHome defaults to reboot_timeout: 15min, and that timer restarts the
+  # device when no Native API CLIENT is connected. A board that only publishes
+  # to MQTT usually has no such client, so it reboots every 15 minutes forever.
+  # That was measured here on 2026-08-20/21: the RX metadata showed 51 distinct
+  # boot_id values per board in a single night, median 900 s between starts,
+  # while Home Assistant had no ESPHome device added at all. After setting 0s
+  # the same boards ran 14.1 h with one boot_id and a continuously rising seq.
+  #
+  # This is NOT mqtt.reboot_timeout - that one reacts to losing the broker and
+  # is a separate decision. Leave it alone unless you have measured a broker
+  # problem.
+  reboot_timeout: 0s
 ota:
   - platform: esphome
 mdns:

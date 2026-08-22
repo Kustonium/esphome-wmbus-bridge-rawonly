@@ -35,6 +35,8 @@ public:
 
   void set_rssi(int8_t rssi);
   void set_forced_link_mode(LinkMode mode);
+  void set_rx_task_wakeup_us(uint64_t value) { this->rx_task_wakeup_us_ = value; }
+  uint64_t rx_task_wakeup_us() const { return this->rx_task_wakeup_us_; }
 
   std::optional<Frame> convert_to_frame();
 
@@ -116,6 +118,7 @@ protected:
   // T1 (3-of-6) symbol diagnostics
   uint16_t t1_symbols_total_{0};
   uint16_t t1_symbols_invalid_{0};
+  uint64_t rx_task_wakeup_us_{0};
 };
 
 struct Frame {
@@ -136,6 +139,7 @@ public:
   // try_get_meter_id() this does not require a BCD ID, so it is the only form
   // available for meters such as Diehl/IZAR.
   bool try_get_meter_id_raw(uint32_t &out_id) const;
+  uint64_t rx_task_wakeup_us() const { return this->rx_task_wakeup_us_; }
 
   void mark_as_handled();
   uint8_t handlers_count();
@@ -146,6 +150,7 @@ protected:
   int8_t rssi_;
   std::string format_;
   uint8_t handlers_count_ = 0;
+  uint64_t rx_task_wakeup_us_{0};
 };
 
 } // namespace wmbus_radio

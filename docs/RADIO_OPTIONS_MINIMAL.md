@@ -7,6 +7,7 @@
 | `SX1262` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, TCXO, FEM, bramka RF switch, `long_gfsk_packets` | zalecany dla trudnego RF i długich ramek |
 | `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | dobry dla spokojniejszych instalacji; ma mechanizm busy-ether; `tcxo_pin` tylko dla płytek z osobnym TCXO enable |
 | `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | eksperymentalny; wymaga `cc1101_allow_experimental: true`; single-IRQ nie jest wspierany |
+| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | eksperymentalny; wymaga `lr1121_allow_experimental: true`; odbiera T1/C1/S1 na sprzęcie Waveshare HF |
 
 ## Listen mode frequency defaults / domyślne częstotliwości trybów
 
@@ -70,7 +71,7 @@ Płytki Heltec V3 / V4 / V4-R8 tej opcji nie wymagają; korzystają z wyprowadze
 
 `busy_ether_state` w summary jest raportem mechanizmu busy-ether i ma sens tylko dla SX1276.
 
-`sx1276_busy_ether_mode` jest akceptowane przez schemat YAML także przy innych radiach, ale dla SX1262/CC1101 jest ignorowane bez błędu; w summary będzie `n/a`.
+`sx1276_busy_ether_mode` jest akceptowane przez schemat YAML także przy innych radiach, ale dla SX1262/CC1101/LR1121 jest ignorowane bez błędu; w summary będzie `n/a`.
 
 `tcxo_pin` jest opcją jawną dla płytek SX1276 z osobnym pinem TCXO enable. Jeśli jest ustawiony, komponent ustawia ten pin w stan HIGH przed inicjalizacją radia. Zwykłe płytki SX1276 nie wymagają tej opcji.
 
@@ -99,3 +100,37 @@ wmbus_radio:
 ```
 
 Nie kopiować konfiguracji CC1101 z projektów single-IRQ. Ten komponent wymaga osobno GDO0 i GDO2.
+
+## LR1121
+
+Minimalny schemat (Waveshare ESP32-S3-LR1121-HF, SKU 34011):
+
+```yaml
+wmbus_radio:
+  - radio_type: LR1121
+    lr1121_allow_experimental: true
+    cs_pin: GPIO42
+    reset_pin: GPIO39
+    irq_pin: GPIO38
+    busy_pin: GPIO41
+    tcxo_voltage: 3.0v
+    payload_length: 255
+```
+
+Trzy rzeczy, bez których ta płytka wygląda na martwą, choć działa:
+
+- **`tcxo_voltage: 3.0v`** — zmierzone. Przy `1.8v` układ zgłasza `HF_XOSC_START`
+  i nie dochodzi do odbioru. Pakiet producenta podaje obie wartości dla tej samej
+  płytki; obowiązuje ta zweryfikowana na sprzęcie.
+- **`payload_length: 255`** — ramki NES mają 245 bajtów surowych. Niższa wartość
+  je utnie.
+- **Gniazdo antenowe.** Płytka ma więcej niż jedno gniazdo u.FL: WiFi ESP32,
+  port 2,4 GHz LR1121 i dopiero jedno z nich jest torem sub-GHz przez przełącznik
+  RF. Złe gniazdo daje idealną ciszę bez żadnego błędu.
+
+Ta płytka nie ma mostka USB-UART — konsola idzie przez natywne USB ESP32-S3, więc
+`logger:` wymaga `hardware_uart: USB_SERIAL_JTAG`, inaczej log nie pojawi się nigdzie.
+
+Komunikat `HF_XOSC_START` przy starcie **jest normalny i nie jest usterką** —
+zapala się przy wejściu w `STDBY_XOSC`, a obie kalibracje po nim wracają czyste.
+Sterownik tłumaczy to w logu.

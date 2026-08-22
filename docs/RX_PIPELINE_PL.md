@@ -8,13 +8,13 @@ Komponent publikuje tylko telegramy, które przeszły wewnętrzną walidację ra
 
 ```text
 IRQ z radia
-  -> odczyt bajtów PHY z SX1262/SX1276
+  -> odczyt bajtów PHY z CC1101/SX1276/SX1262/LR1121
   -> zbudowanie kandydata na pakiet
   -> wskazanie trybu: T1, C1 albo wymuszone S1
   -> wyliczenie oczekiwanej długości kandydata
   -> parsowanie i walidacja
   -> usunięcie bajtów DLL CRC
-  -> publikacja zweryfikowanego HEX do MQTT
+  -> publikacja zweryfikowanego HEX i strukturalnych metadanych RX do MQTT
 ```
 
 ## Ścieżka T1
@@ -96,6 +96,20 @@ To znaczy:
 - payload nadal nie jest zdekodowany jako licznik.
 
 Czyli `RAW-only` oznacza **brak dekodowania licznika na ESP**, a nie przepychanie dowolnych śmieci z radia.
+
+## Co publikuje towarzyszący temat `/rx`
+
+Dla każdej zweryfikowanej ramki dopuszczonej przez whitelistę i opublikowanej na
+`telegram_topic` komponent publikuje dodatkowo JSON schematu 1 na
+`wmbus/<topic_name>/rx`. Identyfikuje on rozruch ESP oraz ciągłą sekwencję odbioru
+danego źródła, niesie czas obudzenia zadania odbiorczego po IRQ, `meter_id`, tryb
+łącza, zmierzone RSSI (jeśli jest) oraz CRC32 i długość końcowej, znormalizowanej
+ramki.
+
+Te metadane są **obserwacją toru odbiorczego ESP, a nie odczytem licznika**. Znacznik
+obudzenia nosi celowo nazwę `rx_task_wakeup_us`: sterowniki radiowe sygnalizują
+zadaniu na różnych etapach odbioru, więc nie wolno go traktować jako dokładnego
+czasu początku emisji ani dokładnego `RX_DONE`.
 
 ## Diagnostyka a publikacja
 

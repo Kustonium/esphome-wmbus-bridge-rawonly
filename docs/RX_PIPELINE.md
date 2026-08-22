@@ -8,13 +8,13 @@ The component publishes only telegrams that passed the internal wM-Bus frame che
 
 ```text
 radio IRQ
-  -> read PHY bytes from SX1262/SX1276
+  -> read PHY bytes from CC1101/SX1276/SX1262/LR1121
   -> build a packet candidate
   -> detect link mode hint: T1, C1 or forced S1
   -> calculate expected candidate length
   -> parse and validate the candidate
   -> remove DLL CRC bytes
-  -> publish validated telegram HEX to MQTT
+  -> publish validated telegram HEX and structured RX metadata to MQTT
 ```
 
 ## T1 path
@@ -96,6 +96,19 @@ That means:
 - the payload is still not meter-decoded.
 
 So it is “RAW-only” in the sense of **no meter decoding on ESP**, not in the sense of forwarding arbitrary radio garbage.
+
+## What the companion `/rx` topic publishes
+
+For every validated, whitelist-eligible frame published on `telegram_topic`,
+the component also publishes schema-1 JSON on `wmbus/<topic_name>/rx`. It
+identifies the ESP boot and source-wide receive sequence, carries the receiver
+task wake time after IRQ, meter ID, link mode, measured RSSI when available,
+and the CRC32 and length of the final normalized frame.
+
+This metadata is an observation of the ESP receive path, not a decoded meter
+reading. The wake timestamp is deliberately named `rx_task_wakeup_us`: radio
+drivers signal the task at different receive stages, so it must not be treated
+as an exact on-air start or exact `RX_DONE` time.
 
 ## Diagnostics versus forwarding
 

@@ -46,6 +46,12 @@ mqtt:
   skip_cert_cn_check: true
 
 api:
+  # A standalone MQTT receiver must not reboot because no Native API client is
+  # connected. ESPHome's default is reboot_timeout: 15min, which restarted these
+  # boards every 15 minutes (measured 2026-08-20/21: 51 distinct boot_id per
+  # board in one night, median 900 s apart). 0s disables that watchdog only -
+  # Native API and time: platform: homeassistant keep working.
+  reboot_timeout: 0s
 ota:
   - platform: esphome
 time:

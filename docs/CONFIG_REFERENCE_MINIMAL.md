@@ -4,7 +4,7 @@
 
 | Opcja | Domyślnie | Status | Opis PL / EN |
 |---|---:|---|---|
-| `radio_type` | wymagane | public | `SX1262`, `SX1276`, `CC1101` |
+| `radio_type` | wymagane | public | `SX1262`, `SX1276`, `CC1101`, `LR1121` |
 | `topic_name` | `esphome.name` | public | nazwa bazowa topiców: `wmbus/<topic_name>/...`; bez `/`, spacji, `+`, `#` |
 | `listen_mode` | `both` | public | `t1`, `c1`, `both` = T1/C1 only, `s1` = experimental S1 only |
 | `frequency` | mode default | public | optional override; T1/C1/both default `868.950 MHz`, S1 default `868.300 MHz` |
@@ -58,10 +58,11 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `cc1101_allow_experimental` | `CC1101` | `false` | safety gate | wymagane do uruchomienia CC1101 |
 | `gdo0_pin`, `gdo2_pin` | `CC1101` | wymagane | public | dual IRQ; single-IRQ CC1101 nie jest wspierany |
 | `lr1121_allow_experimental` | `LR1121` | `false` | safety gate | wymagane do uruchomienia LR1121 |
-| `tcxo_voltage` | `LR1121` | `1.8v` | public | napięcie TCXO modułu |
+| `tcxo_voltage` | `LR1121` | `3.0v` | public | napięcie TCXO modułu |
+| `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | czas rozruchu TCXO w taktach 32,768 kHz (~91,6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | advanced | szerokość pasma RX w Hz |
 | `preamble_detector` | `LR1121` | `16` | advanced | długość detektora preambuły w bitach |
-| `payload_length` | `LR1121` | `128` | advanced | maksymalna długość payloadu; podnieś, gdy długie telegramy są ucinane |
+| `payload_length` | `LR1121` | `255` | advanced | długość stałego przechwycenia T1; host przycina telegram według zdekodowanego L-field |
 | `rx_boosted` | `LR1121` | `true` | advanced | +2 dB czułości kosztem ok. 2 mA |
 | `bitrate` | `LR1121` | `100000` | advanced | bitrate GFSK |
 | `deviation` | `LR1121` | `50000` | advanced | dewiacja GFSK |
@@ -79,6 +80,8 @@ Preferuj `topic_name`.
 | Topik | Skąd się bierze | Uwagi |
 |---|---|---|
 | `wmbus/<topic_name>/telegram` | każda poprawna ramka (lub tylko `forward_meters`) | główny output dla bridge/wmbusmeters |
+| `wmbus/<topic_name>/rx` | ta sama poprawna ramka co na `telegram` | strukturalne metadane odbioru; QoS 1, bez retain |
+| `wmbus/<topic_name>/rx` | ta sama poprawna ramka co na `telegram` | strukturalne metadane odbioru; QoS 1, bez retain |
 | `wmbus/<topic_name>/diag` | drop/rx_path eventy + kopia boot event | root diag, bez retain |
 | `wmbus/<topic_name>/diag/summary` | co `diagnostic_summary_interval` | globalne summary |
 | `wmbus/<topic_name>/diag/summary_15min` | co 15 min | `normal`+ |
@@ -88,6 +91,58 @@ Preferuj `topic_name`.
 | `wmbus/<topic_name>/diag/suggestion` | wykryta anomalia RF | sugestie diagnostyczne |
 | `wmbus/<topic_name>/diag/busy_ether_changed` | zmiana stanu busy-ether | SX1276 + `adaptive` |
 | `wmbus/<topic_name>/rssi/<meter_id>` | ramka z realnym pomiarem RSSI | tylko przy `publish_rssi: true`; `retain=true` |
+
+### Structured RX metadata / strukturalne metadane RX
+
+Każdemu telegramowi dopuszczonemu przez `forward_meters` towarzyszy komunikat
+JSON na `wmbus/<topic_name>/rx`. Nie zastępuje on HEX-a na `telegram` i nie
+zawiera zdekodowanej wartości licznika. ESP nadal wyłącznie odbiera i
+kwalifikuje ramkę RF; zapis do bazy pozostaje zadaniem backendu.
+
+Payload schematu 1 zawiera:
+
+- `boot_id` — identyfikator bieżącego uruchomienia ESP;
+- `seq` — wspólny dla źródła, rosnący numer poprawnej ramki;
+- `rx_task_wakeup_us` — czas `esp_timer` od uruchomienia, pobrany gdy task RX
+  obudził się po IRQ; nie jest to znacznik początku transmisji ani dokładnego
+  zdarzenia `RX_DONE`;
+- `meter_id`, `mode` (`T1`, `C1` albo `S1`) i `rssi_dbm` (`null`, gdy sterownik
+  nie dostarczył rzeczywistego pomiaru);
+- `frame_crc32` — IEEE CRC32 końcowych, znormalizowanych bajtów ramki, które są
+  publikowane jako HEX;
+- `frame_length` — liczba tych bajtów.
+
+`/rx` jest publikowany z QoS 1 i `retain=false`. `seq` zwiększa się także dla
+poprawnych ramek odebranych podczas braku połączenia MQTT, więc następny
+opublikowany komunikat może ujawnić lukę. Luka wskazuje brak zdarzeń na
+ścieżce ESP→broker→subskrybent, ale sama nie rozstrzyga, na którym odcinku
+powstała. Zmiana `boot_id` rozpoczyna nową domenę numeracji.
+
+### Structured RX metadata / strukturalne metadane RX
+
+Każdemu telegramowi dopuszczonemu przez `forward_meters` towarzyszy komunikat
+JSON na `wmbus/<topic_name>/rx`. Nie zastępuje on HEX-a na `telegram` i nie
+zawiera zdekodowanej wartości licznika. ESP nadal wyłącznie odbiera i
+kwalifikuje ramkę RF; zapis do bazy pozostaje zadaniem backendu.
+
+Payload schematu 1 zawiera:
+
+- `boot_id` — identyfikator bieżącego uruchomienia ESP;
+- `seq` — wspólny dla źródła, rosnący numer poprawnej ramki;
+- `rx_task_wakeup_us` — czas `esp_timer` od uruchomienia, pobrany gdy task RX
+  obudził się po IRQ; nie jest to znacznik początku transmisji ani dokładnego
+  zdarzenia `RX_DONE`;
+- `meter_id`, `mode` (`T1`, `C1` albo `S1`) i `rssi_dbm` (`null`, gdy sterownik
+  nie dostarczył rzeczywistego pomiaru);
+- `frame_crc32` — IEEE CRC32 końcowych, znormalizowanych bajtów ramki, które są
+  publikowane jako HEX;
+- `frame_length` — liczba tych bajtów.
+
+`/rx` jest publikowany z QoS 1 i `retain=false`. `seq` zwiększa się także dla
+poprawnych ramek odebranych podczas braku połączenia MQTT, więc następny
+opublikowany komunikat może ujawnić lukę. Luka wskazuje brak zdarzeń na
+ścieżce ESP→broker→subskrybent, ale sama nie rozstrzyga, na którym odcinku
+powstała. Zmiana `boot_id` rozpoczyna nową domenę numeracji.
 
 Legacy/manual override:
 
@@ -184,6 +239,7 @@ jest statystyka odbioru 15/60 min, nie RSSI.
 | `target_topic` | `""` | advanced | topic dla `target_meter_id` |
 | `target_log` | `true` | advanced | logowanie trafień target meter |
 | `publish_radio_raw` | `false` | dev-only | surowy tap radiowy na stałym topicu `wmbus_bridge/raw`; nie mylić z normalnym telegramem |
+| `diagnostic_publish_suggestion` | z presetu `diagnostic_mode` | advanced | publikuj zdarzenia `suggestion` (podpowiedzi diagnostyczne), dławione do jednej na godzinę na kod; jawne `true`/`false` nadpisuje preset |
 
 ## Deprecated diagnostic aliases / stare aliasy
 

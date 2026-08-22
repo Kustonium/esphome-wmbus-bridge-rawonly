@@ -1,16 +1,41 @@
-# LR1121 — experimental, never run on hardware
+# LR1121 — receiving since 2026-08-19
 
-**EN.** Every other radio in this repository was tuned against real meters. This
-one has not been powered on even once. The driver
-(`components/wmbus_radio/transceiver_lr1121.{h,cpp}`) was written from
-documentation, and the YAML here describes a board that was still in the post
-when it was authored. Treat it as a starting point for someone with the board in
-hand, not as support.
+**EN.** The driver (`components/wmbus_radio/transceiver_lr1121.{h,cpp}`) was
+written entirely from documentation, with no board on the desk. It has since
+decoded real telegrams on this exact hardware: BMT and NES meters, 17 good
+frames per minute, RSSI -57..-96 dBm, no truncations, `RF link looks stable`.
 
-**PL.** Każde inne radio w tym repozytorium było strojone na prawdziwych
-licznikach. To nie zostało ani razu włączone. Sterownik powstał z dokumentacji,
-a przykładowy YAML opisuje płytkę, która w chwili pisania była jeszcze w drodze.
-To punkt startowy dla kogoś, kto ma płytkę w ręku — nie wsparcie.
+C1 works as well - a Techem C1 A frame decoded alongside the T1 traffic, which
+exercises the 3:1 sync-word cycling. S1 receives too, verified on 2026-08-19
+against a workshop transmitter.
+
+Weakest successful decode so far: **-114 dBm**, measured over a 14.1 h run on
+2026-08-21 and read from the `/api/esp-rx` export rather than off a log screen.
+That run also produced 1401 frames at -105 dBm or below. The datasheet-derived
+estimate for this bitrate was -106..-109 dBm, so the front end is doing slightly
+better than predicted, not worse.
+
+Still young, though. It has not run for weeks, C-mode Format B has never been
+seen here, and nobody has compared its yield against an SX1262 in the same
+position - which is the only comparison that would separate the chip from where
+it happens to stand. Treat it as a working starting point, not as a supported
+configuration.
+
+**PL.** Sterownik powstał wyłącznie z dokumentacji, bez płytki na biurku. Od
+2026-08-19 odbiera prawdziwe telegramy na tym sprzęcie: liczniki BMT i NES,
+17 poprawnych ramek na minutę, RSSI -57..-96 dBm, bez obcięć.
+
+C1 też działa — jedna ramka C1 A od Techema obok ruchu T1. S1 również odbiera,
+sprawdzone 2026-08-19 na nadajniku warsztatowym.
+
+Najsłabszy udany odbiór: **−114 dBm**, zmierzone w biegu 14,1 h dnia 2026-08-21
+i odczytane z eksportu `/api/esp-rx`, a nie z ekranu logu. W tym samym biegu było
+1401 ramek na poziomie −105 dBm i niżej — czyli lepiej niż oszacowanie
+−106…−109 dBm z datasheetu.
+
+Ale to wciąż młode: nie chodziło tygodniami, formatu B C-mode tu nie widziano,
+nikt nie porównał uzysku z SX1262 w tym samym miejscu — a tylko takie porównanie
+oddziela układ od miejsca, w którym stoi.
 
 ## Board
 
@@ -62,10 +87,9 @@ Confirmed from the schematic netlist and from the vendor's own Meshtastic
    with no error anywhere — indistinguishable from dead hardware.
 2. **`tcxo_voltage`.** The vendor package states two different values for the
    same board (3.0 V in all thirteen C examples, 1.8 V in the bundled Meshtastic
-   variant) and neither is a measurement. The default here is the low one
-   because that failure is loud: the chip reports `HF_XOSC_START` in the boot
-   error log and the driver spells out what it means. Too high a voltage starts
-   the oscillator anyway, out of spec, silently.
+   variant). Hardware bring-up of the Waveshare HF board selected 3.0 V: at
+   1.8 V the chip reports `HF_XOSC_START`, while 3.0 V reaches the receive path.
+   The Waveshare example and component default therefore use 3.0 V.
 3. **Boot log.** The driver logs `hw/type/fw` from GetVersion and decodes the
    error word by name. If GetVersion answers all-zeros or all-ones, SPI or BUSY
    is mis-wired and nothing further will work.

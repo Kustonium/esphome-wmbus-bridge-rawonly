@@ -84,6 +84,12 @@ static constexpr uint8_t RFSW_WIFI    = 0x00;
 static constexpr uint32_t IRQ_RX_DONE       = (1UL << 3);
 static constexpr uint32_t IRQ_TIMEOUT       = (1UL << 10);
 static constexpr uint32_t IRQ_FSK_LEN_ERROR = (1UL << 24);
+// Sync word detected. Not used to drive capture - the capture still starts on
+// RX_DONE. Enabled in S1 only, as a probe: it is the one bit that separates
+// "sync never matched" from "sync matched but the packet never completed", and
+// those two have completely different fixes. Kept out of T1/C1 so a proven
+// receive path is not disturbed by an extra interrupt source.
+static constexpr uint32_t IRQ_SYNC_WORD_VALID = (1UL << 2);
 static constexpr uint32_t IRQ_ALL           = 0xFFFFFFFFUL;
 
 // GetErrors bits. Bit 5 is the one that matters at bring-up: it is the chip
@@ -116,29 +122,42 @@ static constexpr uint8_t RX_CONTINUOUS[3] = {0xFF, 0xFF, 0xFF};
 
 static constexpr int8_t RSSI_NOT_MEASURED = -127;
 
-// How long to wait for BUSY to fall. Generous: the longest legitimate wait is
-// the TCXO start-up (~9.2 ms at the default 300 ticks) plus calibration.
-static constexpr uint32_t BUSY_TIMEOUT_MS = 100;
+// Per-command BUSY timeout lives in the header as a default argument (100 ms).
+// The post-reset wait is separate and much longer - see setup(). The first
+// version of this driver used one short timeout for both and failed the whole
+// component before it ever spoke to the chip.
 
 // ---------------------------------------------------------------------------
 // SPI plumbing
 // ---------------------------------------------------------------------------
 
-bool LR1121::wait_while_busy_() {
+bool LR1121::wait_while_busy_(uint32_t timeout_ms) {
   if (this->busy_pin_ == nullptr)
     return true;
   const uint32_t start = millis();
   while (this->busy_pin_->digital_read()) {
-    if ((uint32_t) (millis() - start) > BUSY_TIMEOUT_MS)
+    if ((uint32_t) (millis() - start) > timeout_ms)
       return false;
+    delay(1);  // yield; a tight spin here starves the idle task
   }
   return true;
 }
 
+void LR1121::wake_pulse_() {
+  // One real byte, so the delegate definitely asserts and releases CS.
+  this->delegate_->begin_transaction();
+  (void) this->delegate_->transfer((uint8_t) 0x00);
+  this->delegate_->end_transaction();
+  delay(2);
+}
+
 void LR1121::cmd_write_buf_(uint16_t opcode, const uint8_t *args, size_t len) {
-  if (!this->wait_while_busy_()) {
-    ESP_LOGW(TAG, "BUSY stuck high before command 0x%04X", opcode);
-    return;
+  if (!this->wait_while_busy_() && !this->busy_line_suspect_) {
+    // Warn once, then carry on. Refusing to talk because BUSY looks stuck is
+    // how a bad BUSY reading turns into a silent radio that cannot even be
+    // interrogated.
+    ESP_LOGW(TAG, "BUSY stuck high before command 0x%04X - sending anyway", opcode);
+    this->busy_line_suspect_ = true;
   }
   this->delegate_->begin_transaction();
   this->delegate_->transfer((uint8_t) (opcode >> 8));
@@ -172,13 +191,18 @@ bool LR1121::cmd_read_(uint16_t opcode, std::initializer_list<uint8_t> args, uin
   }
   this->cmd_write_buf_(opcode, buf, n);
 
-  if (!this->wait_while_busy_()) {
-    ESP_LOGW(TAG, "BUSY stuck high after command 0x%04X", opcode);
-    return false;
-  }
+  // Not fatal for the same reason as above: read the answer regardless and let
+  // the caller judge it. A sane GetVersion arriving while BUSY reads high is
+  // the single most useful diagnostic this driver can produce.
+  (void) this->wait_while_busy_();
 
   this->delegate_->begin_transaction();
-  (void) this->delegate_->transfer((uint8_t) 0x00);  // status byte, discarded
+  // Semtech's lr11xx_hal_read clocks exactly one dummy/status byte before the
+  // response payload.  Discarding two shifts every result: on LR1121 hardware
+  // GetVersion then misleadingly reads type=0x01 even though the documented
+  // LR1121 type is 0x03, and GetErrors moves valid low-byte flags into the
+  // undefined high byte.
+  (void) this->delegate_->transfer((uint8_t) 0x00);
   for (size_t i = 0; i < out_len; i++)
     out[i] = this->delegate_->transfer((uint8_t) 0x00);
   this->delegate_->end_transaction();
@@ -217,14 +241,22 @@ uint32_t LR1121::get_irq_status_() {
   // Sending 0x0100 as a command here instead would look right and return
   // rubbish, because the first transaction would be interpreted as a command
   // and the answer would be one frame late.
-  if (!this->wait_while_busy_())
-    return 0;
+  (void) this->wait_while_busy_();  // advisory, not a gate - see wait_while_busy_
   uint8_t r[6]{};
   this->delegate_->begin_transaction();
   for (size_t i = 0; i < sizeof(r); i++)
     r[i] = this->delegate_->transfer((uint8_t) 0x00);
   this->delegate_->end_transaction();
   return ((uint32_t) r[2] << 24) | ((uint32_t) r[3] << 16) | ((uint32_t) r[4] << 8) | (uint32_t) r[5];
+}
+
+// S-mode sync, same bytes the SX1276 and SX1262 drivers program: the 18-bit
+// S-mode sync 0x7696 preceded by three "01" preamble bits, which packet radios
+// express as 0x54 0x76 0x96. Twenty-four bits, not sixteen - configure_gfsk_()
+// sizes the field from the listen mode for exactly this reason.
+void LR1121::set_s1_sync_word_() {
+  const uint8_t sw[8] = {0x54, 0x76, 0x96, 0, 0, 0, 0, 0};
+  this->cmd_write_buf_(OC_SET_GFSK_SYNC_WORD, sw, sizeof(sw));
 }
 
 void LR1121::set_sync_word_(uint8_t sync2) {
@@ -270,14 +302,40 @@ void LR1121::setup() {
   this->common_setup();
   this->reset();
 
-  // Wake-up pulse on NSS. The vendor HAL does this after reset and it costs
-  // nothing; a chip already awake ignores it.
-  this->delegate_->begin_transaction();
-  this->delegate_->end_transaction();
-  delay(1);
+  // Wake-up pulse, then a generous wait. Two separate reasons for the length:
+  // the chip loads its firmware out of NVM after NRESET is released, and the
+  // vendor HAL allows seconds for BUSY on every single command - not the tens
+  // of milliseconds a TCXO start would suggest. 100 ms was simply too short.
+  this->wake_pulse_();
+  bool busy_ok = this->wait_while_busy_(1000);
+  if (!busy_ok) {
+    // Second attempt with another NSS edge: a chip that came up in sleep needs
+    // the pulse, and one pulse may land before it is listening.
+    this->wake_pulse_();
+    busy_ok = this->wait_while_busy_(1000);
+  }
 
-  if (!this->wait_while_busy_()) {
-    ESP_LOGE(TAG, "BUSY never fell after reset - check wiring (BUSY, NSS, power)");
+  // Ask the chip who it is EVEN IF BUSY still looks stuck. This is the whole
+  // point: the answer separates "no chip / no SPI" from "chip fine, BUSY line
+  // lying", and those two have completely different fixes.
+  this->boot_ok_ = this->get_version_(this->boot_hw_, this->boot_type_, this->boot_fw_);
+
+  if (!busy_ok) {
+    this->busy_line_suspect_ = true;
+    ESP_LOGW(TAG, "BUSY did not fall within 2 s after reset (pin reads %d)",
+             this->busy_pin_ != nullptr ? (int) this->busy_pin_->digital_read() : -1);
+    if (this->boot_ok_) {
+      ESP_LOGW(TAG, "...but GetVersion answered hw=0x%02X type=0x%02X fw=0x%04X.",
+               (unsigned) this->boot_hw_, (unsigned) this->boot_type_, (unsigned) this->boot_fw_);
+      ESP_LOGW(TAG, "   The chip is alive and talking - suspect the BUSY line itself "
+                    "(wrong busy_pin, floating input, board revision), not the radio.");
+    } else {
+      ESP_LOGE(TAG, "...and GetVersion returned nothing sane. SPI, power or reset wiring.");
+    }
+  }
+
+  if (!this->boot_ok_) {
+    ESP_LOGE(TAG, "No sane answer to GetVersion - check SPI (CLK/MOSI/MISO/CS) and reset_pin");
     this->mark_failed();
     return;
   }
@@ -297,19 +355,48 @@ void LR1121::setup() {
   // The Waveshare board fits Y1 for this.
   this->cmd_write_(OC_CFG_LFCLK, {(uint8_t) (LFCLK_XTAL | (1 << 2))});
 
+  // Calibrations that exercise the RF PLL need the 32 MHz reference running.
+  // SetTcxoMode only tells the chip how to power and start that reference; it
+  // does not itself leave standby RC.  The first hardware run with correctly
+  // framed GetErrors proved the distinction: HF_XOSC_START was clear, but the
+  // calibration ended with PLL_LOCK.  Enter XOSC explicitly after configuring
+  // the TCXO and before launching either calibration.
+  this->cmd_write_(OC_CLEAR_ERRORS, {});
+  this->cmd_write_(OC_SET_STANDBY, {STANDBY_XOSC});
+  // Give the reference the full startup window before judging it. The default
+  // per-command wait is 100 ms, while tcxo_startup_ticks is counted in 32.768
+  // kHz ticks - 3000 of them is ~91.6 ms, so the old margin was 8 ms on a board
+  // whose BUSY line is not fully trusted. Reading GetErrors mid-startup is a
+  // good way to latch a failure that is not one.
+  (void) this->wait_while_busy_(1000);
+  const uint16_t errors_after_xosc = this->get_errors_();
+
   this->cmd_write_(OC_CLEAR_ERRORS, {});
   this->cmd_write_(OC_CALIBRATE_IMAGE, {CAL_IMG_FREQ1_863MHZ, CAL_IMG_FREQ2_870MHZ});
-  this->cmd_write_(OC_CALIBRATE, {CALIBRATE_ALL});
+  const uint16_t errors_after_image = this->get_errors_();
 
-  this->boot_errors_ = this->get_errors_();
   this->cmd_write_(OC_CLEAR_ERRORS, {});
+  this->cmd_write_(OC_CALIBRATE, {CALIBRATE_ALL});
+  // Calibrate(0x3F) is the longest system command.  On this board the BUSY
+  // input has already proved unreliable while SPI itself works (GetVersion,
+  // RSSI and RX FIFO all answer), so BUSY must remain advisory rather than
+  // becoming a fatal gate again.  Give calibration the same one-second window
+  // used by the vendor HAL, then read its result.  This avoids the premature
+  // 100 ms GetErrors that produced the impossible value 0x1300 without
+  // disabling a working receiver when GPIO41 stays asserted.
+  (void) this->wait_while_busy_(1000);
+  const uint16_t errors_after_calibrate = this->get_errors_();
 
-  this->boot_ok_ = this->get_version_(this->boot_hw_, this->boot_type_, this->boot_fw_);
-  if (!this->boot_ok_) {
-    ESP_LOGE(TAG, "No sane answer to GetVersion - SPI or BUSY wiring is wrong");
-    this->mark_failed();
-    return;
-  }
+  // Keep the aggregate for the normal boot report, but expose the individual
+  // stages at INFO while this new board is being brought up.  PLL_LOCK is a
+  // sticky bit; without clearing between stages the final 0x0080 cannot tell
+  // whether entering XOSC, image calibration or the full calibration raised
+  // it.  Reading and clearing the diagnostic latch does not undo calibration.
+  this->errors_after_xosc_ = errors_after_xosc;
+  this->errors_after_image_ = errors_after_image;
+  this->errors_after_calibrate_ = errors_after_calibrate;
+  this->boot_errors_ = errors_after_xosc | errors_after_image | errors_after_calibrate;
+  this->cmd_write_(OC_CLEAR_ERRORS, {});
 
   this->configure_gfsk_();
   this->restart_rx();
@@ -344,10 +431,18 @@ void LR1121::configure_gfsk_() {
   // rots.
   this->cmd_write_(OC_SET_RSSI_CALIBRATION, {0x22, 0x32, 0x43, 0x45, 0x64, 0x55, 0x66, 0x76, 0x06, 0x00, 0x00});
 
-  this->cmd_write_(OC_SET_MODULATION_PARAM, {(uint8_t) (this->bitrate_bps_ >> 24),
-                                             (uint8_t) (this->bitrate_bps_ >> 16),
-                                             (uint8_t) (this->bitrate_bps_ >> 8),
-                                             (uint8_t) (this->bitrate_bps_ >> 0),
+  // S-mode runs at 32768 b/s, not 100000. The bitrate is a YAML option, so an
+  // explicit value always wins; this only supplies the right default when the
+  // user picked listen_mode: s1 and left the T-mode number alone. The effective
+  // value is printed on the RF line below, so the substitution is never silent.
+  uint32_t bitrate = this->bitrate_bps_;
+  if (this->listen_mode_ == LISTEN_MODE_S1 && bitrate == 100000UL)
+    bitrate = 32768UL;
+
+  this->cmd_write_(OC_SET_MODULATION_PARAM, {(uint8_t) (bitrate >> 24),
+                                             (uint8_t) (bitrate >> 16),
+                                             (uint8_t) (bitrate >> 8),
+                                             (uint8_t) (bitrate >> 0),
                                              GFSK_PULSE_SHAPE_OFF,
                                              (uint8_t) this->rx_bandwidth_,
                                              (uint8_t) (this->deviation_hz_ >> 24),
@@ -360,7 +455,7 @@ void LR1121::configure_gfsk_() {
   // not because it does anything here.
   this->cmd_write_(OC_SET_PKT_PARAM, {0x00, 32,
                                       (uint8_t) this->preamble_detector_,
-                                      16,  // sync word length in BITS
+                                      (uint8_t) (this->listen_mode_ == LISTEN_MODE_S1 ? 24 : 16),
                                       GFSK_ADDR_FILTER_DISABLE,
                                       GFSK_PKT_FIX_LEN,
                                       this->payload_length_,
@@ -369,17 +464,27 @@ void LR1121::configure_gfsk_() {
 
   this->cmd_write_(OC_SET_RX_BOOSTED, {(uint8_t) (this->rx_boosted_ ? 0x01 : 0x00)});
 
-  const uint32_t mask = IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_FSK_LEN_ERROR;
+  uint32_t mask = IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_FSK_LEN_ERROR;
+  if (this->listen_mode_ == LISTEN_MODE_S1)
+    mask |= IRQ_SYNC_WORD_VALID;
   this->cmd_write_(OC_SET_DIO_IRQ_PARAMS, {(uint8_t) (mask >> 24), (uint8_t) (mask >> 16), (uint8_t) (mask >> 8),
                                            (uint8_t) (mask >> 0),
                                            0x00, 0x00, 0x00, 0x00});  // DIO2: nothing
 
   char buf[96];
   snprintf(buf, sizeof(buf), "%.3f MHz, %u bps, fdev %u Hz, BW 0x%02X, len %u, boost %s",
-           this->configured_frequency_hz_ / 1000000.0f, (unsigned) this->bitrate_bps_,
+           this->configured_frequency_hz_ / 1000000.0f, (unsigned) bitrate,
            (unsigned) this->deviation_hz_, (unsigned) this->rx_bandwidth_, (unsigned) this->payload_length_,
            this->rx_boosted_ ? "on" : "off");
   this->rf_params_str_ = buf;
+
+  if (this->listen_mode_ == LISTEN_MODE_S1) {
+    ESP_LOGI(TAG, "S1: modem 32768 b/s, sync 0x54 0x76 0x96 (24 bit). Capture starts on "
+                  "RX_DONE against the fixed length and the host trims - measured working "
+                  "2026-08-19, Format A, 85 B decoded from a 255 B capture at -59 dBm. "
+                  "Sensitivity at the margin is NOT established; that needs a weak real "
+                  "transmitter, not a bench generator.");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +496,19 @@ void LR1121::restart_rx() {
   // C-mode exists in two format variants that differ only in the second sync
   // byte (A = 0x3D, B = 0xCD). Listening on one of them silently drops the
   // other, so `both` and `c1` rotate 3:1 in favour of A.
+  if (this->listen_mode_ == LISTEN_MODE_S1) {
+    this->set_s1_sync_word_();
+    this->cmd_write_(OC_CLEAR_IRQ, {(uint8_t) (IRQ_ALL >> 24), (uint8_t) (IRQ_ALL >> 16),
+                                    (uint8_t) (IRQ_ALL >> 8), (uint8_t) (IRQ_ALL >> 0)});
+    this->cmd_write_(OC_SET_STANDBY, {STANDBY_XOSC});
+    this->cmd_write_buf_(OC_SET_RX, RX_CONTINUOUS, sizeof(RX_CONTINUOUS));
+    this->rx_loaded_ = false;
+    this->rx_idx_ = 0;
+    this->rx_len_ = 0;
+    this->last_rssi_dbm_ = RSSI_NOT_MEASURED;
+    return;
+  }
+
   uint8_t sync2;
   if (this->listen_mode_ == LISTEN_MODE_T1) {
     sync2 = 0x3D;
@@ -418,8 +536,23 @@ bool LR1121::load_rx_buffer_() {
 
   const uint8_t payload_len = st[0];
   const uint8_t start_ptr = st[1];
-  if (payload_len == 0)
+  if (payload_len == 0) {
+    // In S1 the IRQ line also carries SYNC_WORD_VALID, so landing here means the
+    // sync word matched and no packet followed. That is the decisive observation
+    // for whether a SYNC_WORD_VALID-driven capture path is needed at all - say it
+    // once, and clear the latch so the line does not stay asserted.
+    if (this->listen_mode_ == LISTEN_MODE_S1) {
+      if (!this->s1_sync_seen_) {
+        this->s1_sync_seen_ = true;
+        ESP_LOGW(TAG, "S1: sync word matched but no packet completed. The modem and sync "
+                      "are right; RX_DONE is what does not arrive. This is the case that "
+                      "needs a SYNC_WORD_VALID-driven capture (see the SX1262 S1 path).");
+      }
+      this->cmd_write_(OC_CLEAR_IRQ, {(uint8_t) (IRQ_ALL >> 24), (uint8_t) (IRQ_ALL >> 16),
+                                      (uint8_t) (IRQ_ALL >> 8), (uint8_t) (IRQ_ALL >> 0)});
+    }
     return false;
+  }
 
   // Packet RSSI first: RssiSync is latched at sync-word detection and survives
   // the frame, whereas GetRssiInst after RX_DONE would measure the empty
@@ -442,10 +575,10 @@ bool LR1121::load_rx_buffer_() {
   this->rx_buffer_.assign(payload_len, 0);
   uint8_t r[2] = {start_ptr, payload_len};
   this->cmd_write_buf_(OC_READ_BUFFER8, r, sizeof(r));
-  if (!this->wait_while_busy_())
-    return false;
+  (void) this->wait_while_busy_();  // advisory, not a gate
   this->delegate_->begin_transaction();
-  (void) this->delegate_->transfer((uint8_t) 0x00);  // status byte
+  // Same single dummy/status byte as lr11xx_hal_read and cmd_read_().
+  (void) this->delegate_->transfer((uint8_t) 0x00);
   for (size_t i = 0; i < this->rx_buffer_.size(); i++)
     this->rx_buffer_[i] = this->delegate_->transfer((uint8_t) 0x00);
   this->delegate_->end_transaction();
@@ -519,15 +652,107 @@ static void lr1121_log_errors_(uint16_t errors) {
 
   // The one worth spelling out, because the fix is a config line and the
   // symptom otherwise looks like dead hardware.
-  if (errors & ERR_HF_XOSC_START)
-    ESP_LOGW(TAG, "  HF_XOSC_START: the 32 MHz TCXO did not start. Try the other tcxo_voltage "
-                  "(1.8v / 3.0v) - the vendor package states both and neither is measured.");
+  if (errors & ERR_HF_XOSC_START) {
+    ESP_LOGW(TAG, "  HF_XOSC_START: latched while entering STDBY_XOSC. Read the stage line above "
+                  "before acting on this.");
+    ESP_LOGW(TAG, "   IMAGE and ALL clean + frames arriving = startup transient, ignore it: "
+                  "measured on the Waveshare HF board at tcxo_voltage 3.0v, which receives fine.");
+    ESP_LOGW(TAG, "   IMAGE or ALL also failing = the 32 MHz reference really is not running; "
+                  "that is when tcxo_voltage / tcxo_startup_ticks are worth changing.");
+  }
+}
+
+// Receiver bandwidth in Hz for the exposed codes, so the sanity block can check
+// it against the signal instead of printing a hex code nobody can judge.
+static uint32_t lr1121_bw_hz_(uint8_t code) {
+  switch (code) {
+    case LR1121_BW_234300: return 234300;
+    case LR1121_BW_312000: return 312000;
+    case LR1121_BW_373600: return 373600;
+    case LR1121_BW_467000: return 467000;
+    default: return 0;
+  }
 }
 
 void LR1121::log_reg_status() {
-  ESP_LOGCONFIG(TAG, "  Chip: hw=0x%02X type=0x%02X fw=0x%04X", (unsigned) this->boot_hw_,
-                (unsigned) this->boot_type_, (unsigned) this->boot_fw_);
+  // INFO, not LOGCONFIG. This is the evidence that SPI and the chip answer at
+  // all, and LOGCONFIG sits BELOW info in ESPHome's level order - so on a
+  // perfectly ordinary `logger: level: info` it would never be printed, which
+  // is precisely when someone needs it most.
+  ESP_LOGI(TAG, "  Chip: hw=0x%02X type=0x%02X fw=0x%04X", (unsigned) this->boot_hw_,
+           (unsigned) this->boot_type_, (unsigned) this->boot_fw_);
   ESP_LOGCONFIG(TAG, "  RF: %s", this->rf_params_str_.c_str());
+
+  // YAML sanity, same idea as the SX1262 block in component.cpp: echo what was
+  // chosen and say what it means, at INFO, where it is actually visible. Kept in
+  // the driver because the driver already holds these values - the SX1262 path
+  // copies them into the component, which is plumbing this does not need.
+  ESP_LOGI(TAG, "LR1121 YAML sanity / sprawdzenie YAML LR1121:");
+
+  if (this->tcxo_voltage_ == LR1121_TCXO_3_0V) {
+    ESP_LOGI(TAG, "  tcxo_voltage: 3.0v -> measured working on the Waveshare HF board / "
+                  "zmierzone jako dzialajace na plytce Waveshare HF");
+  } else if (this->tcxo_voltage_ == LR1121_TCXO_1_8V) {
+    ESP_LOGW(TAG, "  tcxo_voltage: 1.8v -> RISK(!): the 32 MHz TCXO did not start at this "
+                  "setting on the Waveshare HF board / na tej plytce TCXO nie wystartowal "
+                  "przy tym ustawieniu");
+  } else {
+    ESP_LOGW(TAG, "  tcxo_voltage: code 0x%02X -> untested on this board; 3.0v is the "
+                  "measured one / nietestowane na tej plytce",
+             (unsigned) this->tcxo_voltage_);
+  }
+  ESP_LOGI(TAG, "  tcxo_startup_ticks: %u (~%u ms at 32.768 kHz)",
+           (unsigned) this->tcxo_startup_ticks_,
+           (unsigned) ((this->tcxo_startup_ticks_ * 1000UL) / 32768UL));
+
+  const uint32_t bw = lr1121_bw_hz_((uint8_t) this->rx_bandwidth_);
+  const uint32_t needed = 2UL * this->deviation_hz_ + this->bitrate_bps_;
+  if (bw >= needed) {
+    ESP_LOGI(TAG, "  rx_bandwidth: %u Hz -> covers 2*fdev+bitrate = %u Hz / pokrywa wymagane %u Hz",
+             (unsigned) bw, (unsigned) needed, (unsigned) needed);
+  } else {
+    ESP_LOGW(TAG, "  rx_bandwidth: %u Hz -> RISK(!): narrower than 2*fdev+bitrate = %u Hz, "
+                  "frames will be clipped / wezsze niz wymagane %u Hz",
+             (unsigned) bw, (unsigned) needed, (unsigned) needed);
+  }
+
+  if (this->payload_length_ >= 255) {
+    ESP_LOGI(TAG, "  payload_length: 255 -> full capture; host trims / pelne przechwycenie, "
+                  "host przycina");
+  } else {
+    ESP_LOGW(TAG, "  payload_length: %u -> RISK(!): frames longer than this are truncated; "
+                  "NES telegrams arrive as 245 raw bytes / dluzsze ramki beda ucinane, "
+                  "telegramy NES maja 245 bajtow surowych",
+             (unsigned) this->payload_length_);
+  }
+
+  ESP_LOGI(TAG, "  rx_boosted: %s%s", this->rx_boosted_ ? "true" : "false",
+           this->rx_boosted_ ? " -> +2 dB for ~2 mA / +2 dB kosztem ~2 mA"
+                             : " -> 2 dB of sensitivity left on the table / oddane 2 dB czulosci");
+
+  if (this->listen_mode_ == LISTEN_MODE_S1) {
+    ESP_LOGI(TAG, "  listen_mode: s1 -> 32768 b/s, sync 0x54 0x76 0x96 (24 bit), 868.300 MHz. "
+                  "Measured working; margin sensitivity unknown / zmierzone jako dzialajace, "
+                  "czulosc na granicy niezbadana");
+  }
+
+  // The known-benign signature, measured on this board: the flag latches while
+  // entering STDBY_XOSC, both calibrations that follow are clean, and reception
+  // works. Saying that in three warning lines on every single boot is how a log
+  // teaches people to stop reading warnings. One calm line is enough.
+  const bool benign_xosc = this->boot_errors_ == ERR_HF_XOSC_START &&
+                           this->errors_after_image_ == 0 && this->errors_after_calibrate_ == 0;
+  if (benign_xosc) {
+    ESP_LOGI(TAG, "  Calibration stages: XOSC=0x%04X IMAGE=0x0000 ALL=0x0000 - HF_XOSC_START "
+                  "latched at XOSC entry, calibrations clean. Known transient on this board, "
+                  "not a fault.",
+             (unsigned) this->errors_after_xosc_);
+    return;
+  }
+
+  ESP_LOGI(TAG, "  Calibration stages: XOSC=0x%04X IMAGE=0x%04X ALL=0x%04X",
+           (unsigned) this->errors_after_xosc_, (unsigned) this->errors_after_image_,
+           (unsigned) this->errors_after_calibrate_);
   lr1121_log_errors_(this->boot_errors_);
 }
 
