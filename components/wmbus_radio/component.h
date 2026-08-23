@@ -91,6 +91,15 @@ public:
     this->sx1262_yaml_long_gfsk_packets_ = long_gfsk_packets;
     this->sx1262_yaml_rx_gain_ = rx_gain;
   }
+  void set_sx1262_rf_sw_pin_configured(bool configured) { this->sx1262_yaml_rf_sw_pin_ = configured; }
+  void set_cc1101_yaml_sanity(bool gdo0_configured, bool gdo2_configured) {
+    this->cc1101_yaml_sanity_configured_ = true;
+    this->cc1101_yaml_gdo0_ = gdo0_configured;
+    this->cc1101_yaml_gdo2_ = gdo2_configured;
+  }
+  // Built by __init__.py, which is the only place that knows the schema
+  // defaults. Logged verbatim so the driver never has to restate a default.
+  void add_config_report_line(const std::string &line) { this->config_report_.push_back(line); }
   void set_sx1276_yaml_sanity(bool tcxo_pin_configured) {
     this->sx1276_yaml_sanity_configured_ = true;
     this->sx1276_yaml_tcxo_pin_configured_ = tcxo_pin_configured;
@@ -455,6 +464,11 @@ protected:
   // but boards such as LilyGO T3 V3.0 TCXO use GPIO12 as TCXO enable.
   bool sx1276_yaml_sanity_configured_{false};
   bool sx1276_yaml_tcxo_pin_configured_{false};
+  bool sx1262_yaml_rf_sw_pin_{false};
+  bool cc1101_yaml_sanity_configured_{false};
+  bool cc1101_yaml_gdo0_{false};
+  bool cc1101_yaml_gdo2_{false};
+  std::vector<std::string> config_report_;
 
   // Adaptive busy-ether hold state: aggressive mode stays active until this timestamp (ms).
   // Updated once per diagnostic summary window by evaluate_busy_ether_adaptive_().

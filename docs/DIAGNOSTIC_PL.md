@@ -239,3 +239,58 @@ Publikacja MQTT jest celowo oddzielona od odbioru radiowego.
 Jeżeli MQTT jest niedostępne, odebrane ramki nadal są logowane lokalnie, a publikacja MQTT jest pomijana z ograniczanym czasowo ostrzeżeniem. To pomaga oddzielić problemy RF od problemów transportu.
 
 Jeżeli lokalnie widzisz `Have data / odebrano dane`, ale backend nic nie odbiera, debuguj MQTT. Jeżeli nie widzisz lokalnych linii `Have data`, najpierw debuguj RF i konfigurację płytki.
+
+## Raport konfiguracji przy starcie
+
+Przy każdym starcie, i ponownie przy cyklicznej linii boot-log, komponent
+wypisuje **efektywną konfigurację tej płytki** — jedna opcja na linię, oznaczona
+tak, żeby dało się odróżnić wybór od dziedziczenia:
+
+```text
+[I][wmbus] Configuration / konfiguracja (SX1262):
+[I][wmbus]   [core]
+[I][wmbus]   radio_type: SX1262 (required)
+[I][wmbus]   listen_mode: t1 (CHANGED, default: both)
+[I][wmbus]   receiver_task_stack_size: 6144 (CHANGED, default: 3072)
+[I][wmbus]   [pins]
+[I][wmbus]   cs_pin: GPIO41 (set)
+[I][wmbus]   rf_sw_pin: GPIO38 (set)
+[I][wmbus]   [sx1262]
+[I][wmbus]   has_tcxo: true (CHANGED, default: false)
+[I][wmbus]   rx_gain: boosted (default)
+```
+
+Znaczniki:
+
+| znacznik | znaczenie |
+|---|---|
+| `(required)` | wymagane; `radio_type` |
+| `(set)` | brak domyślnej w schemacie — pin, nazwa topiku |
+| `(default)` | obecne i równe domyślnej ze schematu |
+| `(CHANGED, default: X)` | ustawione przez Ciebie i różne od `X` |
+| `not set (default: X)` | nieobecne; obowiązuje `X` |
+
+Lista powstaje przy kompilacji **ze schematu**, więc domyślna nie może rozjechać
+się z tym, czego naprawdę używa sterownik. Wypisywane są wyłącznie opcje
+dotyczące wybranego radia — `has_tcxo` nigdy nie pojawi się przy `CC1101`.
+
+Po co to jest: wcześniej log pokazywał kilka ręcznie wybranych kontroli, więc
+wszystko poza tą listą było niewidoczne, a źle skonfigurowana płytka i tak
+wyglądała zdrowo. Z raportem pytanie od użytkownika da się rozstrzygnąć z samego
+logu, a zdanie „przecież tego nie zmieniałem" staje się sprawdzalne.
+
+## Kontrole sanity per radio
+
+Poza raportem każde radio loguje te kontrole, których niepowodzenie jest
+**ciche** — płytka startuje, log wygląda dobrze, a odbioru nie ma albo jest zły:
+
+- **SX1262** — `has_tcxo` (płytka z TCXO bez tego może nie odbierać nic),
+  `dio2_rf_switch`, `long_gfsk_packets` (długie ramki T1), `rx_gain` oraz
+  **`rf_sw_pin`**: wymagany na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), a bez niego
+  płytka jest głucha o jakieś 30 dB, wyglądając przy tym całkiem zdrowo.
+- **SX1276** — `tcxo_pin` (LilyGO T3 V3.0 TCXO używa `GPIO12`).
+- **CC1101** — bramka eksperymentalna oraz `gdo0_pin`/`gdo2_pin`, żeby okablowanie
+  dwóch przerwań było potwierdzone, a nie domniemane.
+- **LR1121** — `tcxo_voltage`, `tcxo_startup_ticks`, `rx_bandwidth` wobec
+  wymaganego `2*fdev + bitrate`, `payload_length`, `rx_boosted` oraz etapy
+  kalibracji przy znanym stanie przejściowym `HF_XOSC_START`.

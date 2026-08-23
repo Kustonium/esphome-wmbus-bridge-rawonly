@@ -239,3 +239,58 @@ MQTT publishing is intentionally separated from radio reception.
 If MQTT is unavailable, received frames are still logged locally and MQTT publishing is skipped with a throttled warning. This helps separate RF problems from transport problems.
 
 If you see `Have data / odebrano dane` locally but nothing reaches the backend, debug MQTT. If you do not see local `Have data` lines, debug RF/board configuration first.
+
+## Boot configuration report
+
+Every boot, and again on the periodic boot-log line, the component prints the
+**effective configuration of this board**, one option per line, marked so a
+reader can tell a choice from an inheritance:
+
+```text
+[I][wmbus] Configuration / konfiguracja (SX1262):
+[I][wmbus]   [core]
+[I][wmbus]   radio_type: SX1262 (required)
+[I][wmbus]   listen_mode: t1 (CHANGED, default: both)
+[I][wmbus]   receiver_task_stack_size: 6144 (CHANGED, default: 3072)
+[I][wmbus]   [pins]
+[I][wmbus]   cs_pin: GPIO41 (set)
+[I][wmbus]   rf_sw_pin: GPIO38 (set)
+[I][wmbus]   [sx1262]
+[I][wmbus]   has_tcxo: true (CHANGED, default: false)
+[I][wmbus]   rx_gain: boosted (default)
+```
+
+Markers:
+
+| marker | meaning |
+|---|---|
+| `(required)` | must be given; `radio_type` |
+| `(set)` | no schema default exists — a pin, a topic name |
+| `(default)` | present, and equal to the schema default |
+| `(CHANGED, default: X)` | you set it, and it differs from `X` |
+| `not set (default: X)` | absent; `X` applies |
+
+The list is built at compile time from the schema, so a default can never drift
+away from what the driver actually uses. Only options that apply to the selected
+radio are listed — `has_tcxo` never appears for `CC1101`.
+
+Why it exists: the log used to show a handful of hand-picked checks, so anything
+outside that list was invisible and a misconfigured board still looked healthy.
+With the report, a support question can be answered from the log alone, and
+"I did not change that" becomes checkable.
+
+## Per-radio sanity checks
+
+Beyond the report, each radio logs the checks whose failure is *silent* — the
+board initializes, the log looks fine, and reception is bad or absent:
+
+- **SX1262** — `has_tcxo` (a TCXO board without it may receive nothing),
+  `dio2_rf_switch`, `long_gfsk_packets` (long T1 frames), `rx_gain`, and
+  **`rf_sw_pin`**: required on XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), and without
+  it the board is roughly 30 dB deaf while looking perfectly healthy.
+- **SX1276** — `tcxo_pin` (LilyGO T3 V3.0 TCXO uses `GPIO12`).
+- **CC1101** — the experimental gate plus `gdo0_pin`/`gdo2_pin`, so dual-IRQ
+  wiring is confirmed rather than inferred.
+- **LR1121** — `tcxo_voltage`, `tcxo_startup_ticks`, `rx_bandwidth` against the
+  required `2*fdev + bitrate`, `payload_length`, `rx_boosted`, and the
+  calibration stages behind the known `HF_XOSC_START` transient.

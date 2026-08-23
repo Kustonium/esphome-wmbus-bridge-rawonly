@@ -53,8 +53,8 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `tcxo_pin` | `SX1276` | brak | board-specific | opcjonalny pin TCXO enable; ustawiany HIGH przed inicjalizacją SX1276 |
 | `busy_pin` | `SX1262`, `LR1121` | wymagane | public | linia BUSY; bez niej sterownik nie odróżni „jeszcze nie gotowy" od „odpowiedział" |
 | `rf_switch` | `SX1262` | brak | board-specific | wymuszenie stanu przełącznika RF; ustawiaj tylko gdy dokumentacja płytki tego wymaga |
-| `clear_device_errors_on_boot` | `SX1262` | `false` | advanced | kasuj rejestr błędów układu przy starcie |
-| `publish_dev_err_after_clear` | `SX1262` | `false` | advanced | opublikuj stan błędów po skasowaniu (diagnostyka `clear_device_errors_on_boot`) |
+| `clear_device_errors_on_boot` | `SX1262` | `false` | advanced | kasuj rejestr błędów układu przy starcie; **zalecane na płytkach z TCXO** — bez tego `XOSC_START_ERR` jest tam zapalone zawsze i nic nie znaczy |
+| `publish_dev_err_after_clear` | `SX1262` | `false` | advanced | opublikuj ponownie odczytany stan błędów po skasowaniu; jedyny sposób, by zobaczyć go na węźle, który nic nie odbiera |
 | `cc1101_allow_experimental` | `CC1101` | `false` | safety gate | wymagane do uruchomienia CC1101 |
 | `gdo0_pin`, `gdo2_pin` | `CC1101` | wymagane | public | dual IRQ; single-IRQ CC1101 nie jest wspierany |
 | `lr1121_allow_experimental` | `LR1121` | `false` | safety gate | wymagane do uruchomienia LR1121 |

@@ -446,6 +446,17 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       }
 
       ESP_LOGI(TAG, "  rx_gain: %s", this->sx1262_yaml_rx_gain_.c_str());
+
+      // Same failure shape as has_tcxo: the radio initializes, the log looks
+      // healthy, and the board is ~30 dB deaf because the module never opens
+      // its antenna path. Reported in both states so "not configured" is a
+      // positive statement rather than a missing line.
+      if (this->sx1262_yaml_rf_sw_pin_) {
+        ESP_LOGI(TAG, "  rf_sw_pin: configured -> module RF switch gated by the driver / przelacznik RF modulu sterowany przez sterownik");
+      } else {
+        ESP_LOGI(TAG,
+                 "  rf_sw_pin: not configured -> OK for boards without a module RF switch; REQUIRED on XIAO ESP32-S3 + Wio-SX1262 (GPIO38), otherwise ~30 dB less sensitivity / OK dla plytek bez przelacznika RF w module; WYMAGANE na XIAO ESP32-S3 + Wio-SX1262 (GPIO38), inaczej czulosc nizsza o ~30 dB");
+      }
       this->radio->log_reg_status();
     } else {
       ESP_LOGI(TAG,
@@ -456,6 +467,17 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                this->diag_mode_str_.c_str(),
                this->meter_stats_str_.c_str(),
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
+
+      if (this->cc1101_yaml_sanity_configured_) {
+        ESP_LOGI(TAG, "CC1101 YAML sanity / sprawdzenie YAML CC1101:");
+        ESP_LOGI(TAG, "  cc1101_allow_experimental: true -> experimental gate open / bramka eksperymentalna otwarta");
+        // The schema already refuses to build without both pins, so these can
+        // only read "configured". They are logged anyway: a reader debugging a
+        // silent CC1101 should see dual-IRQ confirmed, not have to infer it.
+        ESP_LOGI(TAG, "  gdo0_pin: %s / gdo2_pin: %s -> dual IRQ; single-IRQ CC1101 wiring is not supported / dwa przerwania; okablowanie single-IRQ nie jest wspierane",
+                 this->cc1101_yaml_gdo0_ ? "configured" : "MISSING",
+                 this->cc1101_yaml_gdo2_ ? "configured" : "MISSING");
+      }
       this->radio->log_reg_status();
     }
 
@@ -466,6 +488,18 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     // rather than a missing line.
     ESP_LOGI(TAG, "Forward whitelist / whitelista przekazywania: %s",
              this->forward_whitelist_summary_().c_str());
+
+    // Every effective setting, marked (default) / (CHANGED) / (set). Logged for
+    // every radio, not only the ones that happen to have a sanity block, so a
+    // support question can be answered from the log alone instead of asking for
+    // the YAML - and so "I did not change that" becomes checkable.
+    // Deliberately here and not in setup(): setup() runs before the network
+    // logger attaches, so over `esphome logs` those lines are never seen.
+    if (!this->config_report_.empty()) {
+      ESP_LOGI(TAG, "Configuration / konfiguracja (%s):", radio_name);
+      for (const auto &line : this->config_report_)
+        ESP_LOGI(TAG, "%s", line.c_str());
+    }
 
     this->boot_log_last_ms_ = loop_now_ms;
     this->boot_log_count_++;
