@@ -413,6 +413,124 @@ BASE_CONFIG_SCHEMA = (
 )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Boot configuration report
+#
+# The startup log used to show a handful of hand-picked "sanity" lines, so any
+# option outside that list was invisible: a board could be misconfigured and
+# the log looked healthy. Worse, a reader could not tell whether a value was
+# chosen or simply inherited - which is the difference between "I set rx_gain"
+# and "rx_gain happens to be boosted".
+#
+# The report is built HERE, not in C++, because this is the only place that
+# knows both the user's config and the schema defaults. Duplicating defaults in
+# the driver is exactly the drift that tests/ci/check_example_defaults.py exists
+# to prevent.
+# ─────────────────────────────────────────────────────────────────────────────
+def _schema_defaults():
+    """Map option name -> schema default. Cosmetic; never break a build over it."""
+    out = {}
+    try:
+        import voluptuous as vol
+
+        for key in BASE_CONFIG_SCHEMA.schema:
+            name = getattr(key, "schema", None)
+            if not isinstance(name, str):
+                continue
+            default = getattr(key, "default", None)
+            if default is None:
+                continue
+            value = default() if callable(default) else default
+            if value is vol.UNDEFINED:
+                continue
+            out[name] = value
+    except Exception:  # noqa: BLE001
+        return {}
+    return out
+
+
+def _report_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict) and "number" in value:
+        return f"GPIO{value['number']}"
+    if isinstance(value, (list, tuple)):
+        return f"{len(value)} entries" if value else "empty"
+    if hasattr(value, "total_milliseconds"):
+        return f"{value.total_milliseconds / 1000:g}s"
+    if value == "":
+        return '""'
+    return str(value)
+
+
+_REPORT_PINS = ("cs_pin", CONF_RESET_PIN, CONF_IRQ_PIN, CONF_BUSY_PIN,
+                CONF_GDO0_PIN, CONF_GDO2_PIN, CONF_TCXO_PIN, CONF_RF_SW_PIN,
+                CONF_FEM_EN_PIN, CONF_FEM_CTRL_PIN, CONF_FEM_PA_PIN)
+
+_REPORT_CORE = (CONF_RADIO_TYPE, CONF_LISTEN_MODE, CONF_LISTEN_MODE_FILTER_AFTER_PARSE,
+                CONF_FREQUENCY, CONF_RECEIVER_TASK_STACK_SIZE, CONF_ALLOW_UNTESTED_FRAMEWORK)
+
+_REPORT_RADIO = {
+    "SX1262": (CONF_HAS_TCXO, CONF_DIO2_RF_SWITCH, CONF_RF_SWITCH, CONF_RX_GAIN,
+               CONF_LONG_GFSK_PACKETS, CONF_CLEAR_DEVICE_ERRORS_ON_BOOT,
+               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR),
+    "SX1276": (CONF_SX1276_BUSY_ETHER_MODE,),
+    "CC1101": (CONF_CC1101_ALLOW_EXPERIMENTAL,),
+    "LR1121": (CONF_LR1121_ALLOW_EXPERIMENTAL, CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS,
+               CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR, CONF_PAYLOAD_LENGTH,
+               CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION),
+}
+
+_REPORT_OUTPUT = (CONF_TOPIC_NAME, CONF_TELEGRAM_TOPIC, CONF_PUBLISH_RSSI,
+                  CONF_FORWARD_METERS, CONF_TARGET_METER_ID, CONF_PUBLISH_RADIO_RAW)
+
+_REPORT_DIAG = (CONF_DIAGNOSTIC_MODE, CONF_DIAG_SUMMARY_INTERVAL, CONF_DIAG_TOPIC,
+                CONF_HIGHLIGHT_METERS, CONF_DIAG_METER_STATS, CONF_DIAG_VERBOSE)
+
+
+def _config_report_lines(config):
+    """Every effective setting, marked (default) or (changed)."""
+    defaults = _schema_defaults()
+    radio_type = str(config[CONF_RADIO_TYPE]).upper()
+    lines = []
+
+    def emit(key):
+        if key == CONF_RADIO_TYPE:
+            lines.append(f"  {key}: {config[key]} (required)")
+            return
+        if key not in config:
+            if key in defaults:
+                lines.append(f"  {key}: not set (default: {_report_value(defaults[key])})")
+            else:
+                lines.append(f"  {key}: not set")
+            return
+        value = _report_value(config[key])
+        if key not in defaults:
+            lines.append(f"  {key}: {value} (set)")
+        elif config[key] == defaults[key]:
+            lines.append(f"  {key}: {value} (default)")
+        else:
+            lines.append(f"  {key}: {value} (CHANGED, default: {_report_value(defaults[key])})")
+
+    for title, keys in (
+        ("core", _REPORT_CORE),
+        ("pins", _REPORT_PINS),
+        (f"{radio_type.lower()}", _REPORT_RADIO.get(radio_type, ())),
+        ("output", _REPORT_OUTPUT),
+        ("diagnostics", _REPORT_DIAG),
+    ):
+        reported = [k for k in keys if k in config or k in defaults]
+        if title == "pins":
+            # A pin that does not exist on this radio is noise, not information.
+            reported = [k for k in keys if k in config]
+        if not reported:
+            continue
+        lines.append(f"  [{title}]")
+        for key in reported:
+            emit(key)
+    return lines
+
+
 def _validate_radio_pins(config):
     radio_type = config[CONF_RADIO_TYPE].upper()
 
@@ -794,6 +912,18 @@ async def to_code(config):
 
     if config[CONF_RADIO_TYPE] == "SX1276":
         cg.add(var.set_sx1276_yaml_sanity(CONF_TCXO_PIN in config))
+
+    if config[CONF_RADIO_TYPE] == "SX1262":
+        cg.add(var.set_sx1262_rf_sw_pin_configured(CONF_RF_SW_PIN in config))
+
+    if config[CONF_RADIO_TYPE] == "CC1101":
+        cg.add(var.set_cc1101_yaml_sanity(
+            CONF_GDO0_PIN in config,
+            CONF_GDO2_PIN in config,
+        ))
+
+    for _line in _config_report_lines(config):
+        cg.add(var.add_config_report_line(_line))
 
     # Log highlight config
     meters = config.get(CONF_HIGHLIGHT_METERS, [])

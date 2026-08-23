@@ -1,3 +1,39 @@
+# Feature: the boot log now states the whole configuration, and says what you changed
+
+## EN
+
+- Every radio now logs a **configuration report** at boot: each effective option on its own line, grouped into `[core] [pins] [<radio>] [output] [diagnostics]`, and marked `(default)`, `(CHANGED, default: X)`, `(set)` or `(required)`. Previously the log carried a handful of hand-picked checks, so any option outside that list was invisible and a misconfigured board still looked healthy.
+- The report is generated at **compile time from the schema**, not restated in the driver, so a default in the log can never drift away from the default the component uses. Only options that apply to the selected radio are printed.
+- **`rf_sw_pin` is now reported for SX1262.** Its absence is the same class of silent failure as `has_tcxo: false`: the radio initializes, the log looks healthy, and a XIAO ESP32-S3 + Wio-SX1262 runs roughly 30 dB deaf because the module never opens its antenna path. It is stated in both directions, so "not configured" is a positive statement rather than a missing line.
+- **CC1101 had no sanity block at all** and now has one: the experimental gate plus `gdo0_pin`/`gdo2_pin`, so dual-IRQ wiring is confirmed instead of inferred.
+- Coverage before this change was uneven — SX1276 logged one check, SX1262 four, LR1121 six, CC1101 none.
+- Documented in `DIAGNOSTIC{,_PL}.md` with the marker table and the per-radio list.
+
+## PL
+
+- Każde radio wypisuje teraz przy starcie **raport konfiguracji**: każda efektywna opcja w osobnej linii, pogrupowane w `[core] [pins] [<radio>] [output] [diagnostics]`, z oznaczeniem `(default)`, `(CHANGED, default: X)`, `(set)` albo `(required)`. Wcześniej log niósł kilka ręcznie wybranych kontroli, więc cokolwiek poza tą listą było niewidoczne, a źle skonfigurowana płytka i tak wyglądała zdrowo.
+- Raport powstaje **przy kompilacji, ze schematu**, a nie jest powtarzany w sterowniku — więc domyślna w logu nie może rozjechać się z domyślną, której komponent faktycznie używa. Wypisywane są wyłącznie opcje dotyczące wybranego radia.
+- **`rf_sw_pin` jest teraz raportowany dla SX1262.** Jego brak to ta sama klasa cichej usterki co `has_tcxo: false`: radio się inicjalizuje, log wygląda zdrowo, a XIAO ESP32-S3 + Wio-SX1262 pracuje z czułością niższą o jakieś 30 dB, bo moduł nigdy nie otwiera toru antenowego. Stan jest podawany w obie strony, więc „nie skonfigurowany" jest stwierdzeniem, a nie brakującą linią.
+- **CC1101 nie miał bloku sanity w ogóle** i teraz go ma: bramka eksperymentalna oraz `gdo0_pin`/`gdo2_pin`, żeby okablowanie dwóch przerwań było potwierdzone, a nie domniemane.
+- Pokrycie przed tą zmianą było nierówne — SX1276 logował jedną kontrolę, SX1262 cztery, LR1121 sześć, CC1101 ani jednej.
+- Opisane w `DIAGNOSTIC{,_PL}.md` razem z tabelą znaczników i listą per radio.
+
+# Docs: SX1262 examples with a TCXO now clear the device-error register
+
+## EN
+
+- All eight `SX1262` examples (Heltec V3, V4, V4-R8, XIAO) set `clear_device_errors_on_boot: true` and `publish_dev_err_after_clear: true` instead of listing them as optional extras. Every one of those boards declares `has_tcxo: true`, and on a TCXO board `XOSC_START_ERR` is set on every power-up as a matter of course: the chip tries its own crystal before DIO3 has been told to power the TCXO, and DIO3 is configured after reset.
+- Left off, the flag is therefore always set and carries no information. Cleared once the reference is up - which is what the datasheet expects - it becomes a diagnostic: a flag that stays cleared was a power-on artefact, a flag that comes back after a clean clear is a reference that genuinely is not starting.
+- `publish_dev_err_after_clear` sends the re-read state to MQTT. That is the only way to see it on a node receiving nothing, which is precisely the case where the error register is the last thing left to read - the situation the 2026-08-01 fix was about.
+- Defaults in the schema are unchanged (`false` for both). This is a change to what the examples recommend, not to component behaviour.
+
+## PL
+
+- Wszystkie osiem przykładów `SX1262` (Heltec V3, V4, V4-R8, XIAO) ustawia `clear_device_errors_on_boot: true` oraz `publish_dev_err_after_clear: true`, zamiast wymieniać je jako opcjonalny dodatek. Każda z tych płytek deklaruje `has_tcxo: true`, a na płytce z TCXO `XOSC_START_ERR` zapala się przy każdym starcie w sposób normalny: układ próbuje uruchomić własny kwarc, zanim DIO3 dostanie polecenie zasilenia TCXO, a DIO3 konfiguruje się dopiero po resecie.
+- Bez skasowania flaga jest więc zawsze zapalona i nie niesie żadnej informacji. Skasowana po ustawieniu referencji - czego oczekuje datasheet - staje się diagnostyką: flaga, która zostaje skasowana, była artefaktem startu; flaga, która wraca po czystym skasowaniu, to referencja, która naprawdę nie startuje.
+- `publish_dev_err_after_clear` wysyła ponownie odczytany stan na MQTT. To jedyny sposób, żeby zobaczyć go na węźle, który nic nie odbiera - a właśnie tam rejestr błędów jest ostatnią rzeczą do odczytania; dokładnie o tym była poprawka z 2026-08-01.
+- Domyślne w schemacie bez zmian (`false` dla obu). To zmiana tego, co zalecają przykłady, a nie zachowania komponentu.
+
 # Fix: examples no longer reboot a standalone MQTT receiver every 15 minutes
 
 ## EN

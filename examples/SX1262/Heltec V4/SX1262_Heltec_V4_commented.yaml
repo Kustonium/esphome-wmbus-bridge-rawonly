@@ -134,6 +134,31 @@ wmbus_radio:
 
   # dio2_rf_switch: true  # default: true
   has_tcxo: true
+  # EN: A TCXO board sets XOSC_START_ERR on every power-up as a matter of course:
+  #     the chip tries to start its own crystal before DIO3 has been told to
+  #     power the TCXO, and DIO3 is configured after reset. Clearing the flag
+  #     once the reference is up is what the datasheet expects, and it is what
+  #     turns the flag into a diagnostic: one that stays cleared was a power-on
+  #     artefact, one that comes back after a clean clear is a reference that
+  #     genuinely is not starting. Left off, the flag is always set on this board
+  #     and therefore reports nothing at all.
+  #     publish_dev_err_after_clear sends the re-read state to MQTT, which is the
+  #     only way to see it on a node that receives nothing - and a node that
+  #     receives nothing is exactly where the error register is the last thing
+  #     left to read.
+  # PL: Plytka z TCXO zapala XOSC_START_ERR przy kazdym starcie w sposob normalny:
+  #     uklad probuje uruchomic wlasny kwarc, zanim DIO3 dostanie polecenie
+  #     zasilenia TCXO, a DIO3 konfiguruje sie dopiero po resecie. Skasowanie
+  #     flagi po ustawieniu referencji jest tym, czego oczekuje datasheet, i to
+  #     dopiero czyni ja diagnostyczna: taka, ktora zostaje skasowana, byla
+  #     artefaktem startu; taka, ktora wraca po czystym skasowaniu, to
+  #     referencja, ktora naprawde nie startuje. Bez tego flaga jest na tej
+  #     plytce zawsze zapalona i nie niesie zadnej informacji.
+  #     publish_dev_err_after_clear wysyla ponownie odczytany stan na MQTT - to
+  #     jedyny sposob, zeby zobaczyc go na wezle, ktory nic nie odbiera, a wlasnie
+  #     tam rejestr bledow jest ostatnia rzecza, jaka zostala do odczytania.
+  clear_device_errors_on_boot: true  # default: false
+  publish_dev_err_after_clear: true  # default: false
   # rx_gain: boosted  # default: boosted
   long_gfsk_packets: true
 
@@ -161,9 +186,6 @@ wmbus_radio:
   diagnostic_mode: normal
   # diagnostic_summary_interval: 60s  # default: 60s
 
-  # Optional SX1262 boot diagnostics.
-  # clear_device_errors_on_boot: true  # default: false
-  # publish_dev_err_after_clear: true  # default: false
 
   # EN: Publish the last measured RSSI for each forwarded meter as a retained
   #     integer at wmbus/<topic_name>/rssi/<meter_id>. Frames without a real

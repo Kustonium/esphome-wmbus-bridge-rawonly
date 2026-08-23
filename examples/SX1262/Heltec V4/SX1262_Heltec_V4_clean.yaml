@@ -75,6 +75,14 @@ wmbus_radio:
   fem_pa_pin: GPIO46
   dio2_rf_switch: true
   has_tcxo: true
+  # A TCXO board sets XOSC_START_ERR on every power-up: the chip tries its own
+  # crystal before DIO3 is told to power the TCXO, and DIO3 is configured after
+  # reset. Clearing it once the reference is up is what the datasheet expects,
+  # and it is what makes the flag mean something - one that stays cleared was a
+  # boot artefact, one that comes back is a reference that really is not
+  # starting. Left off, the flag is always set and reports nothing.
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: true
   rx_gain: boosted
   long_gfsk_packets: true
   listen_mode: t1
