@@ -16,6 +16,9 @@
 
 #include <cstdio>
 #include <string>
+#include <ctime>
+#include <esp_timer.h>
+#include <sys/time.h>
 
 namespace esphome {
 namespace wmbus_radio {
@@ -126,6 +129,48 @@ void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter
   }
 }
 
+// Wall-clock instant at which the frame was RECEIVED, not published.
+//
+// The two differ: the frame is captured in the receiver task and reaches MQTT a
+// moment later, and if the broker is down it may not reach it at all until the
+// connection returns. Stamping publish time would quietly relabel the frame,
+// which is exactly the failure a timestamp is supposed to prevent.
+//
+// rx_task_wakeup_us is monotonic since boot, so the reception instant is
+// "now, minus how long ago that wake-up was".
+//
+// Returns false when the clock has not been set yet. That is not an edge case:
+// after a restart the radio receives normally for the seconds or minutes it
+// takes SNTP to answer, and a frame from that window must arrive WITHOUT the
+// field rather than carrying 1970 or an uptime pretending to be a date.
+static bool frame_received_at_iso_(uint64_t rx_task_wakeup_us, char *out, size_t out_len) {
+  struct timeval tv {};
+  if (gettimeofday(&tv, nullptr) != 0)
+    return false;
+
+  const int64_t now_us = (int64_t) tv.tv_sec * 1000000 + (int64_t) tv.tv_usec;
+  const int64_t age_us = (int64_t) esp_timer_get_time() - (int64_t) rx_task_wakeup_us;
+  const int64_t at_us = now_us - (age_us > 0 ? age_us : 0);
+
+  const time_t at_s = (time_t) (at_us / 1000000);
+  // 2020-09-13. Below this the clock is unset or nonsense; ESP-IDF starts at
+  // the epoch, so "not synced yet" and "genuinely 1970" are indistinguishable
+  // and both are useless as a measurement.
+  if (at_s < 1600000000)
+    return false;
+
+  struct tm tm_utc {};
+  if (gmtime_r(&at_s, &tm_utc) == nullptr)
+    return false;
+
+  char base[24];
+  if (std::strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", &tm_utc) == 0)
+    return false;
+
+  const unsigned ms = (unsigned) ((at_us % 1000000) / 1000);
+  return snprintf(out, out_len, "%s.%03uZ", base, ms) > 0;
+}
+
 void Radio::publish_rx_metadata_(Frame &frame, const char *id_str) {
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected() || this->rx_topic_.empty() ||
@@ -137,15 +182,25 @@ void Radio::publish_rx_metadata_(Frame &frame, const char *id_str) {
   const int rssi = (int) frame.rssi();
   const std::string rssi_json = (rssi >= -125 && rssi <= -1) ? std::to_string(rssi) : "null";
 
-  char payload[320];
+  char received_at[32];
+  const bool has_time = frame_received_at_iso_(frame.rx_task_wakeup_us(), received_at, sizeof(received_at));
+
+  // Absent, not null: a consumer that never sees the key cannot mistake a
+  // placeholder for a measurement.
+  std::string received_at_json;
+  if (has_time) {
+    received_at_json = std::string(",\"received_at\":\"") + received_at + "\"";
+  }
+
+  char payload[384];
   snprintf(payload, sizeof(payload),
            "{\"schema\":1,\"boot_id\":\"%08lX\",\"seq\":%lu,"
            "\"rx_task_wakeup_us\":%llu,\"meter_id\":\"%s\",\"mode\":\"%s\","
-           "\"rssi_dbm\":%s,\"frame_crc32\":\"%08lX\",\"frame_length\":%u}",
+           "\"rssi_dbm\":%s,\"frame_crc32\":\"%08lX\",\"frame_length\":%u%s}",
            (unsigned long) this->rx_boot_id_, (unsigned long) this->rx_publish_seq_,
            (unsigned long long) frame.rx_task_wakeup_us(), id_str,
            link_mode_name(frame.link_mode()), rssi_json.c_str(),
-           (unsigned long) crc, (unsigned) data.size());
+           (unsigned long) crc, (unsigned) data.size(), received_at_json.c_str());
 
   mqtt->publish(this->rx_topic_, std::string(payload), static_cast<uint8_t>(1), false);
 }

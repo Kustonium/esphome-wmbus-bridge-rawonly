@@ -111,6 +111,24 @@ obudzenia nosi celowo nazwę `rx_task_wakeup_us`: sterowniki radiowe sygnalizuj�
 zadaniu na różnych etapach odbioru, więc nie wolno go traktować jako dokładnego
 czasu początku emisji ani dokładnego `RX_DONE`.
 
+`received_at` dochodzi, gdy zegar płytki jest ustawiony: znacznik ISO-8601 UTC
+z milisekundami, na przykład `2026-08-24T06:41:12.481Z`.
+
+To jest chwila **odbioru** ramki, a nie chwila jej publikacji. Te dwie się różnią
+— ramka jest przechwytywana w zadaniu odbiorczym i trafia na MQTT nieco później
+— więc wartość liczona jest wstecz z `rx_task_wakeup_us`, który jest monotoniczny
+od startu. Stemplowanie czasem publikacji po cichu przekłamywałoby ramkę, czyli
+robiłoby dokładnie to, czemu znacznik czasu ma zapobiegać.
+
+Pole jest **nieobecne, a nie puste, dopóki zegar nie zostanie ustawiony**. To nie
+jest rzadki przypadek brzegowy: po restarcie radio odbiera normalnie przez te
+sekundy czy minuty, których SNTP potrzebuje na odpowiedź, a ramka z tego okna nie
+może nieść 1970 ani czasu pracy przebranego za datę. Odbiorca, który nigdy nie
+zobaczy klucza, nie pomyli zastępnika z pomiarem.
+
+Dodanie opcjonalnego pola nie zmienia wersji schematu: czytnik napisany pod
+schemat 1 działa dalej, a ten, który chce znacznika, sprawdza, czy klucz jest.
+
 ## Diagnostyka a publikacja
 
 Diagnostyka może liczyć albo opcjonalnie publikować nieudane kandydaty:

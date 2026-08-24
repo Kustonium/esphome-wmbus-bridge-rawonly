@@ -108,6 +108,9 @@ Payload schematu 1 zawiera:
   zdarzenia `RX_DONE`;
 - `meter_id`, `mode` (`T1`, `C1` albo `S1`) i `rssi_dbm` (`null`, gdy sterownik
   nie dostarczył rzeczywistego pomiaru);
+- `received_at` — czas ODBIORU ramki w ISO-8601 UTC z milisekundami; pole
+  nieobecne, dopóki zegar płytki nie jest ustawiony (po restarcie, zanim
+  odpowie SNTP)
 - `frame_crc32` — IEEE CRC32 końcowych, znormalizowanych bajtów ramki, które są
   publikowane jako HEX;
 - `frame_length` — liczba tych bajtów.
@@ -134,6 +137,9 @@ Payload schematu 1 zawiera:
   zdarzenia `RX_DONE`;
 - `meter_id`, `mode` (`T1`, `C1` albo `S1`) i `rssi_dbm` (`null`, gdy sterownik
   nie dostarczył rzeczywistego pomiaru);
+- `received_at` — czas ODBIORU ramki w ISO-8601 UTC z milisekundami; pole
+  nieobecne, dopóki zegar płytki nie jest ustawiony (po restarcie, zanim
+  odpowie SNTP)
 - `frame_crc32` — IEEE CRC32 końcowych, znormalizowanych bajtów ramki, które są
   publikowane jako HEX;
 - `frame_length` — liczba tych bajtów.
