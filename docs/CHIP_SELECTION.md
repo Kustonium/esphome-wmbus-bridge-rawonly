@@ -114,23 +114,43 @@ frequency to 868.300 MHz.
 
 ## Recommendation about `adaptive`
 
-For `SX1276`, start with:
+For `SX1276`, start with the default:
 
 ```yaml
-sx1276_busy_ether_mode: adaptive
+sx1276_busy_ether_mode: normal
 ```
 
-Use `normal` only if:
+`adaptive` and `aggressive` do not tune the receiver - they **give up on weak
+starts** so the radio can keep up in a busy ether. That is a trade, and it is
+only worth making once the receiver is genuinely overrunning.
 
-- the RF environment is calm,
-- you have only a few meters,
-- `meter_window` looks good,
-- there are no clear busy-ether symptoms.
+Measured on a dense block, 2026-08-23, all four boards in one spot:
 
-Use `aggressive` only deliberately for testing or very rough environments.
+| mode | weakest frame received | meters heard |
+|---|---:|---:|
+| `adaptive` | −84 dBm (nothing weaker got through at all) | 27 |
+| `normal` | **−97 dBm** | **53** |
+
+Meanwhile `fifo_overrun`, `truncated`, `payload_read_failed` and `irq_timeout`
+stayed at zero all day: the receiver was never overrunning, so the sensitivity
+was being spent on nothing. That is why the default is now `normal`.
+
+Raise it when the overload counters say so, not because the environment feels
+busy:
+
+- `fifo_overrun` > 0 or `truncated` > 0, **and** real losses in `drop_pct`,
+- then compare per-meter counts before and after - not `drop_pct`, which
+  improves simply because the frames it would have counted are no longer
+  attempted.
+
+`aggressive` is for deliberate testing, not for daily use.
 
 This option is `SX1276`-only. On `SX1262`, `CC1101` and `LR1121` there is no
 busy-ether state machine, and `busy_ether_state` reads as `n/a`.
+
+**Caveat:** one board, one building, one evening. The mechanism is understood
+(the abort threshold is clamped near −86 dBm and the mode pushes it to that
+clamp) but the size of the effect elsewhere is unknown.
 
 ## Known limits you should accept upfront
 

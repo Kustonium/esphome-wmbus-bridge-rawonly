@@ -135,7 +135,11 @@ wmbus_radio:
 
   # EN: adaptive is the recommended default for dense RF environments on SX1276.
   # PL: adaptive to zalecany domyślny tryb dla SX1276 w gęstym eterze.
-  # sx1276_busy_ether_mode: adaptive  # default: adaptive
+  # sx1276_busy_ether_mode: adaptive  # default: normal
+  # EN: raise only when overload is MEASURED (fifo_overrun/truncated > 0).
+  #     adaptive aborts weak starts to keep up and costs ~12 dB of sensitivity.
+  # PL: podnosic dopiero przy ZMIERZONYM przeciazeniu (fifo_overrun/truncated > 0).
+  #     adaptive przerywa slabe starty i kosztuje ~12 dB czulosci.
 
   # EN: Diagnostic preset. Normal mode gives summary + 15min summary + highlighted meter snapshots.
   # PL: Preset diagnostyczny. Normal daje summary + summary 15 min + snapshot wyróżnionych liczników.

@@ -30,6 +30,7 @@ wmbus/xiao_s3/diag/summary
 wmbus/xiao_s3/diag/summary_15min
 wmbus/xiao_s3/diag/meter_snapshot
 wmbus/xiao_s3/diag/boot                 # retain=true
+wmbus/xiao_s3/diag/config               # retain=true; effective config snapshot
 wmbus/xiao_s3/diag/suggestion
 wmbus/xiao_s3/diag/summary_60min        # dev only
 wmbus/xiao_s3/diag/busy_ether_changed   # SX1276 adaptive only

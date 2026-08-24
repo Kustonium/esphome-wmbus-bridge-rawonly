@@ -22,6 +22,7 @@ wmbus/xiao-s3/diag/summary
 wmbus/xiao-s3/diag/summary_15min
 wmbus/xiao-s3/diag/meter_snapshot
 wmbus/xiao-s3/diag/boot
+wmbus/xiao-s3/diag/config              # retain=true; effective YAML this boot
 ```
 
 Use `topic_name` to override only the device part:

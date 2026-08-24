@@ -133,7 +133,11 @@ wmbus_radio:
 
   # EN: adaptive is recommended default for dense RF environments.
   # PL: adaptive to zalecany domyślny tryb w gęstym eterze.
-  # sx1276_busy_ether_mode: adaptive  # default: adaptive
+  # sx1276_busy_ether_mode: adaptive  # default: normal
+  # EN: raise only when overload is MEASURED (fifo_overrun/truncated > 0).
+  #     adaptive aborts weak starts to keep up and costs ~12 dB of sensitivity.
+  # PL: podnosic dopiero przy ZMIERZONYM przeciazeniu (fifo_overrun/truncated > 0).
+  #     adaptive przerywa slabe starty i kosztuje ~12 dB czulosci.
 
 
   diagnostic_mode: normal

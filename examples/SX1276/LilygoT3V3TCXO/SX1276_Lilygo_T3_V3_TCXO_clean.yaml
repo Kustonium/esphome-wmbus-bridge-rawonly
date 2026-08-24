@@ -72,7 +72,6 @@ wmbus_radio:
 
   listen_mode: t1
   listen_mode_filter_after_parse: false
-  sx1276_busy_ether_mode: adaptive
 
   diagnostic_mode: normal
   diagnostic_summary_interval: 60s

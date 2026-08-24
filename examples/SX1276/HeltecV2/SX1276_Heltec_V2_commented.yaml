@@ -119,7 +119,11 @@ wmbus_radio:
   #   wmbus/<topic_name>/telegram
   #   wmbus/<topic_name>/diag/...
   # topic_name: "${devicename}"
-  # sx1276_busy_ether_mode: adaptive  # default: adaptive
+  # sx1276_busy_ether_mode: adaptive  # default: normal
+  # EN: raise only when overload is MEASURED (fifo_overrun/truncated > 0).
+  #     adaptive aborts weak starts to keep up and costs ~12 dB of sensitivity.
+  # PL: podnosic dopiero przy ZMIERZONYM przeciazeniu (fifo_overrun/truncated > 0).
+  #     adaptive przerywa slabe starty i kosztuje ~12 dB czulosci.
 
 
   diagnostic_mode: normal

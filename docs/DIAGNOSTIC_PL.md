@@ -22,6 +22,7 @@ wmbus/xiao-s3/diag/summary
 wmbus/xiao-s3/diag/summary_15min
 wmbus/xiao-s3/diag/meter_snapshot
 wmbus/xiao-s3/diag/boot
+wmbus/xiao-s3/diag/config              # retain=true; efektywna konfiguracja z tego bootu
 ```
 
 Użyj `topic_name`, jeśli chcesz nadpisać tylko nazwę urządzenia:

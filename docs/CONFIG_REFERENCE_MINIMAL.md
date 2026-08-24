@@ -49,7 +49,7 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `long_gfsk_packets` | `SX1262` | `false` | public | zalecane dla długich ramek T1; brak może powodować ucinanie/dropy |
 | `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | brak | board-specific | piny zewnętrznego front-endu RF, np. Heltec V4 |
 | `rf_sw_pin` | `SX1262` | brak | board-specific | bramka wewnętrznego przełącznika RF modułu; wymagane na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), inaczej czułość niższa o ~30 dB |
-| `sx1276_busy_ether_mode` | `SX1276` | `adaptive` | public | `normal`, `aggressive`, `adaptive` |
+| `sx1276_busy_ether_mode` | `SX1276` | `normal` | public | `normal`, `aggressive`, `adaptive`; podnosić dopiero przy **zmierzonym** przeciążeniu (`fifo_overrun`/`truncated` > 0) — `adaptive` przerywa słabe starty i kosztuje ok. 12 dB czułości |
 | `tcxo_pin` | `SX1276` | brak | board-specific | opcjonalny pin TCXO enable; ustawiany HIGH przed inicjalizacją SX1276 |
 | `busy_pin` | `SX1262`, `LR1121` | wymagane | public | linia BUSY; bez niej sterownik nie odróżni „jeszcze nie gotowy" od „odpowiedział" |
 | `rf_switch` | `SX1262` | brak | board-specific | wymuszenie stanu przełącznika RF; ustawiaj tylko gdy dokumentacja płytki tego wymaga |
@@ -88,6 +88,7 @@ Preferuj `topic_name`.
 | `wmbus/<topic_name>/diag/summary_60min` | co 60 min | tylko `dev`, chyba że wymusisz stare flagi |
 | `wmbus/<topic_name>/diag/meter_snapshot` | snapshot liczników | `normal`+ z `highlight_meters`; w `dev` wszystkie |
 | `wmbus/<topic_name>/diag/boot` | raz po starcie | `retain=true`; boot idzie też jako kopia do root `diag` bez retain |
+| `wmbus/<topic_name>/diag/config` | raz po starcie | `retain=true`; snapshot efektywnej konfiguracji (`{radio, lines[]}`) - konsumowany przez panel diagnostyczny dodatku |
 | `wmbus/<topic_name>/diag/suggestion` | wykryta anomalia RF | sugestie diagnostyczne |
 | `wmbus/<topic_name>/diag/busy_ether_changed` | zmiana stanu busy-ether | SX1276 + `adaptive` |
 | `wmbus/<topic_name>/rssi/<meter_id>` | ramka z realnym pomiarem RSSI | tylko przy `publish_rssi: true`; `retain=true` |
