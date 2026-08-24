@@ -41,6 +41,7 @@ wmbus/<device>/diag/summary
 wmbus/<device>/diag/summary_15min
 wmbus/<device>/diag/meter_snapshot
 wmbus/<device>/diag/boot
+wmbus/<device>/diag/config
 ```
 
 Dodatek bridge w Home Assistant powinien subskrybować:

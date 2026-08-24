@@ -393,7 +393,7 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_15MIN): cv.boolean,
             cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_60MIN): cv.boolean,
             cv.Optional(CONF_DIAG_PUBLISH_SUMMARY_HIGHLIGHT_METERS): cv.boolean,
-            cv.Optional(CONF_SX1276_BUSY_ETHER_MODE, default="adaptive"): cv.one_of(
+            cv.Optional(CONF_SX1276_BUSY_ETHER_MODE, default="normal"): cv.one_of(
                 "normal", "aggressive", "adaptive", lower=True
             ),
 
@@ -912,7 +912,7 @@ async def to_code(config):
         "aggressive": SX1276BusyEtherMode.AGGRESSIVE,
         "adaptive": SX1276BusyEtherMode.ADAPTIVE,
     }
-    cg.add(var.set_sx1276_busy_ether_mode(busy_ether_mode_map[config.get(CONF_SX1276_BUSY_ETHER_MODE, "adaptive")]))
+    cg.add(var.set_sx1276_busy_ether_mode(busy_ether_mode_map[config.get(CONF_SX1276_BUSY_ETHER_MODE, "normal")]))
 
     if config[CONF_RADIO_TYPE] == "SX1262":
         sx1262_dio2_rf = config.get(CONF_RF_SWITCH, config.get(CONF_DIO2_RF_SWITCH, True))

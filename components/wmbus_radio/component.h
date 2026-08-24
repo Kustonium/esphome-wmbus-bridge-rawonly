@@ -450,6 +450,9 @@ protected:
   uint32_t boot_log_count_{0};
   bool boot_info_mqtt_pending_{false};
   bool boot_info_event_pending_{false};
+  // Retained per-radio snapshot of the effective configuration on <diag>/config.
+  // Consumed by the add-on's diagnostics panel; kept in sync with the boot log block.
+  bool config_report_mqtt_pending_{true};
 
   // SX1262 YAML sanity state. These values are copied from YAML as-is.
   // They do not auto-configure board wiring; they only make risky settings visible in boot logs.

@@ -115,23 +115,42 @@ domyślną częstotliwość na 868,300 MHz.
 
 ## Rekomendacja dla `adaptive`
 
-Dla `SX1276` zacznij od:
+Dla `SX1276` zacznij od domyślnej:
 
 ```yaml
-sx1276_busy_ether_mode: adaptive
+sx1276_busy_ether_mode: normal
 ```
 
-Na `normal` schodź dopiero wtedy, gdy:
+`adaptive` i `aggressive` niczego nie stroją — one **rezygnują ze słabych
+startów**, żeby radio nadążyło w zajętym eterze. To jest wymiana, którą warto
+zrobić dopiero wtedy, gdy odbiornik naprawdę się przeciąża.
 
-- eter jest spokojny,
-- masz tylko kilka liczników,
-- `meter_window` wygląda dobrze,
-- nie ma wyraźnych objawów busy ether.
+Zmierzone w gęstej zabudowie 2026-08-23, cztery płytki w jednym punkcie:
 
-`aggressive` traktuj jako tryb specjalny do testów albo bardzo ciężkiego środowiska.
+| tryb | najsłabsza odebrana ramka | liczba liczników |
+|---|---:|---:|
+| `adaptive` | −84 dBm (nic słabszego nie przeszło w ogóle) | 27 |
+| `normal` | **−97 dBm** | **53** |
+
+W tym samym czasie `fifo_overrun`, `truncated`, `payload_read_failed` i
+`irq_timeout` przez cały dzień wynosiły zero: odbiornik się nie przeciążał, więc
+czułość była wydawana na nic. Dlatego domyślną jest teraz `normal`.
+
+Podnoś dopiero wtedy, gdy mówią o tym liczniki przeciążenia, a nie wrażenie, że
+w eterze jest tłoczno:
+
+- `fifo_overrun` > 0 albo `truncated` > 0, **i** realne straty w `drop_pct`,
+- potem porównaj liczby per licznik przed i po — nie `drop_pct`, bo ten poprawia
+  się już przez to, że ramki, które by policzył, nie są w ogóle próbowane.
+
+`aggressive` jest do świadomych testów, nie do codziennej pracy.
 
 Ta opcja dotyczy wyłącznie `SX1276`. Na `SX1262`, `CC1101` i `LR1121` nie ma
-maszyny stanów busy ether, a `busy_ether_state` raportuje `n/a`.
+maszyny busy-ether, a `busy_ether_state` raportuje `n/a`.
+
+**Zastrzeżenie:** jedna płytka, jeden budynek, jeden wieczór. Mechanizm jest
+zrozumiały (próg przerwania jest zaciśnięty klamrą przy −86 dBm, a tryb dopycha
+go do tej klamry), ale skala efektu w innych warunkach jest nieznana.
 
 ## Ograniczenia, które warto zaakceptować od razu
 

@@ -228,6 +228,22 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
         "Dużo fałszywych startów z realnymi stratami (SX1276). Włącz diagnostic_publish_rx_path_events: true aby zbadać ścieżkę RX.");
   }
 
+  // SX1276: overload actually measured -> only THEN is busy_ether worth raising.
+  // The mode trades sensitivity for survival in a busy ether: measured on a
+  // dense block 2026-08-23, adaptive imposed a hard floor near -85 dBm (no frame
+  // weaker than -84 got through, against -97 with normal) and halved the number
+  // of meters heard. That price is only worth paying once the receiver is
+  // genuinely overrunning, which these counters - not RF noise - are what say so.
+  if (is_sx1276 && this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL &&
+      (this->diag_rx_path_.fifo_overrun > 0 || this->diag_truncated_ > 0) && drop_pct >= 10) {
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+        chip, "CONSIDER_BUSY_ETHER_ADAPTIVE",
+        "sx1276_busy_ether_mode", "adaptive",
+        "sx1276_busy_ether_mode: adaptive",
+        "Receiver overrun measured (fifo_overrun/truncated) with real losses. sx1276_busy_ether_mode: adaptive may help - it aborts weak starts to keep up, at the cost of roughly 12 dB of sensitivity. Compare per-meter counts before and after.",
+        "Zmierzone przeciazenie odbiornika (fifo_overrun/truncated) z realnymi stratami. sx1276_busy_ether_mode: adaptive moze pomoc - przerywa slabe starty, kosztem okolo 12 dB czulosci. Porownaj liczby per licznik przed i po.");
+  }
+
   // Weak signal — suggest drop_events + raw.
   // Require total >= 20 to avoid firing on a handful of packets right after boot.
   // Skip if already enabled in YAML.

@@ -139,26 +139,37 @@ What to do:
 
 ## 8. Which `sx1276_busy_ether_mode` should I use?
 
-Start here:
+Stay on the default:
 
 ```yaml
-sx1276_busy_ether_mode: adaptive
+sx1276_busy_ether_mode: normal
 ```
 
-Stay on `adaptive` if:
+`adaptive` and `aggressive` do not improve the receiver. They **abort weak starts**
+so the radio can keep up when it is genuinely overrunning - and if it is not
+overrunning, you pay the price for nothing.
 
-- you live in an apartment block,
-- you see many false starts,
-- `meter_window` is worse than `summary` suggests,
-- you do not yet know how calm the environment is.
+The price is large. Measured on a dense block, 2026-08-23, four boards in one
+spot: under `adaptive` no frame weaker than **−84 dBm** got through at all and the
+board heard **27** meters; under `normal`, frames arrived down to **−97 dBm** and
+it heard **53**. The abort threshold is clamped near −86 dBm and `adaptive`
+pushes it to that clamp, so the effect is a hard sensitivity floor, not a
+gradual trade.
 
-Try `normal` only if:
+Raise it only when overload is **measured**, not when the ether feels busy:
 
-- you have few meters,
-- the RF environment is calm,
-- `meter_window` already looks stable.
+- `fifo_overrun` > 0, or `truncated` > 0,
+- **and** real losses in `drop_pct`.
 
-Treat `aggressive` as a deliberate test setting, not a default.
+A high `false_start_like` on its own is not a reason: it counts noise triggers,
+and on the board above it sat near 60/min for a whole day while `fifo_overrun`
+stayed at zero.
+
+When you do try it, judge it by **per-meter counts before and after**, not by
+`drop_pct`. `drop_pct` improves automatically, because frames it would have
+counted as dropped are no longer attempted at all.
+
+`aggressive` is a deliberate test setting, not a daily one.
 
 ## 9. I need a sane diagnostic profile
 

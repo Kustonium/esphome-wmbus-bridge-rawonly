@@ -139,26 +139,38 @@ Co zrobić:
 
 ## 8. Którego `sx1276_busy_ether_mode` używać?
 
-Zacznij od:
+Zostań przy domyślnym:
 
 ```yaml
-sx1276_busy_ether_mode: adaptive
+sx1276_busy_ether_mode: normal
 ```
 
-Zostań przy `adaptive`, jeśli:
+`adaptive` i `aggressive` nie poprawiają odbiornika. One **przerywają słabe
+starty**, żeby radio nadążyło, gdy naprawdę się przeciąża — a jeśli się nie
+przeciąża, płacisz cenę za nic.
 
-- mieszkasz w bloku,
-- widzisz dużo false startów,
-- `meter_window` jest gorszy niż sugeruje `summary`,
-- jeszcze nie wiesz, jak spokojny jest eter.
+Cena jest duża. Zmierzone w gęstej zabudowie 2026-08-23, cztery płytki w jednym
+punkcie: przy `adaptive` żadna ramka słabsza niż **−84 dBm** nie przeszła w ogóle,
+a płytka słyszała **27** liczników; przy `normal` ramki docierały aż do **−97 dBm**
+i słyszała **53**. Próg przerwania jest zaciśnięty klamrą przy −86 dBm, a
+`adaptive` dopycha go do tej klamry — więc efektem jest twarda podłoga czułości,
+a nie płynny kompromis.
 
-`normal` testuj dopiero wtedy, gdy:
+Podnoś dopiero przy **zmierzonym** przeciążeniu, a nie wtedy, gdy w eterze wydaje
+się tłoczno:
 
-- masz mało liczników,
-- eter jest spokojny,
-- `meter_window` już wygląda stabilnie.
+- `fifo_overrun` > 0 albo `truncated` > 0,
+- **i** realne straty w `drop_pct`.
 
-`aggressive` traktuj jako ustawienie specjalne do testów, nie domyślne.
+Sam wysoki `false_start_like` nie jest powodem: liczy wyzwolenia na szumie, a na
+powyższej płytce przez cały dzień wynosił około 60/min przy `fifo_overrun` równym
+zero.
+
+Gdy już spróbujesz, oceniaj po **liczbach per licznik przed i po**, a nie po
+`drop_pct`. `drop_pct` poprawia się sam z siebie, bo ramki, które policzyłby jako
+odrzucone, nie są już w ogóle próbowane.
+
+`aggressive` to ustawienie do świadomych testów, nie na co dzień.
 
 ## 9. Potrzebuję sensownego profilu diagnostycznego
 

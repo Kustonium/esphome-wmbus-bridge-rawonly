@@ -524,6 +524,32 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       mqtt->publish(this->diag_topic_, std::string(boot_payload), static_cast<uint8_t>(0), false);
       this->boot_info_event_pending_ = false;
     }
+
+    // Effective configuration as one retained JSON snapshot per boot.
+    // The add-on renders it as the "what the board is running" panel;
+    // publishing here means the marker (default / CHANGED / set) matches
+    // exactly what a reader would see in the boot log.
+    if (this->config_report_mqtt_pending_ && !this->config_report_.empty()) {
+      std::string cfg_payload = "{\"radio\":\"";
+      cfg_payload += (this->radio != nullptr) ? this->radio->get_name() : "unknown";
+      cfg_payload += "\",\"lines\":[";
+      bool cfg_first = true;
+      for (const auto &cfg_line : this->config_report_) {
+        if (!cfg_first) cfg_payload += ",";
+        cfg_first = false;
+        cfg_payload += "\"";
+        for (char ch : cfg_line) {
+          if (ch == '\\' || ch == '\"') cfg_payload += '\\';
+          if (ch == '\n' || ch == '\r' || ch == '\t') { cfg_payload += ' '; continue; }
+          cfg_payload += ch;
+        }
+        cfg_payload += "\"";
+      }
+      cfg_payload += "]}";
+      std::string cfg_topic = this->diag_topic_ + "/config";
+      mqtt->publish(cfg_topic, cfg_payload, static_cast<uint8_t>(0), true);
+      this->config_report_mqtt_pending_ = false;
+    }
   }
 
   if (this->dev_err_cleared_pending_ && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
