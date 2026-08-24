@@ -1,3 +1,21 @@
+# Feature: `/rx` metadata carries the reception time
+
+## EN
+
+- The `wmbus/<topic_name>/rx` payload gains `received_at`, an ISO-8601 UTC stamp with milliseconds.
+- It marks when the frame was **received**, not when it was published. The frame is captured in the receiver task and reaches MQTT later, so the value is computed backwards from the monotonic `rx_task_wakeup_us`. Publish time would relabel the frame - the exact failure a timestamp exists to prevent, and the one that matters most to anyone buffering frames while the broker is unreachable.
+- **Absent, not null, when the clock is unset.** After a restart the radio receives normally for as long as SNTP takes to answer; a frame from that window must not carry 1970 or an uptime pretending to be a date. A reader that never sees the key cannot mistake a placeholder for a measurement.
+- No schema bump: the field is additive and optional, so a consumer written against schema 1 is unaffected.
+- Asked for on the forum, alongside a durable store-and-forward buffer. The timestamp is the half that is cheap and unambiguous; buffering is not, because a flash write lands on the timing-sensitive receive path.
+
+## PL
+
+- Payload `wmbus/<topic_name>/rx` zyskuje `received_at`, znacznik ISO-8601 UTC z milisekundami.
+- Opisuje moment **odbioru** ramki, a nie jej publikacji. Ramka jest przechwytywana w zadaniu odbiorczym i trafia na MQTT później, więc wartość liczona jest wstecz z monotonicznego `rx_task_wakeup_us`. Czas publikacji przekłamywałby ramkę — czyli robiłby dokładnie to, czemu znacznik ma zapobiegać, i co najbardziej boli każdego, kto buforuje ramki przy niedostępnym brokerze.
+- **Nieobecne, a nie puste, gdy zegar nie jest ustawiony.** Po restarcie radio odbiera normalnie tak długo, jak SNTP potrzebuje na odpowiedź; ramka z tego okna nie może nieść 1970 ani czasu pracy udającego datę. Odbiorca, który nigdy nie zobaczy klucza, nie pomyli zastępnika z pomiarem.
+- Bez podbicia schematu: pole jest dodatkowe i opcjonalne, więc konsument pisany pod schemat 1 nie odczuwa zmiany.
+- Poproszone na forum, razem z trwałym buforem store-and-forward. Znacznik czasu to ta połowa, która jest tania i jednoznaczna; buforowanie nie jest, bo zapis do flasha ląduje na wrażliwej czasowo ścieżce odbiorczej.
+
 # Feature: the boot log now states the whole configuration, and says what you changed
 
 ## EN

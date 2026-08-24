@@ -449,7 +449,12 @@ def _schema_defaults():
     return out
 
 
-def _report_value(value):
+def _report_value(value, key=None):
+    # forward_meters accepts a list or a bare false, and both mean the same
+    # thing: no whitelist. Rendering them differently produced a "(CHANGED)"
+    # on a setting that changes nothing.
+    if key == CONF_FORWARD_METERS and (value is False or (isinstance(value, (list, tuple)) and not value)):
+        return "disabled (no whitelist)"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, dict) and "number" in value:
@@ -499,18 +504,26 @@ def _config_report_lines(config):
             lines.append(f"  {key}: {config[key]} (required)")
             return
         if key not in config:
-            if key in defaults:
-                lines.append(f"  {key}: not set (default: {_report_value(defaults[key])})")
+            if key == CONF_FREQUENCY:
+                lines.append("  frequency: not set (mode default: 868.950 MHz for t1/c1/both, 868.300 MHz for s1)")
+            elif key in defaults:
+                lines.append(f"  {key}: not set (default: {_report_value(defaults[key], key)})")
             else:
                 lines.append(f"  {key}: not set")
             return
-        value = _report_value(config[key])
+        value = _report_value(config[key], key)
         if key not in defaults:
             lines.append(f"  {key}: {value} (set)")
-        elif config[key] == defaults[key]:
+            return
+        # Compare the RENDERED values, not the raw ones. A schema default is
+        # written as the user would write it ("60s"), while the validated config
+        # holds the parsed object - so raw equality reported a change on a
+        # setting nobody touched.
+        default_value = _report_value(defaults[key], key)
+        if value == default_value:
             lines.append(f"  {key}: {value} (default)")
         else:
-            lines.append(f"  {key}: {value} (CHANGED, default: {_report_value(defaults[key])})")
+            lines.append(f"  {key}: {value} (CHANGED, default: {default_value})")
 
     for title, keys in (
         ("core", _REPORT_CORE),
@@ -519,7 +532,7 @@ def _config_report_lines(config):
         ("output", _REPORT_OUTPUT),
         ("diagnostics", _REPORT_DIAG),
     ):
-        reported = [k for k in keys if k in config or k in defaults]
+        reported = [k for k in keys if k in config or k in defaults or k == CONF_FREQUENCY]
         if title == "pins":
             # A pin that does not exist on this radio is noise, not information.
             reported = [k for k in keys if k in config]

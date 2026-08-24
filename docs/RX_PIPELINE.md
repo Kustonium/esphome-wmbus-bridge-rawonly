@@ -110,6 +110,25 @@ reading. The wake timestamp is deliberately named `rx_task_wakeup_us`: radio
 drivers signal the task at different receive stages, so it must not be treated
 as an exact on-air start or exact `RX_DONE` time.
 
+`received_at` is added when the board's clock is set: an ISO-8601 UTC stamp with
+milliseconds, for example `2026-08-24T06:41:12.481Z`.
+
+It is the moment the frame was **received**, not the moment it was published.
+The two differ - the frame is captured in the receiver task and reaches MQTT a
+little later - so the value is computed backwards from `rx_task_wakeup_us`,
+which is monotonic since boot. Stamping publish time would quietly relabel the
+frame, which is precisely what a timestamp is supposed to prevent.
+
+The field is **absent, not null, when the clock has not been set yet**. That is
+not a rare edge: after a restart the radio receives normally for the seconds or
+minutes SNTP needs to answer, and a frame from that window must not carry 1970
+or an uptime dressed up as a date. A consumer that never sees the key cannot
+mistake a placeholder for a measurement.
+
+Adding an optional field does not change the schema version: a reader written
+against schema 1 keeps working, and one that wants the timestamp checks whether
+the key is there.
+
 ## Diagnostics versus forwarding
 
 Diagnostics may count or optionally publish failed candidates:
