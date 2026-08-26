@@ -394,3 +394,37 @@ na płytkę w ciągu nocy przed zmianą, jeden `boot_id` przez 14,1 h po niej.
 
 `mqtt.reboot_timeout` to inny mechanizm, reagujący na utratę brokera. Nie zmieniaj
 go przy okazji tej poprawki.
+
+## 18. Dodatek pisze „brak znacznika czasu", chociaż płytka ma `time:` w YAML
+
+Objaw: panel diagnostyczny dodatku pokazuje **`Zegar ESP: brak znacznika czasu`**
+dla płytki, w której YAML wyraźnie widać blok `time:`, więc firmware „ma
+zegar wkompilowany". Panel nie kłamie — liczy ramki, w których było pole
+`received_at`, a ta płytka publikuje `/rx` bez niego.
+
+Przyczyna jest niemal zawsze ta sama: YAML używa `time: - platform:
+homeassistant` **samotnie**, a Native API nie jest połączone. Ta platforma
+bierze czas z HA po API, więc jeśli integracja ESPHome nie sparowała
+urządzenia (albo API padło), zegar systemowy zostaje na epoce. Firmware
+odmawia stemplowania ramek datą starszą niż 2020-09-13 — stempel „1970"
+jest gorszy niż brak stempla, więc pole jest pomijane w całości.
+
+Rozwiązanie: dopisz SNTP jako pierwszy, HA time jako fallback. SNTP działa
+z samego WiFi, niezależnie od tego, czy HA widzi płytkę.
+
+```yaml
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
+  - platform: homeassistant
+    id: ha_time
+```
+
+Po przebudowie i wgraniu przez jedną sesję dodatku będziesz widzieć
+**`Zegar ESP: częściowo stemplowane`**: radio zawsze startuje szybciej,
+niż NTP odpowie, więc kilka pierwszych ramek leci bez stempla i zostają
+w liczniku sesji, dopóki się nie zresetuje. Po restarcie dodatku (z SNTP
+już działającym na płytce) powinno być `zsynchronizowany`.

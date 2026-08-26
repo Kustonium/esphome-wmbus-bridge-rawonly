@@ -26,6 +26,7 @@ class SX1276 : public RadioTransceiver {
   optional<uint8_t> read() override;
   void restart_rx() override;
   int8_t get_rssi() override;
+  bool read_channel_rssi_dbm(int8_t *out) override;
   const char *get_name() override;
   bool supports_preamble_retry() const override { return true; }
   bool supports_unknown_size_raw_drain() const override { return true; }

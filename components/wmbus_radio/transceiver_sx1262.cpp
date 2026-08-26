@@ -1635,6 +1635,18 @@ int8_t SX1262::get_rssi() {
   return this->last_rssi_dbm_;
 }
 
+// Live channel reading, unlike get_rssi() which returns the value cached at the
+// last packet capture. read_rssi_inst_dbm_() already existed for internal use;
+// this only exposes it through the transceiver interface.
+bool SX1262::read_channel_rssi_dbm(int8_t *out) {
+  const int8_t rssi = this->read_rssi_inst_dbm_();
+  if (rssi == -127 || rssi >= 0)
+    return false;
+  if (out != nullptr)
+    *out = rssi;
+  return true;
+}
+
 const char *SX1262::get_name() { return TAG; }
 
 }  // namespace wmbus_radio

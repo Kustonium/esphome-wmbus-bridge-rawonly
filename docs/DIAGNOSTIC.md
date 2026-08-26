@@ -55,8 +55,8 @@ Deprecated aliases:
 ```yaml
 diagnostic_mode: normal
 highlight_meters:
-  - "00089907"
-  - "03534159"
+  - "00088888"
+  - "03500001"
 ```
 
 This publishes:
@@ -92,7 +92,7 @@ Recommended:
 ```yaml
 diagnostic_mode: normal
 highlight_meters:
-  - "00089907"
+  - "00088888"
 ```
 
 Advanced:

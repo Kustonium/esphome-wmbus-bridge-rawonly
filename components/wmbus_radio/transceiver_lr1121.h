@@ -124,6 +124,7 @@ class LR1121 : public RadioTransceiver {
   void restart_rx() override;
   optional<uint8_t> read() override;
   int8_t get_rssi() override;
+  bool read_channel_rssi_dbm(int8_t *out) override;
   const char *get_name() override;
   void log_reg_status() override;
   void dump_debug_status(const char *reason) override;

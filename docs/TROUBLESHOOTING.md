@@ -394,3 +394,39 @@ one `boot_id` over 14.1 h after it.
 
 `mqtt.reboot_timeout` is a different mechanism that reacts to losing the broker.
 Do not change it as part of this fix.
+
+## 18. Add-on says "no timestamp" for a board that has `time:` configured
+
+Symptom: the add-on's diagnostics panel shows **`ESP clock: no timestamp`**
+for a board whose YAML clearly has a `time:` block, so the firmware "has
+time compiled in". The panel is not wrong - it counts frames that arrived
+carrying the `received_at` field, and this board is publishing `/rx` without
+it.
+
+Root cause is almost always the same: the YAML uses `time: - platform:
+homeassistant` **alone**, and the Native API is not connected. That platform
+gets the clock from HA over the API, so if the ESPHome integration has not
+paired the device (or the API dropped) the system clock stays at the epoch.
+The firmware then refuses to stamp frames with something older than
+2020-09-13 - a stamp of 1970 is worse than no stamp at all, so the field is
+omitted entirely.
+
+Fix: list SNTP first, HA time as a fallback. SNTP works from WiFi alone,
+independent of whether HA sees the board.
+
+```yaml
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
+  - platform: homeassistant
+    id: ha_time
+```
+
+After rebuild and reflash, expect **`ESP clock: partly stamped`** for one
+add-on session: the radio always starts faster than NTP answers, so the
+first few frames go out unstamped and stay in the session counter until it
+resets. On the next add-on restart (with SNTP already running on the board)
+you should see `synced`.

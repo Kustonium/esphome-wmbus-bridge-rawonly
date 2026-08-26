@@ -86,8 +86,8 @@ By default every frame that decodes and passes the DLL CRC is published to
 ```yaml
 wmbus_radio:
   forward_meters:
-    - 41551279
-    - 90830781
+    - 44332211
+    - 77665544
 ```
 
 If the same meters are already listed in `highlight_meters`, do not repeat them —
@@ -96,8 +96,8 @@ If the same meters are already listed in `highlight_meters`, do not repeat them 
 ```yaml
 wmbus_radio:
   highlight_meters:
-    - 41551279
-    - 90830781
+    - 44332211
+    - 77665544
   forward_meters: true
 ```
 
@@ -115,8 +115,8 @@ Notes:
 - The filter runs after decoding and DLL CRC, so it matches an ID the parser has
   already validated. Filtering on the raw header would be cheaper in theory but
   unreliable: an ID read from a frame that failed CRC can be corrupted.
-- Use the ID exactly as the log prints it. A decimal `id:41551279` is written
-  `- 41551279`; a meter whose A-field is not BCD prints as hex (`id:417F0666`, typical
+- Use the ID exactly as the log prints it. A decimal `id:44332211` is written
+  `- 44332211`; a meter whose A-field is not BCD prints as hex (`id:417F0666`, typical
   of Diehl/IZAR) and is written `- "0x417F0666"`. Both forms are matched.
 - **Quote hex entries.** Unquoted, YAML resolves `0x417F0666` to the number
   `1098843750`, which would be stored as a decimal ID and never match. That case is
@@ -124,7 +124,7 @@ Notes:
 - You do not have to know which kind a meter is. A non-BCD A-field always contains a
   nibble above 9, so its printed form always carries a hex letter, while a BCD ID never
   does — an all-digits entry means decimal, anything with letters means raw. The `0x`
-  form also works for BCD meters (`"0x00089907"` is meter `89907`).
+  form also works for BCD meters (`"0x00088888"` is meter `88888`).
 - Diagnostics are unaffected: counters and RSSI statistics are updated before
   publishing, so summaries still cover the whole ether including neighbours. Only the
   RAW stream is reduced.
@@ -223,8 +223,8 @@ For normal use:
 ```yaml
 diagnostic_mode: normal
 highlight_meters:
-  - "00089907"
-  - "03534159"
+  - "00088888"
+  - "03500001"
 ```
 
 This publishes a combined snapshot on:

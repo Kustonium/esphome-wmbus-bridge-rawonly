@@ -394,6 +394,11 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   const uint32_t crc_fail_pct = (total == 0) ? 0 : (crc_failed * 100U) / total;
   const uint32_t drop_pct = (total == 0) ? 0 : (this->diag_dropped_ * 100U) / total;
   const uint32_t trunc_pct = (total == 0) ? 0 : (this->diag_truncated_ * 100U) / total;
+  // Ambient floor and how many idle samples back it. Reported even when the
+  // threshold does not use it yet: without seeing real numbers from real
+  // front-ends there is no honest way to choose the margin.
+  int32_t noise_floor = 0;
+  const bool noise_floor_ok = this->noise_floor_dbm_(&noise_floor);
   const int32_t avg_ok_rssi = (this->diag_rssi_ok_n_ == 0) ? 0 : (this->diag_rssi_ok_sum_ / (int32_t) this->diag_rssi_ok_n_);
   const int32_t avg_drop_rssi = (this->diag_rssi_drop_n_ == 0) ? 0 : (this->diag_rssi_drop_sum_ / (int32_t) this->diag_rssi_drop_n_);
 
@@ -572,6 +577,8 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            "\"trunc_pct\":%u,"
            "\"avg_ok_rssi\":%d,"
            "\"avg_drop_rssi\":%d,"
+           "\"noise_floor_dbm\":%d,"
+           "\"noise_floor_n\":%u,"
            "\"t1\":{"
              "\"total\":%u,\"ok\":%u,\"dropped\":%u,\"per_pct\":%u,"
              "\"crc_failed\":%u,\"crc_pct\":%u,\"avg_ok_rssi\":%d,\"avg_drop_rssi\":%d,"
@@ -656,6 +663,11 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) trunc_pct,
            (int) avg_ok_rssi,
            (int) avg_drop_rssi,
+           // 0 when not yet established; noise_floor_n says how many idle
+           // samples stand behind it, so a reader can tell 0-because-unknown
+           // from a genuine reading.
+           (int) (noise_floor_ok ? noise_floor : 0),
+           (unsigned) this->noise_floor_count_,
            (unsigned) t1_total,
            (unsigned) t1_ok,
            (unsigned) t1_drop,
