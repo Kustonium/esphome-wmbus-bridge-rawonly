@@ -10,7 +10,7 @@ wmbus_radio:
     topic_name: xiao_s3
     diagnostic_mode: normal
     highlight_meters:
-      - "03534159"
+      - "03500001"
 ```
 
 Modes / tryby:

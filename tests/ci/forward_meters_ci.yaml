@@ -75,7 +75,7 @@ wmbus_radio:
     listen_mode: t1
     diagnostic_mode: normal
     highlight_meters:
-      - "00089907"
+      - "00088888"
       - "0x417F0666"
     forward_meters: true
     # Exercise the opt-in per-meter RSSI publishing code path in a real build.
@@ -91,5 +91,5 @@ wmbus_radio:
       mode: input
     listen_mode: t1
     forward_meters:
-      - "03534159"
+      - "03500001"
       - "0x417F0666"

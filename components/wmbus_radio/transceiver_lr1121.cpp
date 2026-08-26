@@ -624,6 +624,18 @@ optional<uint8_t> LR1121::read() {
 
 int8_t LR1121::get_rssi() { return this->last_rssi_dbm_; }
 
+// Live channel reading, unlike get_rssi() which returns the value cached at the
+// last packet capture. read_rssi_inst_dbm_() already existed for internal use;
+// this only exposes it through the transceiver interface.
+bool LR1121::read_channel_rssi_dbm(int8_t *out) {
+  const int8_t rssi = this->read_rssi_inst_dbm_();
+  if (rssi == RSSI_NOT_MEASURED || rssi >= 0)
+    return false;
+  if (out != nullptr)
+    *out = rssi;
+  return true;
+}
+
 const char *LR1121::get_name() { return TAG; }
 
 bool LR1121::take_rssi_diag(RssiDiag &out) {

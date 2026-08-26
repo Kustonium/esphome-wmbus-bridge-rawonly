@@ -5,6 +5,7 @@
 ![Supports SX1262][sx1262-shield]
 ![Supports SX1276][sx1276-shield]
 ![Supports CC1101][cc1101-shield]
+![Supports LR1121][lr1121-shield]
 
 [![CI][ci-shield]][ci]
 [![Commit activity][commits-shield]][commits]
@@ -26,6 +27,7 @@
 [sx1262-shield]: https://img.shields.io/badge/SX1262-yes-green.svg
 [sx1276-shield]: https://img.shields.io/badge/SX1276-yes-green.svg
 [cc1101-shield]: https://img.shields.io/badge/CC1101-experimental-yellow.svg
+[lr1121-shield]: https://img.shields.io/badge/LR1121-experimental-yellow.svg
 [ci-shield]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml/badge.svg
 [ci]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml
 [commits-shield]: https://img.shields.io/github/commit-activity/y/Kustonium/esphome-wmbus-bridge-rawonly

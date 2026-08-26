@@ -60,6 +60,7 @@ class SX1262 : public RadioTransceiver {
   void restart_rx() override;
   optional<uint8_t> read() override;
   int8_t get_rssi() override;
+  bool read_channel_rssi_dbm(int8_t *out) override;
   bool take_rssi_diag(RssiDiag &out) override;
   const char *get_name() override;
   void log_reg_status() override;

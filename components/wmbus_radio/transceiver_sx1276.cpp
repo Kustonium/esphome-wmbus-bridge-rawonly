@@ -503,6 +503,18 @@ int8_t SX1276::get_rssi() {
   return this->last_rssi_dbm_;
 }
 
+// RegRssiValue is the live receiver reading; in FSK mode the register holds
+// -2x the dBm value. Harmless to read while RX is running - it is a plain
+// register fetch, not a mode change.
+bool SX1276::read_channel_rssi_dbm(int8_t *out) {
+  const int rssi = -(int) this->spi_read(REG_RSSI_VALUE) / 2;
+  if (rssi >= 0 || rssi < -127)
+    return false;
+  if (out != nullptr)
+    *out = (int8_t) rssi;
+  return true;
+}
+
 bool SX1276::consume_rx_abort_request() {
   const bool abort = this->abort_requested_;
   this->abort_requested_ = false;

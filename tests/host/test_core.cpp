@@ -203,25 +203,33 @@ static std::vector<uint8_t> format_a_with_crc() {
   return format_a_with_crc_from_body(base_frame_body());
 }
 
+// Synthetic Format A bodies - deliberately not field captures. Each one keeps
+// the length and block layout of a real frame ("long" still spans eight 16-byte
+// blocks, which is the coverage that actually matters here), but carries a
+// fictional serial and filler payload. Real captures used to sit here; they
+// identified specific meters and carried their consumption readings, which is
+// not something to publish. Keep it that way when adding a length regime.
 static std::vector<GoldenFrameFixture> golden_frame_fixtures() {
   return {
       {
           "long",
-          "8e44b3380799080003027a09008005d518489e938d7741372ca5f34153b1f81e0e7f71fc2ce87ac30edb358dcd2b"
-          "4731ecd84f7e705bb3f425aaa0a6df7f654a87b9289d49d7ad83cd2776a0627b6d528cb602da1b6455efca61"
-          "f42dbc25387f1f6acdcbf633a5fde8e0b0e4f9153499cb94f3e64229969d9baaac567112988f3ba86728747"
-          "b0dc9590d7a5afde493",
-          89907,
+          "8e44b3388888080003027a3873aee9245f9ad5114a87c0fd3673acea215c9bd60d4887c3f83572afe4215e9cd70a4d"
+          "80bbfe3175aee3245992d7084e85b8ff3269ace3275c91d60b4085baf03b66a1ec17529dd9024f88b5fe3b64a2e914"
+          "539ec5004f8bb0fd3a67ace916549fc2054873b6f93d66abec115a9fc0064d70b7fa2164abef14599ec3084d72a8e3"
+          "3e79",
+          88888,
       },
       {
           "short",
-          "2f446850791255417462a2069f333904d00b09000000090000000000000000000002121113190b130400000000000100",
-          41551279,
+          "2f446850112233447462a2b3ee29649fda15508ac7003d76b3ec29619cdb164d88c7023875b2ef24619edb174a8dc0"
+          "fb",
+          44332211,
       },
       {
           "mid",
-          "374468508107839027c3a2129f335c5600289e020000800e0000000030c0050f6cc1c7144b6921c12a0748e000000000000000000000c001",
-          90830781,
+          "374468504455667727c3a208437eb9f42f6aa5e11a5790cd06437cbaf12c6ba6dd185793c805427fb4f12e6ca7da1d"
+          "508bce01457eb3f429",
+          77665544,
       },
   };
 }
@@ -442,7 +450,7 @@ static void test_packet_s1_field_erasures_from_2026_08_14() {
 }
 
 // For a BCD meter the raw A-field value is simply its decimal digits read as
-// hex: meter 89907 is stored as the bytes that print 00089907. This pins the
+// hex: meter 88888 is stored as the bytes that print 00088888. This pins the
 // byte order of the raw extraction, which is where a silent bug would live.
 static uint32_t bcd_digits_as_hex(uint32_t decimal_id) {
   uint32_t out = 0;
@@ -557,14 +565,14 @@ static void test_forward_meter_whitelist() {
 
   // No forward_meters configured: nothing is filtered, including frames whose
   // meter ID could not be decoded. This is the pre-existing behaviour.
-  check(meter_id_allowed(none, none, 41551279, 0x41551279), "empty whitelist forwards a decoded meter");
+  check(meter_id_allowed(none, none, 44332211, 0x44332211), "empty whitelist forwards a decoded meter");
   check(meter_id_allowed(none, none, 0, 0), "empty whitelist forwards a frame with no usable id");
 
   // Sorted + deduplicated, as parse_meter_id_csv_ produces.
-  const std::vector<uint32_t> bcd = {41551279, 90830781};
-  check(meter_id_allowed(bcd, none, 41551279, 0x41551279), "listed BCD meter is forwarded");
-  check(meter_id_allowed(bcd, none, 90830781, 0x90830781), "second listed BCD meter is forwarded");
-  check(!meter_id_allowed(bcd, none, 89907, 0x00089907), "unlisted meter is dropped");
+  const std::vector<uint32_t> bcd = {44332211, 77665544};
+  check(meter_id_allowed(bcd, none, 44332211, 0x44332211), "listed BCD meter is forwarded");
+  check(meter_id_allowed(bcd, none, 77665544, 0x77665544), "second listed BCD meter is forwarded");
+  check(!meter_id_allowed(bcd, none, 88888, 0x00088888), "unlisted meter is dropped");
   check(!meter_id_allowed(bcd, none, 0, 0), "frame with no usable id is dropped while filtering");
 
   // Non-BCD meters (Diehl/IZAR and friends) have no decimal ID at all: id is 0
@@ -572,21 +580,21 @@ static void test_forward_meter_whitelist() {
   const std::vector<uint32_t> raw = {0x417F0666};
   check(meter_id_allowed(raw, raw, 0, 0x417F0666), "non-BCD meter matches on the raw id");
   check(!meter_id_allowed(raw, raw, 0, 0x417F0667), "a different raw id is dropped");
-  check(!meter_id_allowed(none, raw, 41551279, 0x41551279), "BCD meter not on the raw list is dropped");
+  check(!meter_id_allowed(none, raw, 44332211, 0x44332211), "BCD meter not on the raw list is dropped");
 
   // A raw entry may also address a BCD meter, since the raw form exists for
-  // every meter - writing 0x00089907 must match meter 89907.
-  const std::vector<uint32_t> raw_of_bcd = {0x00089907};
-  check(meter_id_allowed(none, raw_of_bcd, 89907, 0x00089907), "BCD meter matches via its raw form");
+  // every meter - writing 0x00088888 must match meter 88888.
+  const std::vector<uint32_t> raw_of_bcd = {0x00088888};
+  check(meter_id_allowed(none, raw_of_bcd, 88888, 0x00088888), "BCD meter matches via its raw form");
 
   // Either list may carry the match.
-  check(meter_id_in_lists(bcd, raw, 41551279, 0x41551279), "bcd list hit");
+  check(meter_id_in_lists(bcd, raw, 44332211, 0x44332211), "bcd list hit");
   check(meter_id_in_lists(bcd, raw, 0, 0x417F0666), "raw list hit");
-  check(!meter_id_in_lists(bcd, raw, 89907, 0x00089907), "no list hit");
+  check(!meter_id_in_lists(bcd, raw, 88888, 0x00088888), "no list hit");
 
   // highlight_meters semantics: an empty configuration highlights nothing,
   // unlike the whitelist where empty means "allow everything".
-  check(!meter_id_in_lists(none, none, 41551279, 0x41551279), "empty highlight lists match nothing");
+  check(!meter_id_in_lists(none, none, 44332211, 0x44332211), "empty highlight lists match nothing");
 }
 
 static void test_real_golden_frames_round_trip() {

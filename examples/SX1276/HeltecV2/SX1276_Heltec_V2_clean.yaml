@@ -56,6 +56,20 @@ spi:
   mosi_pin: GPIO27
   miso_pin: GPIO19
 
+# Reception timestamp: SNTP first, HA time as a fallback. If only
+# `homeassistant` is listed and HA API is not connected, the clock
+# never gets set and /rx frames go out without `received_at` - the
+# add-on then reports "no timestamp" indefinitely. SNTP works from
+# WiFi alone, so it recovers frames even before HA sees the board.
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
+  - platform: homeassistant
+    id: ha_time
+
 wmbus_radio:
   radio_type: SX1276
   cs_pin: GPIO18

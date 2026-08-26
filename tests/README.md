@@ -12,7 +12,11 @@ included in ESPHome firmware and are only run by CI or a local host compiler.
 - positive T1, C1, and S1 parser paths,
 - rejection paths for bad CRC, truncated T1, bad C1 preamble, and invalid S1 Manchester,
 - the `forward_meters` whitelist decision (`meter_filter.h`) and matching of non-BCD (hex) meter IDs,
-- real RAW telegram golden samples from field captures.
+- golden-sample RAW telegrams across three length regimes, so the Format A
+  block split (first 10 bytes, then 16-byte blocks, then the remainder) is
+  exercised end to end. These are synthetic: they carry fictional meter serials
+  and filler payloads, because a captured frame identifies a real meter and
+  carries its consumption readings.
 
 The GitHub workflow at `.github/workflows/ci.yml` compiles and runs these tests
 on Ubuntu.

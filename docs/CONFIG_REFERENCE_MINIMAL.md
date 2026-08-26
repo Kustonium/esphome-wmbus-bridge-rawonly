@@ -14,6 +14,8 @@
 | `publish_rssi` | `false` | public | publikuj RSSI ostatniej ramki każdego licznika na `wmbus/<topic_name>/rssi/<meter_id>`; patrz sekcja niżej |
 | `receiver_task_stack_size` | `3072` | advanced | stos osobnego taska RX, zakres `2048..16384` |
 | `listen_mode_filter_after_parse` | `false` | experimental | agresywniejsze filtrowanie po parserze; testować po licznikach, nie po samym globalnym drop% |
+| `use_noise_floor_threshold` | `false` | experimental | próg przerywania słabych startów liczony od ZMIERZONEJ podłogi szumu zamiast od średniej udanych odbiorów; pomiar (`noise_floor_dbm`) działa zawsze, ta opcja tylko go używa |
+| `noise_floor_margin_db` | `6` | experimental | ile dB nad podłogą szumu musi być start, żeby próbować (0–30); działa tylko przy `use_noise_floor_threshold: true` |
 | `highlight_ansi` | `false` | public | kolorowanie ANSI wyróżnionych liczników w logu |
 | `highlight_tag` | `wmbus_user` | public | tag logu dla wyróżnionych liczników |
 | `highlight_prefix` | `"★ "` | public | prefiks linii logu wyróżnionego licznika |
@@ -167,8 +169,8 @@ tylko własne.
 ```yaml
 wmbus_radio:
   forward_meters:
-    - 41551279
-    - 90830781
+    - 44332211
+    - 77665544
 ```
 
 Jeżeli te same liczniki masz już w `highlight_meters`, nie przepisuj ich drugi raz —
@@ -177,8 +179,8 @@ Jeżeli te same liczniki masz już w `highlight_meters`, nie przepisuj ich drugi
 ```yaml
 wmbus_radio:
   highlight_meters:
-    - 41551279
-    - 90830781
+    - 44332211
+    - 77665544
   forward_meters: true
 ```
 
@@ -187,7 +189,7 @@ wmbus_radio:
   filtr się nie włącza, a w logu startowym pojawia się ostrzeżenie.
 - Wpisuj ID dokładnie tak, jak pokazuje log — to ten sam zapis, którego używa
   `highlight_meters`:
-  - `id:41551279` → `- 41551279` (licznik BCD, zapis dziesiętny),
+  - `id:44332211` → `- 44332211` (licznik BCD, zapis dziesiętny),
   - `id:417F0666` → `- "0x417F0666"` (licznik nie-BCD, np. Diehl/IZAR).
 - **Wpisy szesnastkowe ujmuj w cudzysłów.** Bez niego YAML sam zamieni `0x417F0666` na
   liczbę `1098843750` i wpis trafiłby na listę dziesiętną, gdzie nigdy z niczym nie
@@ -196,7 +198,7 @@ wmbus_radio:
 - Rozróżnienie jest jednoznaczne i nie wymaga wiedzy, który licznik jest który: A-field
   spoza BCD zawsze zawiera cyfrę A–F, a ID w BCD nigdy. Wpis czysto cyfrowy znaczy więc
   „dziesiętne", wpis z literami — „surowe".
-- Formy `0x` można użyć również dla licznika BCD (`"0x00089907"` = `89907`), bo surowa
+- Formy `0x` można użyć również dla licznika BCD (`"0x00088888"` = `88888`), bo surowa
   postać istnieje dla każdego licznika.
 - Po starcie log pokazuje sparsowane ID i to, czy przyszły z `highlight_meters`; stan
   filtra jest też w `dump_config()` jako `Forward whitelist:`.

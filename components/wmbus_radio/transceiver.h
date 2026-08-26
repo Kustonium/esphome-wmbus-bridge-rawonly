@@ -57,6 +57,15 @@ public:
   virtual bool supports_preamble_retry() const { return false; }
   virtual bool supports_unknown_size_raw_drain() const { return false; }
 
+  // Live RSSI of the channel right now, as opposed to get_rssi(), which every
+  // driver caches from the last packet capture. The two are easy to confuse and
+  // the difference matters: a noise-floor measurement built on the cached value
+  // would only ever see signals that were received, which is the very feedback
+  // loop it exists to escape.
+  //
+  // Returns false when the radio cannot answer; the caller must then simply not
+  // sample, rather than fall back to something that looks like an answer.
+  virtual bool read_channel_rssi_dbm(int8_t *out) { return false; }
   // Optional SX1276-style early abort hooks / diagnostics.
   virtual bool supports_weak_partial_start_abort() const { return false; }
   virtual bool consume_rx_abort_request() { return false; }

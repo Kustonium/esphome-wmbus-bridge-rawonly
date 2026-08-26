@@ -105,6 +105,8 @@ public:
     this->sx1276_yaml_tcxo_pin_configured_ = tcxo_pin_configured;
   }
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
+  void set_use_noise_floor_threshold(bool enabled) { this->use_noise_floor_threshold_ = enabled; }
+  void set_noise_floor_margin_db(int32_t db) { this->noise_floor_margin_db_ = db; }
   void set_diagnostic_mode_str(const std::string &mode) { this->diag_mode_str_ = mode; }
   void set_diagnostic_meter_stats_str(const std::string &mode) { this->meter_stats_str_ = mode; }
   void set_receiver_task_stack_size(uint32_t stack_size) {
@@ -396,6 +398,31 @@ protected:
   uint32_t last_diag_summary_ms_{0};
   uint32_t last_diag_15min_summary_ms_{0};
   uint32_t last_diag_60min_summary_ms_{0};
+
+  // Ambient noise floor, sampled while the receiver sits idle. This exists
+  // because every weak-start threshold in rf_runtime.cpp is currently derived
+  // from recent_ok_rssi_avg_ - an average over SUCCESSFUL receptions only, so
+  // aborting weak frames raises it, which raises the threshold, which aborts
+  // more. The noise floor has no such loop: it is what the channel does when
+  // we are not receiving.
+  //
+  // It also fixes a portability problem the bench made visible. A board with a
+  // FEM reads roughly 10 dB hotter than the same chip without one (measured
+  // 2026-08-25: two SX1262 boards, medians -59 vs -68, minima -79 vs -89), so
+  // an absolute clamp like [-96, -86] dBm means something different on each.
+  // "N dB above the floor" means the same thing everywhere.
+  //
+  // Minimum over a short ring rather than a mean: a sample taken while someone
+  // else transmits is high, and a mean would let that pull the floor up.
+  static constexpr size_t NOISE_FLOOR_SAMPLES = 16;
+  int8_t noise_floor_ring_[NOISE_FLOOR_SAMPLES]{};
+  uint8_t noise_floor_pos_{0};
+  uint8_t noise_floor_count_{0};
+  bool use_noise_floor_threshold_{false};
+  int32_t noise_floor_margin_db_{6};
+  void note_idle_rssi_(int rssi_dbm);
+  // False until the ring has filled enough to mean anything.
+  bool noise_floor_dbm_(int32_t *out) const;
   int32_t recent_ok_rssi_avg_{-80};
   bool recent_ok_rssi_valid_{false};
 
@@ -404,6 +431,7 @@ protected:
   bool meter_is_highlighted_(uint32_t meter_id, uint32_t meter_id_raw) const;
   void collect_radio_rx_diag_();
   uint32_t current_false_start_like_() const;
+  uint32_t external_false_start_like_() const;
   bool sx1276_busy_ether_aggressive_now_() const;
   bool sx1276_busy_ether_severe_now_() const;
   bool should_abort_weak_partial_start_(int rssi_dbm, size_t bytes_read, bool is_c_mode) const;

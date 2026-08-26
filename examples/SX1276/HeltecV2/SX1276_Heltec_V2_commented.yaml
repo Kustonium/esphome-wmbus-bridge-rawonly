@@ -65,8 +65,19 @@ ota:
   - platform: esphome
 mdns:
   disabled: false
+# Reception timestamp: SNTP first, HA time as a fallback. If only
+# `homeassistant` is listed and HA API is not connected, the clock
+# never gets set and /rx frames go out without `received_at` - the
+# add-on then reports "no timestamp" indefinitely. SNTP works from
+# WiFi alone, so it recovers frames even before HA sees the board.
 time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
   - platform: homeassistant
+    id: ha_time
 
 debug:
 
@@ -143,7 +154,7 @@ wmbus_radio:
 
   # Optional per-meter stats.
   # highlight_meters:  # default: []
-  #   - "00089907"
+  #   - "00088888"
 
   # EN: Optional whitelist — only these meters reach wmbus/<topic_name>/telegram.
   #     Everything else is dropped on the ESP, which is the point in a dense block.
@@ -154,7 +165,7 @@ wmbus_radio:
   #     Zamiast listy można dać `forward_meters: true` i użyć listy z highlight_meters.
   #     ID szesnastkowe w cudzysłowie, inaczej YAML zamieni 0x417F0666 na 1098843750.
   # forward_meters:  # default: []
-  #   - "00089907"
+  #   - "00088888"
   #   - "0x417F0666"
 
   # diagnostic_publish_summary_15min: true

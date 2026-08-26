@@ -38,6 +38,8 @@ CONF_MARK_AS_HANDLED = "mark_as_handled"
 CONF_BUSY_PIN = "busy_pin"
 CONF_LISTEN_MODE = "listen_mode"
 CONF_LISTEN_MODE_FILTER_AFTER_PARSE = "listen_mode_filter_after_parse"
+CONF_USE_NOISE_FLOOR_THRESHOLD = "use_noise_floor_threshold"
+CONF_NOISE_FLOOR_MARGIN_DB = "noise_floor_margin_db"
 CONF_RECEIVER_TASK_STACK_SIZE = "receiver_task_stack_size"
 
 # Optional built-in RAW forwarding (avoids YAML on_frame boilerplate)
@@ -287,6 +289,16 @@ BASE_CONFIG_SCHEMA = (
             # filter listen_mode by preliminary raw packet mode before parsing.
             # True tries parser/CRC-selected mode first, then filters afterwards.
             cv.Optional(CONF_LISTEN_MODE_FILTER_AFTER_PARSE, default=False): cv.boolean,
+            # Derive the weak-start abort threshold from the measured noise floor
+            # instead of an average of successful receptions. Default OFF: the
+            # measurement (noise_floor_dbm in the diagnostic summary) ships enabled
+            # so the right margin can be chosen from real numbers on real
+            # front-ends before anyone's radio behaviour changes.
+            cv.Optional(CONF_USE_NOISE_FLOOR_THRESHOLD, default=False): cv.boolean,
+            # How far above the floor a start must be to be worth attempting.
+            # Small on purpose: this decides whether to TRY, and a failed attempt
+            # costs a few milliseconds while a refused one costs the whole frame.
+            cv.Optional(CONF_NOISE_FLOOR_MARGIN_DB, default=6): cv.int_range(min=0, max=30),
             # Stack size for the dedicated radio_recv FreeRTOS task created by this
             # component. This is intentionally separate from ESPHome's
             # loop_task_stack_size because that YAML option only affects the main
@@ -473,6 +485,7 @@ _REPORT_PINS = ("cs_pin", CONF_RESET_PIN, CONF_IRQ_PIN, CONF_BUSY_PIN,
                 CONF_FEM_EN_PIN, CONF_FEM_CTRL_PIN, CONF_FEM_PA_PIN)
 
 _REPORT_CORE = (CONF_RADIO_TYPE, CONF_LISTEN_MODE, CONF_LISTEN_MODE_FILTER_AFTER_PARSE,
+                CONF_USE_NOISE_FLOOR_THRESHOLD, CONF_NOISE_FLOOR_MARGIN_DB,
                 CONF_FREQUENCY, CONF_RECEIVER_TASK_STACK_SIZE, CONF_ALLOW_UNTESTED_FRAMEWORK)
 
 _REPORT_RADIO = {
@@ -753,6 +766,8 @@ async def to_code(config):
     cg.add(var.set_radio(radio_var))
     cg.add(var.set_receiver_task_stack_size(config[CONF_RECEIVER_TASK_STACK_SIZE]))
     cg.add(var.set_listen_mode_filter_after_parse(config[CONF_LISTEN_MODE_FILTER_AFTER_PARSE]))
+    cg.add(var.set_use_noise_floor_threshold(config[CONF_USE_NOISE_FLOOR_THRESHOLD]))
+    cg.add(var.set_noise_floor_margin_db(config[CONF_NOISE_FLOOR_MARGIN_DB]))
 
     topic_name = config.get(CONF_TOPIC_NAME) or CORE.name
     if not topic_name:

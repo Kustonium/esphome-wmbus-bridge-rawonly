@@ -1,3 +1,24 @@
+# Feature: measured noise floor, and an opt-in threshold based on it
+
+## EN
+
+- The diagnostic summary gains `noise_floor_dbm` and `noise_floor_n`: the ambient RSSI of the channel, sampled while the receiver sits armed and idle, plus how many samples stand behind it. **Always on** - no option needed.
+- Sampled only where a full 5 s hop elapsed with no interrupt, so nothing was being received. Reported as the MINIMUM of a 16-sample ring, not a mean: a sample taken while a neighbouring meter transmits reads high, and averaging would let that drag the floor up.
+- New options `use_noise_floor_threshold` (default `false`) and `noise_floor_margin_db` (default 6). When enabled, the weak-start abort threshold becomes `floor + margin` instead of `recent_ok_rssi_avg - 12`.
+- **Why this matters.** The existing threshold is derived from an average over SUCCESSFUL receptions, so aborting weak frames raises the average, which raises the threshold, which aborts more - a feedback loop with no external reference. The noise floor has no such loop: it is what the channel does when we are not receiving.
+- **And it is portable.** A board with a FEM reads roughly 10 dB hotter than the same chip without one - measured on the bench 2026-08-25, two SX1262 boards, medians -59 vs -68 dBm and minima -79 vs -89. An absolute clamp like `[-96, -86] dBm` therefore means something physically different on each board, while "N dB above the floor" means the same everywhere.
+- **The threshold is off by default on purpose.** No measurement of a real noise floor existed when this was written, so any margin would have been a guess. The measurement ships enabled precisely so the margin can be chosen from numbers instead.
+
+## PL
+
+- Podsumowanie diagnostyczne zyskuje `noise_floor_dbm` i `noise_floor_n`: RSSI eteru mierzone, gdy odbiornik jest uzbrojony i bezczynny, oraz liczba próbek, które za tym stoją. **Zawsze włączone** — bez żadnej opcji.
+- Próbkowane wyłącznie tam, gdzie minęło pełne 5 s bez przerwania, czyli nic nie było odbierane. Raportowane jako MINIMUM z pierścienia 16 próbek, nie średnia: próbka wzięta w trakcie cudzej transmisji jest wysoka, a średnia pozwoliłaby jej podciągnąć podłogę w górę.
+- Nowe opcje `use_noise_floor_threshold` (domyślnie `false`) i `noise_floor_margin_db` (domyślnie 6). Po włączeniu próg przerywania słabych startów to `podłoga + margines` zamiast `recent_ok_rssi_avg - 12`.
+- **Dlaczego to ma znaczenie.** Dotychczasowy próg liczy się ze średniej *udanych* odbiorów, więc przerywanie słabych ramek podnosi tę średnią, co podnosi próg, co przerywa jeszcze więcej — pętla sprzężenia zwrotnego bez zewnętrznego punktu odniesienia. Podłoga szumu takiej pętli nie ma: to jest to, co robi kanał, gdy nie odbieramy.
+- **I jest przenośna.** Płytka z FEM czyta o jakieś 10 dB „goręcej" niż ten sam chip bez niego — zmierzone na stanowisku 25.08.2026, dwie płytki SX1262, mediany −59 vs −68 dBm i minima −79 vs −89. Klamra w bezwzględnych dBm, jak `[-96, -86]`, znaczy więc na każdej płytce co innego fizycznie, a „N dB nad podłogą" znaczy wszędzie to samo.
+- **Próg jest domyślnie wyłączony celowo.** W chwili pisania nie istniał żaden pomiar realnej podłogi szumu, więc każdy margines byłby zgadywaniem. Pomiar wchodzi włączony właśnie po to, żeby margines dało się wybrać z liczb.
+
+
 # Feature: `/diag/config` retained configuration snapshot
 
 ## EN
@@ -772,7 +793,7 @@ Carson nie opisuje dobrze sygnału kodowanego Manchesterem. Strumień chipów ni
 - The Seeed Wio-SX1262 does not connect its antenna unconditionally. Module pin 1 (`RF_SW`, "External IO control internal gate RF switch") must be held high by the host; on the XIAO ESP32S3 kit it is GPIO38. Nothing drove it, so the pin idled as a high-impedance input and the receiver ran on leakage alone.
 - This is separate from `dio2_rf_switch`, and both are needed. Per the module datasheet the SX1262's own DIO2 chooses the TX/RX *direction* (high = TX, low = RX); `RF_SW` decides whether the switch conducts at all.
 - The XIAO examples did carry a workaround - an `on_boot` action toggling a `gpio` output on GPIO38 - and it never worked. Priority 900 lands in the same ESPHome setup bucket as the `gpio output` component itself, so ordering falls out of registration order and the write happened before the pin was an output. No warning, no error, no log line. It has been removed from both examples.
-- Measured on hardware, same board and antenna before and after: meter `00089907` went from -96 dBm to -68 dBm, and the receiver went from 4-6 frames per minute across 3 meters to 14 across 32.
+- Measured on hardware, same board and antenna before and after: meter `00088888` went from -96 dBm to -68 dBm, and the receiver went from 4-6 frames per minute across 3 meters to 14 across 32.
 
 ### Added
 - `rf_sw_pin` for `SX1262`. The pin is driven high inside the radio's own setup, before the chip reset, where ordering is guaranteed. Boards whose module gates the antenna path this way need it; Heltec V3/V4/V4-R8 do not - they use the `fem_*` pins and are unaffected.
@@ -788,7 +809,7 @@ Carson nie opisuje dobrze sygnału kodowanego Manchesterem. Strumień chipów ni
 - Moduł Seeed Wio-SX1262 nie podłącza anteny bezwarunkowo. Wyprowadzenie nr 1 modułu (`RF_SW`, "External IO control internal gate RF switch") musi być trzymane w stanie wysokim przez host; w zestawie z XIAO ESP32S3 jest to GPIO38. Nic go nie sterowało, więc pin pozostawał wejściem w stanie wysokiej impedancji, a odbiornik pracował wyłącznie na przecieku sygnału.
 - To jest coś innego niż `dio2_rf_switch` i potrzebne są oba. Zgodnie z notą katalogową modułu DIO2 układu SX1262 wybiera *kierunek* TX/RX (wysoki = TX, niski = RX), natomiast `RF_SW` decyduje, czy przełącznik w ogóle przewodzi.
 - Przykłady dla XIAO zawierały obejście - akcję `on_boot` przełączającą wyjście `gpio` na GPIO38 - i nigdy ono nie działało. Priorytet 900 trafia w tym samym etapie inicjalizacji ESPHome co sam komponent `gpio output`, więc o kolejności decyduje kolejność rejestracji i zapis wykonywał się, zanim wyprowadzenie stało się wyjściem. Bez ostrzeżenia, bez błędu, bez śladu w logu. Obejście zostało usunięte z obu przykładów.
-- Pomiar na sprzęcie, ta sama płytka i antena przed i po: licznik `00089907` z -96 dBm na -68 dBm, a odbiornik z 4-6 ramek na minutę od 3 liczników na 14 od 32.
+- Pomiar na sprzęcie, ta sama płytka i antena przed i po: licznik `00088888` z -96 dBm na -68 dBm, a odbiornik z 4-6 ramek na minutę od 3 liczników na 14 od 32.
 
 ### Dodano
 - `rf_sw_pin` dla `SX1262`. Wyprowadzenie ustawiane jest w stan wysoki wewnątrz inicjalizacji radia, przed resetem układu, gdzie kolejność jest jednoznaczna. Opcja jest potrzebna płytkom, których moduł bramkuje w ten sposób tor antenowy; Heltec V3/V4/V4-R8 jej nie wymagają - korzystają z wyprowadzeń `fem_*` i zmiana ich nie dotyczy.
@@ -839,7 +860,7 @@ Carson nie opisuje dobrze sygnału kodowanego Manchesterem. Strumień chipów ni
 ### Fixed
 - Meter matching decoded the A-field as BCD and gave up otherwise, so meters that do not use a BCD ID (Diehl/IZAR among others) had no usable ID at all. They could never be listed in `highlight_meters`, and with `forward_meters` active their telegrams were dropped silently - the one case where the whitelist discarded frames the user could not get back by any configuration.
 - Both options now also match the raw A-field value, written the way the log prints it: `id:417F0666` is configured as `"0x417F0666"` (quoted, or YAML turns it into a number). Decimal entries keep their existing meaning, so no configuration changes behaviour.
-- The two forms are told apart without ambiguity: a non-BCD A-field always contains a nibble above 9 and therefore always prints a hex letter, while a BCD ID never does. The `0x` form works for BCD meters too (`"0x00089907"` is meter `89907`).
+- The two forms are told apart without ambiguity: a non-BCD A-field always contains a nibble above 9 and therefore always prints a hex letter, while a BCD ID never does. The `0x` form works for BCD meters too (`"0x00088888"` is meter `88888`).
 - Per-meter statistics were keyed on the BCD ID, so every non-BCD meter collapsed into a single shared entry at key 0. They are now keyed on the raw A-field value, which is unique for every meter.
 - `target_meter_id` still accepts only BCD IDs. A hex value there used to be accepted and then never match; it now logs a warning at boot pointing to `forward_meters`.
 
@@ -848,7 +869,7 @@ Carson nie opisuje dobrze sygnału kodowanego Manchesterem. Strumień chipów ni
 ### Naprawiono
 - Dopasowanie liczników dekodowało A-field jako BCD i w przeciwnym razie rezygnowało, więc liczniki bez ID w BCD (m.in. Diehl/IZAR) nie miały żadnego użytecznego ID. Nie dało się ich wpisać do `highlight_meters`, a przy aktywnym `forward_meters` ich telegramy znikały bez śladu - jedyny przypadek, w którym whitelista odrzucała ramki, których użytkownik nie mógł odzyskać żadną konfiguracją.
 - Obie opcje dopasowują teraz również surową wartość A-field, zapisywaną tak, jak pokazuje ją log: `id:417F0666` konfigurujesz jako `"0x417F0666"` (w cudzyslowie, inaczej YAML zamieni to na liczbe). Wpisy dziesiętne zachowują dotychczasowe znaczenie, więc żadna konfiguracja nie zmienia zachowania.
-- Rozróżnienie obu form jest jednoznaczne: A-field poza BCD zawsze zawiera półbajtówkę powyżej 9, więc zawsze wypisuje literę szesnastkową, a ID w BCD nigdy. Forma `0x` działa też dla liczników BCD (`"0x00089907"` to licznik `89907`).
+- Rozróżnienie obu form jest jednoznaczne: A-field poza BCD zawsze zawiera półbajtówkę powyżej 9, więc zawsze wypisuje literę szesnastkową, a ID w BCD nigdy. Forma `0x` działa też dla liczników BCD (`"0x00088888"` to licznik `88888`).
 - Statystyki per licznik były kluczowane po ID z BCD, więc wszystkie liczniki nie-BCD zlewały się w jeden wspólny wpis pod kluczem 0. Teraz kluczem jest surowa wartość A-field, unikalna dla każdego licznika.
 - `target_meter_id` nadal przyjmuje wyłącznie ID w BCD. Wartość szesnastkowa była tam dotąd przyjmowana i po cichu nigdy nie pasowała; teraz przy starcie pojawia się ostrzeżenie kierujące do `forward_meters`.
 

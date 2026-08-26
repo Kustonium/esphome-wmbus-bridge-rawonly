@@ -1054,6 +1054,18 @@ void Radio::receive_frame() {
       got_irq = true;
       break;
     }
+    // A whole hop with no interrupt: the receiver has been armed and quiet, so
+    // this reading is the ambient floor. Sampling anywhere else would catch a
+    // transmission in progress or an AGC still settled on the last strong frame.
+    //
+    // read_channel_rssi_dbm(), NOT get_rssi(). Every driver caches get_rssi()
+    // from the last packet capture, so sampling it here would measure the last
+    // frame received rather than the channel - rebuilding the exact
+    // successful-receptions-only feedback loop this is meant to escape. A radio
+    // that cannot answer simply contributes no samples.
+    int8_t channel_rssi = 0;
+    if (this->radio->read_channel_rssi_dbm(&channel_rssi))
+      this->note_idle_rssi_((int) channel_rssi);
     waited += hop_ms;
   }
   if (!got_irq) {
@@ -1301,6 +1313,50 @@ void Radio::receive_frame() {
   }
 
   queue_packet(packet);
+}
+
+// One idle RSSI reading. Called only from the receiver task, on the path where
+// a full hop elapsed with no interrupt - so nothing was being received and the
+// reading is the channel itself, not a neighbour's telegram.
+void Radio::note_idle_rssi_(int rssi_dbm) {
+  if (!rssi_is_measured_(rssi_dbm))
+    return;
+  // -127..0 fits int8_t; clamp anyway so a driver returning something odd
+  // cannot corrupt the ring.
+  if (rssi_dbm > 0)
+    rssi_dbm = 0;
+  if (rssi_dbm < -127)
+    rssi_dbm = -127;
+  this->noise_floor_ring_[this->noise_floor_pos_] = (int8_t) rssi_dbm;
+  this->noise_floor_pos_ = (uint8_t) ((this->noise_floor_pos_ + 1) % NOISE_FLOOR_SAMPLES);
+  if (this->noise_floor_count_ < NOISE_FLOOR_SAMPLES)
+    this->noise_floor_count_++;
+}
+
+// Minimum of the ring. Deliberately not a mean: samples taken while another
+// meter transmits read high, and averaging would let them drag the floor up -
+// the same mistake recent_ok_rssi_avg_ makes on the other side.
+//
+// Requires half the ring before answering. With one sample per idle hop (5 s)
+// that is well under a minute on a quiet channel, and on a busy one the caller
+// simply keeps using the legacy threshold until enough idle time exists.
+bool Radio::noise_floor_dbm_(int32_t *out) const {
+  if (this->noise_floor_count_ < (NOISE_FLOOR_SAMPLES / 2))
+    return false;
+  int32_t lowest = 0;
+  bool have = false;
+  for (uint8_t i = 0; i < this->noise_floor_count_; i++) {
+    const int32_t v = (int32_t) this->noise_floor_ring_[i];
+    if (!have || v < lowest) {
+      lowest = v;
+      have = true;
+    }
+  }
+  if (!have)
+    return false;
+  if (out != nullptr)
+    *out = lowest;
+  return true;
 }
 
 void Radio::receiver_task(Radio *arg) {
