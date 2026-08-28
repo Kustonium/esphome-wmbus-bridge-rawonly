@@ -92,6 +92,17 @@ CONF_DIAG_METER_STATS = "diagnostic_meter_stats"
 CONF_DIAG_PUBLISH_SUGGESTION = "diagnostic_publish_suggestion"
 CONF_SX1276_BUSY_ETHER_MODE = "sx1276_busy_ether_mode"
 
+# SX1262 T1 receiver bandwidth. C1 and S1 are not affected - their 234.3 kHz
+# is a measured optimum (three-point sweep on S-mode, 2026-08-01) and is
+# pinned in the driver. T1 never got that sweep: its 312.0 kHz is inherited,
+# and 25% wider than the window the SX1276 uses for the same mode.
+CONF_SX1262_RX_BANDWIDTH = "sx1262_rx_bandwidth"
+SX1262_T1_RX_BANDWIDTHS = {
+    "312khz": "T1_BW_312",
+    "234khz": "T1_BW_234",
+    "156khz": "T1_BW_156",
+}
+
 # Heltec V4 FEM pins (SX1262 external front-end)
 CONF_FEM_CTRL_PIN = "fem_ctrl_pin"
 CONF_FEM_EN_PIN = "fem_en_pin"
@@ -107,6 +118,7 @@ CONF_RF_SW_PIN = "rf_sw_pin"
 CONF_GDO0_PIN = "gdo0_pin"
 CONF_GDO2_PIN = "gdo2_pin"
 CONF_CC1101_ALLOW_EXPERIMENTAL = "cc1101_allow_experimental"
+CONF_SPI_DATA_RATE = "spi_data_rate"
 CONF_ALLOW_UNTESTED_FRAMEWORK = "allow_untested_framework"
 CONF_FREQUENCY = "frequency"
 
@@ -137,6 +149,20 @@ LR1121_TCXO_VOLTAGES = {
     "2.7v": "LR1121_TCXO_2_7V",
     "3.0v": "LR1121_TCXO_3_0V",
     "3.3v": "LR1121_TCXO_3_3V",
+}
+
+# Same key (tcxo_voltage), same eight datasheet steps, same reason it exists:
+# proven on LR1121 (Waveshare HF_XOSC_START tuning), now extended to SX1262
+# because a board finally showed up (LilyGO T-Beam v1.2) that isn't 3.0V.
+SX1262_TCXO_VOLTAGES = {
+    "1.6v": "SX1262_TCXO_1_6V",
+    "1.7v": "SX1262_TCXO_1_7V",
+    "1.8v": "SX1262_TCXO_1_8V",
+    "2.2v": "SX1262_TCXO_2_2V",
+    "2.4v": "SX1262_TCXO_2_4V",
+    "2.7v": "SX1262_TCXO_2_7V",
+    "3.0v": "SX1262_TCXO_3_0V",
+    "3.3v": "SX1262_TCXO_3_3V",
 }
 
 LR1121_RX_BANDWIDTHS = {
@@ -280,6 +306,21 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO0_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
+            # SPI clock for the radio device only, not for the whole bus.
+            #
+            # The driver defaults to 2 MHz, which is well inside every supported
+            # part's rating. What it is not inside is every user's wiring: a
+            # module on dupont leads has enough capacitance and crosstalk to drop
+            # bits at 2 MHz on an otherwise healthy 3.3 V board. That failure is
+            # silent - registers read back as their reset defaults and the radio
+            # simply behaves as if it were misconfigured.
+            #
+            # Lower this before suspecting the part. Raising it above 2 MHz is
+            # allowed but has no known benefit here: the RX FIFO drain is paced
+            # by the radio, not by the bus.
+            cv.Optional(CONF_SPI_DATA_RATE): cv.All(
+                cv.frequency, cv.Range(min=100000, max=8000000)
+            ),
             cv.Optional(CONF_ALLOW_UNTESTED_FRAMEWORK, default=False): cv.boolean,
             cv.Optional(CONF_FREQUENCY): cv.float_range(min=300.0, max=928.0),
             cv.Optional(CONF_LISTEN_MODE, default="both"): cv.one_of(
@@ -408,6 +449,9 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_SX1276_BUSY_ETHER_MODE, default="normal"): cv.one_of(
                 "normal", "aggressive", "adaptive", lower=True
             ),
+            cv.Optional(CONF_SX1262_RX_BANDWIDTH, default="312khz"): cv.one_of(
+                *SX1262_T1_RX_BANDWIDTHS, lower=True
+            ),
 
             # Optional log highlighting for selected meter IDs
             cv.Optional(CONF_HIGHLIGHT_METERS, default=[]): cv.ensure_list(_validate_meter_id),
@@ -480,6 +524,7 @@ def _report_value(value, key=None):
     return str(value)
 
 
+_REPORT_BUS = (CONF_SPI_DATA_RATE,)
 _REPORT_PINS = ("cs_pin", CONF_RESET_PIN, CONF_IRQ_PIN, CONF_BUSY_PIN,
                 CONF_GDO0_PIN, CONF_GDO2_PIN, CONF_TCXO_PIN, CONF_RF_SW_PIN,
                 CONF_FEM_EN_PIN, CONF_FEM_CTRL_PIN, CONF_FEM_PA_PIN)
@@ -489,9 +534,9 @@ _REPORT_CORE = (CONF_RADIO_TYPE, CONF_LISTEN_MODE, CONF_LISTEN_MODE_FILTER_AFTER
                 CONF_FREQUENCY, CONF_RECEIVER_TASK_STACK_SIZE, CONF_ALLOW_UNTESTED_FRAMEWORK)
 
 _REPORT_RADIO = {
-    "SX1262": (CONF_HAS_TCXO, CONF_DIO2_RF_SWITCH, CONF_RF_SWITCH, CONF_RX_GAIN,
+    "SX1262": (CONF_HAS_TCXO, CONF_TCXO_VOLTAGE, CONF_DIO2_RF_SWITCH, CONF_RF_SWITCH, CONF_RX_GAIN,
                CONF_LONG_GFSK_PACKETS, CONF_CLEAR_DEVICE_ERRORS_ON_BOOT,
-               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR),
+               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH),
     "SX1276": (CONF_SX1276_BUSY_ETHER_MODE,),
     "CC1101": (CONF_CC1101_ALLOW_EXPERIMENTAL,),
     "LR1121": (CONF_LR1121_ALLOW_EXPERIMENTAL, CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS,
@@ -541,6 +586,7 @@ def _config_report_lines(config):
     for title, keys in (
         ("core", _REPORT_CORE),
         ("pins", _REPORT_PINS),
+        ("bus", _REPORT_BUS),
         (f"{radio_type.lower()}", _REPORT_RADIO.get(radio_type, ())),
         ("output", _REPORT_OUTPUT),
         ("diagnostics", _REPORT_DIAG),
@@ -606,13 +652,22 @@ def _validate_radio_pins(config):
     else:
         if config.get(CONF_LR1121_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("lr1121_allow_experimental is only valid for radio_type: LR1121.")
-        for key in (CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS, CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR,
+        for key in (CONF_TCXO_STARTUP_TICKS, CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR,
                     CONF_PAYLOAD_LENGTH, CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION):
             # Defaults are always present, so only an explicit non-default value
             # is worth rejecting. Silently ignoring it would be worse: the user
             # would think they had tuned something.
             if key in config and config[key] != BASE_CONFIG_DEFAULTS_LR1121[key]:
                 raise cv.Invalid(f"{key} is only valid for radio_type: LR1121.")
+
+        # tcxo_voltage is shared with SX1262 (2026-08-26: SX1262's DIO3-TCXO
+        # voltage is now configurable too, same key, same eight datasheet
+        # steps) - so it is exempt from the LR1121-only loop above, but still
+        # rejected for radios that have no TCXO-voltage command at all
+        # (SX1276 uses tcxo_pin instead; CC1101 has no TCXO concept).
+        if (radio_type != "SX1262" and CONF_TCXO_VOLTAGE in config
+                and config[CONF_TCXO_VOLTAGE] != BASE_CONFIG_DEFAULTS_LR1121[CONF_TCXO_VOLTAGE]):
+            raise cv.Invalid("tcxo_voltage is only valid for radio_type: LR1121 or SX1262.")
 
     return config
 
@@ -652,10 +707,20 @@ async def to_code(config):
     )
     radio_var = cg.new_Pvariable(config[CONF_RADIO_ID])
 
+    # Must run before spi_setup(), which reads data_rate_ when it registers the
+    # device with the bus. Left alone, the template default (2 MHz) stands.
+    if CONF_SPI_DATA_RATE in config:
+        cg.add(radio_var.set_data_rate(int(config[CONF_SPI_DATA_RATE])))
+
     if config[CONF_RADIO_TYPE] == "SX1262":
         dio2_rf = config.get(CONF_RF_SWITCH, config.get(CONF_DIO2_RF_SWITCH, True))
         cg.add(radio_var.set_dio2_rf_switch(dio2_rf))
         cg.add(radio_var.set_has_tcxo(config.get(CONF_HAS_TCXO, False)))
+
+        SX1262TcxoVoltage = radio_ns.enum("SX1262TcxoVoltage")
+        cg.add(radio_var.set_tcxo_voltage(
+            getattr(SX1262TcxoVoltage, SX1262_TCXO_VOLTAGES[config[CONF_TCXO_VOLTAGE]])
+        ))
 
         SX1262RxGain = radio_ns.enum("SX1262RxGain")
         gain = config.get(CONF_RX_GAIN, "boosted")
@@ -667,6 +732,16 @@ async def to_code(config):
             )
         )
         cg.add(radio_var.set_long_gfsk_packets(config.get(CONF_LONG_GFSK_PACKETS, False)))
+
+        SX1262T1RxBandwidth = radio_ns.enum("SX1262T1RxBandwidth")
+        cg.add(
+            radio_var.set_t1_rx_bandwidth(
+                getattr(
+                    SX1262T1RxBandwidth,
+                    SX1262_T1_RX_BANDWIDTHS[config.get(CONF_SX1262_RX_BANDWIDTH, "312khz")],
+                )
+            )
+        )
 
         # Clear SX1262 device errors on boot (optional)
         cg.add(radio_var.set_clear_device_errors_on_boot(config.get(CONF_CLEAR_DEVICE_ERRORS_ON_BOOT, False)))

@@ -1,3 +1,79 @@
+# Feature: CC1101 hints at a marginal SPI connection when a write needs a retry
+
+## EN
+
+- When `apply_radio_profile_()` needs a retry to land a register, or a register never holds its value at all, the existing `CC1101 profile write-back` line now gets a follow-up `CC1101 hint` explaining what that number likely means.
+- Two tiers: a register that never held its value even after retries points at a persistent fault - reseat every connection, check for a short between adjacent pins, try a shorter cable. A register that needed a retry but landed points at something intermittent - a loose header pin, a marginal short, a cable too long for the clock speed.
+- **Why "likely" and not "confirmed":** `chip_not_ready_count_` already rules out `CHIP_RDYn` as the cause of a retry - if a write is answered with the chip ready and the value still does not read back, the bus corrupted a byte in transit. Issue #22 traced one real case of this to an intermittent short between two jumper wires: `reg_retry_count_` went from double digits to zero the moment the short was fixed, with nothing else about the setup changed. One correlated report is a lead, not a proof, which is why the hint says "likely" rather than naming a cause.
+- This is CC1101-only. The write-verify-retry mechanism it reads from only exists on that driver.
+
+## PL
+
+- Kiedy `apply_radio_profile_()` potrzebuje powtórki, żeby zapisać rejestr, albo rejestr w ogóle nie utrzymuje wartości, istniejąca linia `CC1101 profile write-back` dostaje teraz kontynuację `CC1101 hint` tłumaczącą, co ta liczba prawdopodobnie znaczy.
+- Dwa poziomy: rejestr, który nie utrzymał wartości mimo powtórek, wskazuje na trwałą usterkę - sprawdzić każde połączenie, szukać zwarcia między sąsiednimi pinami, spróbować krótszego kabla. Rejestr, który potrzebował powtórki, ale się zapisał, wskazuje na coś przejściowego - luźny pin, przejściowe zwarcie, kabel za długi jak na prędkość zegara.
+- **Dlaczego „prawdopodobnie", nie „potwierdzone":** `chip_not_ready_count_` już wyklucza `CHIP_RDYn` jako przyczynę powtórki - jeśli zapis dostaje odpowiedź „układ gotowy", a wartość i tak się nie odczytuje z powrotem, to magistrala przekłamała bajt po drodze. Zgłoszenie #22 doprowadziło jeden realny taki przypadek do przejściowego zwarcia między dwoma przewodami: `reg_retry_count_` spadł z dwucyfrowej liczby do zera dokładnie w momencie naprawy zwarcia, bez żadnej innej zmiany w konfiguracji. Jedno skorelowane zgłoszenie to trop, nie dowód, dlatego hint mówi „prawdopodobnie", a nie wskazuje przyczynę wprost.
+- To dotyczy tylko CC1101. Mechanizm zapisu-z-weryfikacją, z którego ten hint korzysta, istnieje tylko w tym sterowniku.
+
+
+# Fix: FREQ and SYNC writes were not verified, and FREQ was the one that mattered
+
+## EN
+
+- The read-back verification added for the boot profile (`write_reg_verified_`) covered every register written from `apply_radio_profile_()` directly, but missed two callees that write registers of their own: `set_frequency_()` (`FREQ2/1/0`) and `set_sync_word_()` (`SYNC1/0`, both the normal and the S1 path).
+- **Issue #22 caught it immediately.** With `spi_data_rate: 1MHz` in place, `FREQ1` landed but `FREQ2` and `FREQ0` stayed at their reset defaults - the radio was listening on 790.961 MHz instead of 868.950 MHz, with everything else in the profile now correct. The FREQ validation added earlier this same day is what made this visible instead of silent.
+- All five registers now go through the same write-verify-retry path as the rest of the profile.
+
+## PL
+
+- Weryfikacja przez odczyt zwrotny dodana dla profilu startowego (`write_reg_verified_`) objęła każdy rejestr zapisywany bezpośrednio z `apply_radio_profile_()`, ale ominęła dwie wywoływane funkcje, które zapisują własne rejestry: `set_frequency_()` (`FREQ2/1/0`) i `set_sync_word_()` (`SYNC1/0`, zarówno ścieżka normalna, jak i S1).
+- **Zgłoszenie #22 złapało to natychmiast.** Z `spi_data_rate: 1MHz` `FREQ1` doszedł, ale `FREQ2` i `FREQ0` zostały na wartościach domyślnych - radio słuchało na 790,961 MHz zamiast 868,950 MHz, przy reszcie profilu już poprawnej. Walidacja FREQ dodana tego samego dnia wcześniej jest tym, co sprawiło, że to było widoczne, a nie ciche.
+- Wszystkie pięć rejestrów przechodzi teraz przez tę samą ścieżkę zapisz-zweryfikuj-powtórz co reszta profilu.
+
+
+# Feature: `spi_data_rate`, and proof that the SPI bus was the problem
+
+## EN
+
+- **New option `spi_data_rate`** (all radios, default unchanged at 2 MHz). Sets the SPI clock for the radio device only, not for the whole bus. Range 100 kHz to 8 MHz.
+- **Why it exists.** On the board in issue #22, `reg_write_retries=4` with `reg_write_failed=0`: every configuration register eventually took its value, but four of them needed a second attempt. That is a bus corrupting bytes, measured rather than guessed — and it happened on a healthy 3.3 V supply, with the module on jumper leads.
+- **The failure is silent, which is the point.** A dropped bit in a register write leaves that register at its reset default. Nothing reports an error; the radio simply behaves as if it had been configured for a different data rate and deviation, and every frame fails its CRC three layers further down. Before the read-back verification landed, this was indistinguishable from a dead antenna.
+- **Lower it before suspecting the part.** Raising it above 2 MHz is permitted but has no known benefit here — the RX FIFO drain is paced by the radio, not by the bus.
+- **What it does not fix.** Register writes are repeated on mismatch, so they recover. The RX FIFO read cannot be repeated: a second read consumes bytes the first one already took. If the bus corrupts a byte there, the frame is lost and no amount of retrying will bring it back. That is the case for setting a clock the wiring can actually carry.
+
+## PL
+
+- **Nowa opcja `spi_data_rate`** (wszystkie radia, domyślnie bez zmian — 2 MHz). Ustawia zegar SPI **tego urządzenia**, nie całej magistrali. Zakres od 100 kHz do 8 MHz.
+- **Skąd się wzięła.** Na płytce ze zgłoszenia #22 `reg_write_retries=4` przy `reg_write_failed=0`: każdy rejestr konfiguracji ostatecznie przyjął swoją wartość, ale cztery potrzebowały drugiej próby. To jest magistrala przekłamująca bajty — zmierzona, nie zgadnięta — i to na zdrowym zasilaniu 3,3 V, z modułem na przewodach.
+- **Awaria jest cicha i o to właśnie chodzi.** Zgubiony bit w zapisie rejestru zostawia ten rejestr na wartości domyślnej. Nic nie zgłasza błędu; radio po prostu zachowuje się tak, jakby skonfigurowano je na inną prędkość i dewiację, a każda ramka pada na CRC trzy warstwy niżej. Zanim doszła weryfikacja przez odczyt zwrotny, było to nie do odróżnienia od martwej anteny.
+- **Obniż go, zanim zaczniesz podejrzewać układ.** Podniesienie powyżej 2 MHz jest dozwolone, ale nie ma tu znanego zysku — opróżnianie RX FIFO dyktuje radio, nie magistrala.
+- **Czego to nie naprawia.** Zapisy rejestrów są powtarzane przy niezgodności, więc się podnoszą. Odczytu RX FIFO powtórzyć się nie da: drugi odczyt zabiera bajty, które pierwszy już pobrał. Jeśli magistrala przekłamie bajt w tym miejscu, ramka przepada i żadne powtarzanie jej nie odzyska. To jest właśnie argument za ustawieniem zegara, który okablowanie faktycznie udźwignie.
+
+
+# Fix: CC1101 lost register writes when the chip was not ready
+
+## EN
+
+- **`CHIP_RDYn` is now honoured.** The CC1101 answers every header byte with a status byte whose bit 7 is `CHIP_RDYn`; TI SWRS061I 10.1 requires it to be low before the first `SCLK` edge. The driver received that byte on every transaction and discarded it. Writes and strobes now inspect it and repeat the transaction when the chip reported itself not ready - up to 5 attempts, 200 us apart.
+- **Reads are counted, never repeated.** A second read of the RX FIFO would consume bytes the first one already took. Single-register reads set the counter too, because a read taken before `CHIP_RDYn` goes low returns `0xFF` rather than the register.
+- **The reset sequence follows the datasheet.** `reset_cc1101_()` now waits for `CHIP_RDYn` before issuing `SRES` and again afterwards, and the post-reset settle went from 5 ms to 10 ms, matching both known working CC1101 drivers. Previously the strobe went out immediately after `CSn` fell, which is only legal if the caller instead honours `tsp,pd` from Table 22 - and that 150 us figure was measured on a CC1101EM reference board with a specific crystal, not on an arbitrary module.
+- **The `0x54CD` sync cycle stays, for now.** It was removed and then restored the same day. The case for removing it is real - mode T and mode C share the sync word `0x543D`, and the `0x54CD` that follows in a mode C telegram arrives as *data*, which is why `packet.cpp` strips it as `WMBUS_MODE_C_SUFIX_LEN`. But the only capture behind that reasoning came from a board whose RF profile does not apply correctly, so it says nothing about what a healthy receiver sees, and the sibling drivers cycle for a documented reason. Settling this needs a measurement from a working CC1101.
+- **`FREQ2/1/0` is validated.** The carrier registers were written and never read back, so a frequency word that failed to land left the radio tuned elsewhere while the self-check reported everything fine. This is the only part of the profile that depends on user YAML, and a silently wrong carrier is indistinguishable from a dead antenna in every other log line.
+- **Every register of the boot profile is now written, read back, and rewritten on mismatch** (3 attempts). The self-check already reported that the profile was wrong, but only at the end and only as a list of final values - it could not say which write failed, whether repeating it helped, or how often. That distinction is the whole diagnosis: a value that a repeat fixes means the transport is corrupting bytes, while a register that keeps reverting to its reset default means no amount of retrying will help and the fault is in the part or its supply. Mismatches are logged, never fatal: a few registers may legitimately read back differently (reserved or read-only bits), and refusing to boot over that would be worse than the problem being measured.
+- **New fields `chip_not_ready`, `reg_write_failed` and `reg_write_retries` in the `CC1101 debug status` line**, counting transactions the chip answered with `CHIP_RDYn` still high. A non-zero value points at supply voltage, wiring length or SPI clock - not at the decoder.
+- **Why this surfaced.** A user running a CC1101 module at 2.932 V found that roughly two thirds of the configuration registers never took, and that inserting a delay after every register write made the problem disappear. On a well-supplied module the chip happens to be ready in time and nobody notices the missing check; a slower crystal start-up exposes it. Reported by @lente-cz, whose logs are the only hardware evidence this driver has.
+
+## PL
+
+- **`CHIP_RDYn` jest wreszcie sprawdzane.** CC1101 odpowiada na każdy bajt nagłówka bajtem statusu, którego bit 7 to `CHIP_RDYn`; datasheet TI SWRS061I 10.1 wymaga, żeby był niski przed pierwszym zboczem `SCLK`. Sterownik dostawał ten bajt przy każdej transakcji i go wyrzucał. Zapisy i strobe'y teraz go oglądają i powtarzają transakcję, gdy układ zgłosił, że nie był gotowy - do 5 prób co 200 us.
+- **Odczyty są liczone, nigdy nie ponawiane.** Powtórny odczyt RX FIFO zabrałby bajty, które pierwszy już pobrał. Odczyty pojedynczych rejestrów też podbijają licznik, bo odczyt sprzed opadnięcia `CHIP_RDYn` zwraca `0xFF`, a nie zawartość rejestru.
+- **Sekwencja resetu jest zgodna z datasheetem.** `reset_cc1101_()` czeka na `CHIP_RDYn` przed `SRES` i jeszcze raz po nim, a odczekanie po resecie wzrosło z 5 ms do 10 ms, tak jak w obu znanych działających sterownikach CC1101. Wcześniej strobe leciał natychmiast po opadnięciu `CSn`, co jest dopuszczalne tylko wtedy, gdy zamiast tego dotrzyma się `tsp,pd` z Table 22 - a te 150 us zmierzono na referencyjnej płytce CC1101EM z konkretnym kwarcem, nie na dowolnym module.
+- **Cykl sync `0x54CD` na razie zostaje.** Został usunięty i tego samego dnia przywrócony. Argument za usunięciem jest realny - tryb T i tryb C dzielą sync word `0x543D`, a następujące po nim `0x54CD` w telegramie trybu C przychodzi jako *dane*, dlatego `packet.cpp` odcina je jako `WMBUS_MODE_C_SUFIX_LEN`. Ale jedyny zrzut, na którym to rozumowanie stoi, pochodzi z płytki, której profil RF nie przykłada się poprawnie, więc nie mówi nic o tym, co widzi sprawny odbiornik, a siostrzane sterowniki cyklują z udokumentowanego powodu. Rozstrzygnie to pomiar z działającego CC1101, nie rozumowanie.
+- **`FREQ2/1/0` jest weryfikowane.** Rejestry nośnej były zapisywane i nigdy nieodczytywane, więc słowo częstotliwości, które nie doszło, zostawiało radio nastrojone gdzie indziej, a autotest meldował, że wszystko gra. To jedyna część profilu zależna od YAML-a użytkownika, a po cichu zła nośna jest w każdej innej linii logu nie do odróżnienia od martwej anteny.
+- **Każdy rejestr profilu startowego jest teraz zapisywany, odczytywany z powrotem i przepisywany przy niezgodności** (3 próby). Autotest i wcześniej meldował, że profil jest zły, ale dopiero na końcu i tylko jako lista wartości końcowych - nie potrafił powiedzieć, który zapis zawiódł, czy powtórzenie pomaga i jak często. A na tym rozróżnieniu stoi cała diagnoza: wartość, którą powtórzenie naprawia, znaczy, że transport przekłamuje bajty, a rejestr uparcie wracający do wartości domyślnej znaczy, że żadne powtarzanie nie pomoże i wina leży w układzie albo jego zasilaniu. Niezgodności są logowane, nigdy nie są krytyczne: kilka rejestrów może zgodnie z projektem odczytywać się inaczej, niż zostały zapisane (bity zarezerwowane albo tylko do odczytu), a odmowa startu z tego powodu byłaby gorsza niż mierzony problem.
+- **Nowe pola `chip_not_ready`, `reg_write_failed` i `reg_write_retries` w linii `CC1101 debug status`**, liczące transakcje, na które układ odpowiedział z `CHIP_RDYn` wciąż wysokim. Wartość niezerowa wskazuje na zasilanie, długość okablowania albo zegar SPI - nie na dekoder.
+- **Skąd to wyszło.** Użytkownik z modułem CC1101 zasilanym 2,932 V odkrył, że mniej więcej dwie trzecie rejestrów konfiguracji nigdy się nie zapisuje, a wstawienie opóźnienia po każdym zapisie problem usuwa. Na dobrze zasilonym module układ zdąża być gotowy i nikt braku sprawdzenia nie zauważa; wolniejszy start kwarcu go odsłania. Zgłoszone przez @lente-cz, którego logi są jedynym sprzętowym materiałem, jaki ten sterownik ma.
+
+
 # Feature: measured noise floor, and an opt-in threshold based on it
 
 ## EN
