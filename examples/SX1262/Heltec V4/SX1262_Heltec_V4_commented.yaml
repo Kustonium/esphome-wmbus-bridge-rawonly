@@ -145,6 +145,21 @@ wmbus_radio:
 
   # dio2_rf_switch: true  # default: true
   has_tcxo: true
+  # EN: DIO3 is a REGULATED output from the SX1262 itself, not a pass-through -
+  #     wrong tcxo_voltage means the chip actively overdrives (or underdrives)
+  #     whatever TCXO is wired to it. Heltec V4/XIAO both want 3.0V (the
+  #     default), so this line can stay commented on those boards. A board
+  #     whose TCXO wants something else - e.g. LilyGO T-Beam v1.2 at 1.8V,
+  #     per Meshtastic's own variant.h - MUST set this, or risks damaging a
+  #     TCXO rated well below what this chip would otherwise push onto it.
+  # PL: DIO3 to wyjscie REGULOWANE przez sam SX1262, nie przelot - zle
+  #     tcxo_voltage oznacza, ze chip aktywnie prze- albo niedostarcza napiecia
+  #     do podlaczonego TCXO. Heltec V4/XIAO chca 3,0V (domyslne), wiec ta
+  #     linia moze zostac zakomentowana na tych plytkach. Plytka, ktorej TCXO
+  #     chce czegos innego - np. LilyGO T-Beam v1.2 na 1,8V, wg wlasnego
+  #     variant.h Meshtastic - MUSI to ustawic, inaczej ryzykuje uszkodzenie
+  #     TCXO ocenionego znacznie nizej niz to, co ten chip by mu inaczej dal.
+  # tcxo_voltage: 3.0v  # default: 3.0v
   # EN: A TCXO board sets XOSC_START_ERR on every power-up as a matter of course:
   #     the chip tries to start its own crystal before DIO3 has been told to
   #     power the TCXO, and DIO3 is configured after reset. Clearing the flag
@@ -172,6 +187,22 @@ wmbus_radio:
   publish_dev_err_after_clear: true  # default: false
   # rx_gain: boosted  # default: boosted
   long_gfsk_packets: true
+
+  # EN: T1 receiver bandwidth. Affects T1 ONLY - C1 and S1 keep their measured
+  #     234.3 kHz no matter what is set here.
+  #     The 312 kHz default was inherited, never measured for T1, and is 25%
+  #     wider than the window an SX1276 uses for the same mode, so it admits
+  #     noise the signal does not need. 234khz is the value to compare against.
+  #     Change it on ONE board and leave a second one at the default, otherwise
+  #     the comparison says nothing.
+  # PL: Szerokosc pasma odbiornika dla T1. Dotyczy WYLACZNIE T1 - C1 i S1
+  #     zachowuja swoje zmierzone 234,3 kHz niezaleznie od tego ustawienia.
+  #     Domyslne 312 kHz jest odziedziczone, nigdy nie zmierzone dla T1 i o 25%
+  #     szersze niz okno SX1276 w tym samym trybie, wiec wpuszcza szum, ktorego
+  #     sygnal nie potrzebuje. 234khz to wartosc do porownania.
+  #     Zmieniac na JEDNEJ plytce, druga zostawic na domyslnej - inaczej
+  #     porownanie niczego nie mowi.
+  # sx1262_rx_bandwidth: 234khz  # default: 312khz
 
   # EN: Receive mode. Available values: t1, c1, both, s1.
   #     both means T1/C1 only. S1 is separate and cannot be combined with T1/C1.

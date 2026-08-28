@@ -49,6 +49,7 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `dio2_rf_switch` | `SX1262` | `true` | public | sterowanie przełącznikiem RF przez DIO2 |
 | `rx_gain` | `SX1262` | `boosted` | public | `boosted` albo `power_saving` |
 | `long_gfsk_packets` | `SX1262` | `false` | public | zalecane dla długich ramek T1; brak może powodować ucinanie/dropy |
+| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | public | `312khz` (domyślne, odziedziczone, niezmierzone dla T1), `234khz`, `156khz`. Działa dla `listen_mode: t1` **i `both`**; `c1` oraz `s1` ignorują — ich 234,3 kHz jest zmierzone i przypięte |
 | `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | brak | board-specific | piny zewnętrznego front-endu RF, np. Heltec V4 |
 | `rf_sw_pin` | `SX1262` | brak | board-specific | bramka wewnętrznego przełącznika RF modułu; wymagane na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), inaczej czułość niższa o ~30 dB |
 | `sx1276_busy_ether_mode` | `SX1276` | `normal` | public | `normal`, `aggressive`, `adaptive`; podnosić dopiero przy **zmierzonym** przeciążeniu (`fifo_overrun`/`truncated` > 0) — `adaptive` przerywa słabe starty i kosztuje ok. 12 dB czułości |
@@ -59,8 +60,9 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `publish_dev_err_after_clear` | `SX1262` | `false` | advanced | opublikuj ponownie odczytany stan błędów po skasowaniu; jedyny sposób, by zobaczyć go na węźle, który nic nie odbiera |
 | `cc1101_allow_experimental` | `CC1101` | `false` | safety gate | wymagane do uruchomienia CC1101 |
 | `gdo0_pin`, `gdo2_pin` | `CC1101` | wymagane | public | dual IRQ; single-IRQ CC1101 nie jest wspierany |
+| `spi_data_rate` | wszystkie | `2000000` (2 MHz) | advanced | zegar SPI **tego urządzenia**, nie całej magistrali. Obniż, zanim zaczniesz podejrzewać układ: moduł na przewodach dupont potrafi gubić bity przy 2 MHz nawet na zdrowych 3,3 V, a objaw jest cichy — rejestry odczytują się jako wartości domyślne i radio zachowuje się jak źle skonfigurowane. Sprawdź `reg_write_retries` w linii `CC1101 debug status`: wartość > 0 to dowód, że magistrala przekłamuje |
 | `lr1121_allow_experimental` | `LR1121` | `false` | safety gate | wymagane do uruchomienia LR1121 |
-| `tcxo_voltage` | `LR1121` | `3.0v` | public | napięcie TCXO modułu |
+| `tcxo_voltage` | `LR1121`, `SX1262` | `3.0v` | public | napięcie TCXO modułu; DIO3 w SX1262 to wyjście regulowane z chipu, więc złe napięcie to realne ryzyko dla TCXO, nie kosmetyka |
 | `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | czas rozruchu TCXO w taktach 32,768 kHz (~91,6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | advanced | szerokość pasma RX w Hz |
 | `preamble_detector` | `LR1121` | `16` | advanced | długość detektora preambuły w bitach |
