@@ -683,7 +683,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              (unsigned long) loop_now_ms, listen_mode,
              (unsigned) this->dev_err_before_, (unsigned) this->dev_err_before_,
              (unsigned) this->dev_err_after_, (unsigned) this->dev_err_after_);
-    mqtt->publish(this->diag_topic_, payload, this->diag_qos_, false);
+    mqtt->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
     this->dev_err_cleared_pending_ = false;
   }
 
@@ -806,7 +806,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                    (unsigned) p->decoded_len(), (unsigned) p->final_len(),
                    (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
         }
-        mqtt::global_mqtt_client->publish(this->diag_topic_, payload, this->diag_qos_, false);
+        mqtt::global_mqtt_client->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
       }
 
       if (this->diag_verbose_) {
@@ -893,7 +893,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                    (unsigned) p->decoded_len(), (unsigned) p->final_len(),
                    (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
         }
-        mqtt::global_mqtt_client->publish(this->diag_topic_, payload, this->diag_qos_, false);
+        mqtt::global_mqtt_client->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
       }
 
       if (this->diag_verbose_) {

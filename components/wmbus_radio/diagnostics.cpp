@@ -110,7 +110,7 @@ void Radio::publish_rx_path_event_(const char *event, const char *stage, const c
              "{\"event\":\"%s\",\"uptime_ms\":%lu,\"listen_mode\":\"%s\",\"stage\":\"%s\",\"rssi\":%d}",
              event, (unsigned long) now_ms, listen_mode, stage, rssi);
   }
-  mqtt->publish(this->diag_topic_, payload, this->diag_qos_, false);
+  mqtt->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
 }
 
 // Publish a suggestion event, throttled to once per hour per code.
@@ -772,7 +772,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_topic_();
-  mqtt->publish(summary_topic, payload, this->diag_qos_, false);
+  mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
   ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) total, (unsigned) this->diag_ok_,
@@ -1196,7 +1196,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_15min_topic_();
-  mqtt->publish(summary_topic, payload, this->diag_qos_, false);
+  mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
   ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) total, (unsigned) this->diag_15m_ok_,
@@ -1633,7 +1633,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_60min_topic_();
-  mqtt->publish(summary_topic, payload, this->diag_qos_, false);
+  mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
   ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) total, (unsigned) this->diag_60min_ok_,
