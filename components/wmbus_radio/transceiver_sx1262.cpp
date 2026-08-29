@@ -86,6 +86,9 @@ static constexpr uint8_t GFSK_PACKET_VAR_LEN = 0x01;
 static constexpr uint8_t GFSK_CRC_OFF = 0x01;
 static constexpr uint8_t GFSK_WHITENING_OFF = 0x00;
 
+// DIO3 TCXO voltage
+static constexpr uint8_t DIO3_OUTPUT_3_0 = 0x06;
+
 // Calibrate(calibParam) bit mask, SX1261/2 datasheet Rev 2.2 table 13-4:
 // bit0 RC64k, bit1 RC13M, bit2 PLL, bit3 ADC pulse, bit4 ADC bulk N,
 // bit5 ADC bulk P, bit6 image. 0x7F therefore recalibrates every block.
@@ -1207,9 +1210,8 @@ void SX1262::setup() {
 
   // TCXO only if enabled.
   // SetDIO3AsTcxoCtrl(tcxoVoltage, timeout[23:0]) per SX1261/2 datasheet:
-  // tcxo_voltage_ (default 3.0V, see SX1262TcxoVoltage) selects DIO3's
-  // regulated output, and the 24-bit timeout counts in 15.625 us steps, so
-  // 0x000040 = 64 steps = 1 ms of TCXO start-up time before the chip
+  // DIO3_OUTPUT_3_0 selects 3.0 V, and the 24-bit timeout counts in 15.625 us
+  // steps, so 0x000040 = 64 steps = 1 ms of TCXO start-up time before the chip
   // considers the reference stable.
   //
   // The recalibration below is not optional and not tuning. At power-on the
@@ -1226,7 +1228,7 @@ void SX1262::setup() {
   // distinguishes that from a bad antenna, which is why the device-error
   // readback further down was added together with this call.
   if (this->has_tcxo_) {
-    this->cmd_write_(CMD_SET_DIO3_AS_TCXO_CTRL, {(uint8_t) this->tcxo_voltage_, 0x00, 0x00, 0x40});
+    this->cmd_write_(CMD_SET_DIO3_AS_TCXO_CTRL, {DIO3_OUTPUT_3_0, 0x00, 0x00, 0x40});
     delay(5);
     this->cmd_write_(CMD_CALIBRATE, {CALIBRATE_ALL});
     // Calibrate holds BUSY for up to 3.5 ms per the datasheet. cmd_write_ already
@@ -1315,23 +1317,10 @@ void SX1262::setup() {
   // 680 pairs a frame needs. Bandwidth is not what stops the SX1262 decoding
   // S-mode - it is worth about a factor of four and no more. Do not re-run this
   // sweep; the numbers are here.
-  // T1 is the one mode the sweep above never covered - it was run on S-mode.
-  // 312.0 kHz here is inherited, not measured, and it is 25% wider than the
-  // 250 kHz the SX1276 uses for T1, so it admits ~1.2 dB of noise the signal
-  // does not need. `sx1262_rx_bandwidth` exists to settle that on hardware.
-  // Scope, exactly: `listen_mode: c1` and `listen_mode: s1` ignore this and
-  // keep their measured 234.3 kHz. `listen_mode: both` does NOT - it shares one
-  // receiver bandwidth with T1 and follows this setting, which is also what it
-  // did before the option existed (it took the 312 kHz T1 branch).
-  uint8_t rx_bw = GFSK_RX_BW_234_3;
-  if (this->listen_mode_ != LISTEN_MODE_C1 && this->listen_mode_ != LISTEN_MODE_S1) {
-    switch (this->t1_rx_bandwidth_) {
-      case T1_BW_234: rx_bw = GFSK_RX_BW_234_3; break;
-      case T1_BW_156: rx_bw = GFSK_RX_BW_156_2; break;
-      case T1_BW_312:
-      default:        rx_bw = GFSK_RX_BW_312_0; break;
-    }
-  }
+  const uint8_t rx_bw =
+      (this->listen_mode_ == LISTEN_MODE_C1 || this->listen_mode_ == LISTEN_MODE_S1)
+          ? GFSK_RX_BW_234_3
+          : GFSK_RX_BW_312_0;
 
   {
     char buf[96];

@@ -9,6 +9,7 @@
 #include "esphome/core/helpers.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include <esp_heap_caps.h>  // heap_caps_get_free_size() for the outbox boot log / auto-sizing seed
 
 #include <cstring>
 #include <algorithm>
@@ -120,6 +121,59 @@ static void parse_meter_id_csv_(const std::string &csv, std::vector<uint32_t> &o
 }
 
 
+// Splits buffer_priority YAML ("<id>:<weight>,<id>:<weight>,...") into a
+// weights map keyed by meter_bucket_key(). Each <id> token uses exactly the
+// same BCD-vs-raw parsing rules as parse_meter_id_csv_ above (decimal = BCD,
+// 0x-prefixed or containing a-f = raw A-field), so an entry here is written
+// exactly like the id already used in forward_meters/highlight_meters. A
+// meter present in forward_meters but absent here simply gets no entry -
+// enqueue_or_publish_/recompute_buffer_quotas_ (mqtt_outbox.cpp) treat a
+// missing entry as weight 1, so an unset buffer_priority means an equal
+// split, not "no buffer".
+static void parse_meter_priority_csv_(const std::string &csv,
+                                       std::unordered_map<uint64_t, uint32_t> &out_weights) {
+  out_weights.clear();
+  if (csv.empty()) return;
+  size_t i = 0;
+  while (i < csv.size()) {
+    while (i < csv.size() && (csv[i] == ',' || csv[i] == ';' || csv[i] == ' ' || csv[i] == '\t' || csv[i] == '\n' || csv[i] == '\r')) i++;
+    if (i >= csv.size()) break;
+    size_t j = i;
+    while (j < csv.size() && csv[j] != ',' && csv[j] != ';' && csv[j] != '\t' && csv[j] != '\n' && csv[j] != '\r') j++;
+    std::string tok = csv.substr(i, j - i);
+    i = j;
+    while (!tok.empty() && (tok.front() == ' ' || tok.front() == '\t')) tok.erase(tok.begin());
+    while (!tok.empty() && (tok.back() == ' ' || tok.back() == '\t')) tok.pop_back();
+    if (tok.empty()) continue;
+
+    const size_t colon = tok.find(':');
+    if (colon == std::string::npos) {
+      ESP_LOGW("wmbus", "buffer_priority: malformed entry '%s' (expected <id>:<weight>), ignoring / "
+                        "bledny wpis '%s' (oczekiwano <id>:<waga>), ignorowanie",
+               tok.c_str(), tok.c_str());
+      continue;
+    }
+    const std::string id_tok = tok.substr(0, colon);
+    const std::string w_tok = tok.substr(colon + 1);
+
+    std::vector<uint32_t> bcd, raw;
+    parse_meter_id_csv_(id_tok, bcd, raw, "buffer_priority");
+    if (bcd.empty() && raw.empty()) continue;  // parse_meter_id_csv_ already warned about the id itself
+
+    char *endp = nullptr;
+    const unsigned long w = std::strtoul(w_tok.c_str(), &endp, 10);
+    if (endp == w_tok.c_str() || *endp != '\0' || w == 0) {
+      ESP_LOGW("wmbus", "buffer_priority: invalid weight '%s' for '%s' (must be a positive integer), ignoring / "
+                        "nieprawidlowa waga '%s' dla '%s' (wymagana dodatnia liczba calkowita), ignorowanie",
+               w_tok.c_str(), id_tok.c_str(), w_tok.c_str(), id_tok.c_str());
+      continue;
+    }
+
+    const uint64_t key = !bcd.empty() ? meter_bucket_key(bcd.front(), 0) : meter_bucket_key(0, raw.front());
+    out_weights[key] = (uint32_t) w;
+  }
+}
+
 std::string Radio::forward_whitelist_summary_() const {
   const size_t bcd_n = this->forward_meter_ids_.size();
   const size_t raw_n = this->forward_meter_raw_ids_.size();
@@ -217,6 +271,73 @@ void Radio::setup() {
   if (!this->telegram_topic_.empty()) {
     ESP_LOGI(TAG, "Frame RAW forwarding topic / topic publikacji RAW: %s", this->telegram_topic_.c_str());
     ESP_LOGI(TAG, "Frame RX metadata topic / topic metadanych RX: %s", this->rx_topic_.c_str());
+  }
+  if (this->mqtt_outbox_auto_) {
+    // Seed an initial estimate right away rather than waiting for the first
+    // periodic re-check (~30s, see maybe_reautosize_outbox_ in loop()). Free
+    // heap at this point in setup() is only a rough first read - WiFi/
+    // Ethernet/MQTT/TLS have not necessarily finished claiming their share
+    // yet - so this gets refined automatically once things settle.
+    const size_t suggested = this->suggested_mqtt_outbox_capacity_();
+    this->set_mqtt_outbox_max_capacity(suggested);
+    this->set_mqtt_outbox_capacity(suggested);
+  }
+  {
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG,
+             "MQTT outbox / bufor MQTT: capacity=%u (max=%u, %s) free_heap=%u B free_psram=%u B / "
+             "pojemnosc=%u (maksimum=%u, %s) wolny_heap=%u B wolny_psram=%u B",
+             (unsigned) this->mqtt_outbox_capacity_, (unsigned) this->mqtt_outbox_max_capacity_,
+             this->mqtt_outbox_auto_ ? "auto" : "fixed",
+             (unsigned) free_internal, (unsigned) free_psram,
+             (unsigned) this->mqtt_outbox_capacity_, (unsigned) this->mqtt_outbox_max_capacity_,
+             this->mqtt_outbox_auto_ ? "auto" : "fixed",
+             (unsigned) free_internal, (unsigned) free_psram);
+  }
+  // Push the compiled starting capacity to the optional number entity (if the
+  // user declared one under number:) so a web_server/HA panel shows the real
+  // value from the first load, not 0 before any interaction.
+  this->publish_initial_buffer_state_();
+
+  // buffer_priority (per-meter RAM buffer weights): parsed here, after
+  // forward_meters above and after mqtt_outbox_capacity_ has its final
+  // boot-time value (fixed, or the auto estimate seeded a moment ago), and
+  // only meaningful once forward_meters is a non-empty whitelist - see
+  // meter_filter.h / mqtt_outbox.cpp for why plain integer weights (not
+  // percentages) are used, and how they become quotas that always sum to
+  // exactly the current capacity regardless of what the weights are.
+  parse_meter_priority_csv_(this->buffer_priority_csv_, this->buffer_priority_weights_);
+  if (!this->buffer_priority_weights_.empty() &&
+      this->forward_meter_ids_.empty() && this->forward_meter_raw_ids_.empty()) {
+    ESP_LOGW(TAG, "buffer_priority is set but forward_meters is empty: nothing to prioritise, ignoring / "
+                  "ustawiono buffer_priority bez forward_meters: brak whitelisty do priorytetyzacji, ignorowanie");
+  }
+
+  // First real per-meter quota computation. Must happen only now: any earlier
+  // (e.g. from the capacity setters themselves) and it would see an empty
+  // whitelist regardless of what YAML actually configured - see setup_done_'s
+  // comment in component.h. From here on the setters recompute live on their
+  // own (auto re-sizing every ~30s, or a runtime edit via the buffer_capacity
+  // number entity).
+  this->recompute_buffer_quotas_();
+  this->setup_done_ = true;
+  if (!this->mqtt_outbox_meter_quotas_.empty()) {
+    std::string quota_list;
+    for (const auto &mq : this->mqtt_outbox_meter_quotas_) {
+      const uint32_t tag = (uint32_t) (mq.key >> 32);
+      const uint32_t low = (uint32_t) (mq.key & 0xFFFFFFFFu);
+      char id_buf[16];
+      if (tag == 1) {
+        snprintf(id_buf, sizeof(id_buf), "%08u", (unsigned) low);
+      } else {
+        snprintf(id_buf, sizeof(id_buf), "0x%08X", (unsigned) low);
+      }
+      if (!quota_list.empty()) quota_list += ", ";
+      quota_list += std::string(id_buf) + ":w" + std::to_string(mq.weight) + "->" + std::to_string(mq.quota);
+    }
+    ESP_LOGI(TAG, "MQTT outbox per-meter quotas (id:weight->slots) / bufor MQTT wg licznika (id:waga->miejsca): %s",
+             quota_list.c_str());
   }
 
   if (!this->forward_meter_ids_.empty() || !this->forward_meter_raw_ids_.empty()) {
@@ -517,11 +638,11 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
 
     if (this->boot_info_mqtt_pending_) {
       std::string boot_topic = this->diag_topic_ + "/boot";
-      mqtt->publish(boot_topic, boot_payload, static_cast<uint8_t>(0), true);
+      mqtt->publish(boot_topic, boot_payload, this->diag_qos_, true);
       this->boot_info_mqtt_pending_ = false;
     }
     if (this->boot_info_event_pending_) {
-      mqtt->publish(this->diag_topic_, std::string(boot_payload), static_cast<uint8_t>(0), false);
+      mqtt->publish(this->diag_topic_, std::string(boot_payload), this->diag_qos_, false);
       this->boot_info_event_pending_ = false;
     }
 
@@ -547,7 +668,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       }
       cfg_payload += "]}";
       std::string cfg_topic = this->diag_topic_ + "/config";
-      mqtt->publish(cfg_topic, cfg_payload, static_cast<uint8_t>(0), true);
+      mqtt->publish(cfg_topic, cfg_payload, this->diag_qos_, true);
       this->config_report_mqtt_pending_ = false;
     }
   }
@@ -562,10 +683,13 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              (unsigned long) loop_now_ms, listen_mode,
              (unsigned) this->dev_err_before_, (unsigned) this->dev_err_before_,
              (unsigned) this->dev_err_after_, (unsigned) this->dev_err_after_);
-    mqtt->publish(this->diag_topic_, payload);
+    mqtt->publish(this->diag_topic_, payload, this->diag_qos_, false);
     this->dev_err_cleared_pending_ = false;
   }
 
+  this->flush_mqtt_outbox_();
+  this->update_outbox_stats_(loop_now_ms);
+  this->maybe_reautosize_outbox_(loop_now_ms);
   this->maybe_publish_health_(loop_now_ms);
   this->maybe_publish_diag_summary_(loop_now_ms);
   this->maybe_publish_diag_15min_summary_(loop_now_ms);
@@ -682,7 +806,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                    (unsigned) p->decoded_len(), (unsigned) p->final_len(),
                    (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
         }
-        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+        mqtt::global_mqtt_client->publish(this->diag_topic_, payload, this->diag_qos_, false);
       }
 
       if (this->diag_verbose_) {
@@ -769,7 +893,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                    (unsigned) p->decoded_len(), (unsigned) p->final_len(),
                    (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
         }
-        mqtt::global_mqtt_client->publish(this->diag_topic_, payload);
+        mqtt::global_mqtt_client->publish(this->diag_topic_, payload, this->diag_qos_, false);
       }
 
       if (this->diag_verbose_) {

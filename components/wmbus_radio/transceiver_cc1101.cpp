@@ -22,25 +22,6 @@ static constexpr uint8_t CC1101_SIDLE = 0x36;
 static constexpr uint8_t CC1101_SFRX  = 0x3A;
 static constexpr uint8_t CC1101_SNOP  = 0x3D;
 
-// CHIP_RDYn is bit 7 of the status byte the CC1101 returns on SO in response to
-// every header byte. TI SWRS061I section 10.1: it stays high until power and the
-// crystal have stabilised, and "must go low before the first positive edge of
-// SCLK". We cannot inspect it before sending the header - that would need the
-// MISO pin, which the ESPHome SPI bus does not expose - but it comes back in a
-// byte we already receive and used to discard. A header answered with
-// CHIP_RDYn=1 means the chip was not listening, so the write did not land.
-static constexpr uint8_t CC1101_CHIP_RDYN = 0x80;
-// Writes are idempotent, so repeating one is free. Reads are NOT repeated:
-// re-reading the RX FIFO would consume bytes that are gone for good.
-static constexpr uint8_t CC1101_WRITE_RETRIES = 5;
-static constexpr uint32_t CC1101_RETRY_GAP_US = 200;
-static constexpr uint32_t CC1101_CHIP_READY_TIMEOUT_US = 10000;
-// Read-back verification of the boot profile. Runs once per boot, so the extra
-// transaction per register costs nothing that matters.
-static constexpr uint8_t CC1101_VERIFY_RETRIES = 3;
-
-static inline bool chip_ready_(uint8_t status) { return (status & CC1101_CHIP_RDYN) == 0; }
-
 // CC1101 configuration registers
 static constexpr uint8_t REG_IOCFG2   = 0x00;
 static constexpr uint8_t REG_IOCFG1   = 0x01;
@@ -230,92 +211,49 @@ static void log_expected_reg_(const char *name, uint8_t got, uint8_t expected,
 
 
 uint8_t CC1101::strobe_(uint8_t cmd) {
-  uint8_t status = 0;
-  for (uint8_t attempt = 0; attempt < CC1101_WRITE_RETRIES; attempt++) {
-    status = this->raw_strobe_(cmd);
-    if (chip_ready_(status)) return status;
-    // CHIP_RDYn was still high, so the chip never saw the strobe. Every strobe
-    // used here (SRES, SCAL, SRX, SIDLE, SFRX, SNOP) is safe to issue again.
-    this->chip_not_ready_count_++;
-    esp_rom_delay_us(CC1101_RETRY_GAP_US);
-  }
-  return status;
-}
-
-// Single transaction with no readiness handling, for callers that must not
-// recurse into the retry logic.
-uint8_t CC1101::raw_strobe_(uint8_t cmd) {
   this->delegate_->begin_transaction();
   const uint8_t status = this->delegate_->transfer(cmd);
   this->delegate_->end_transaction();
   return status;
 }
 
-// Poll CHIP_RDYn with SNOP until the crystal is running. Returns false on
-// timeout; the caller carries on, because a chip that never reports ready is
-// diagnosed far better by the startup config check than by a silent stall.
-bool CC1101::wait_chip_ready_(uint32_t timeout_us) {
-  const int64_t deadline = esp_timer_get_time() + (int64_t) timeout_us;
-  do {
-    if (chip_ready_(this->raw_strobe_(CC1101_SNOP))) return true;
-    esp_rom_delay_us(100);
-  } while (esp_timer_get_time() < deadline);
-  this->chip_not_ready_count_++;
-  return false;
-}
-
 uint8_t CC1101::read_reg_(uint8_t address) {
   this->delegate_->begin_transaction();
-  const uint8_t status = this->delegate_->transfer(address | CC1101_READ);
+  this->delegate_->transfer(address | CC1101_READ);
   const uint8_t value = this->delegate_->transfer(0x00);
   this->delegate_->end_transaction();
-  // A read taken before CHIP_RDYn went low returns 0xFF, not the register.
-  if (!chip_ready_(status)) this->chip_not_ready_count_++;
   return value;
 }
 
 uint8_t CC1101::read_status_(uint8_t address) {
   this->delegate_->begin_transaction();
-  const uint8_t status = this->delegate_->transfer(address | CC1101_READ | CC1101_BURST);
+  this->delegate_->transfer(address | CC1101_READ | CC1101_BURST);
   const uint8_t value = this->delegate_->transfer(0x00);
   this->delegate_->end_transaction();
-  if (!chip_ready_(status)) this->chip_not_ready_count_++;
   return value;
 }
 
 void CC1101::write_reg_(uint8_t address, uint8_t value) {
-  for (uint8_t attempt = 0; attempt < CC1101_WRITE_RETRIES; attempt++) {
-    this->delegate_->begin_transaction();
-    const uint8_t status = this->delegate_->transfer(address);
-    this->delegate_->transfer(value);
-    this->delegate_->end_transaction();
-    if (chip_ready_(status)) return;
-    this->chip_not_ready_count_++;
-    esp_rom_delay_us(CC1101_RETRY_GAP_US);
-  }
-  ESP_LOGW(TAG,
-           "CC1101 register 0x%02X may not have been written: chip reported CHIP_RDYn after %u "
-           "attempts / zapis rejestru 0x%02X mogl nie dojsc: uklad zglasza CHIP_RDYn po %u probach",
-           address, (unsigned) CC1101_WRITE_RETRIES, address, (unsigned) CC1101_WRITE_RETRIES);
+  this->delegate_->begin_transaction();
+  this->delegate_->transfer(address);
+  this->delegate_->transfer(value);
+  this->delegate_->end_transaction();
 }
 
 void CC1101::write_burst_(uint8_t address, const uint8_t *data, size_t len) {
   if (len == 0) return;
   this->delegate_->begin_transaction();
-  const uint8_t status = this->delegate_->transfer(address | CC1101_BURST);
+  this->delegate_->transfer(address | CC1101_BURST);
   for (size_t i = 0; i < len; i++) this->delegate_->transfer(data[i]);
   this->delegate_->end_transaction();
-  if (!chip_ready_(status)) this->chip_not_ready_count_++;
 }
 
 void CC1101::read_burst_(uint8_t address, uint8_t *data, size_t len) {
   if (len == 0) return;
   this->delegate_->begin_transaction();
-  const uint8_t status = this->delegate_->transfer(address | CC1101_READ | CC1101_BURST);
+  this->delegate_->transfer(address | CC1101_READ | CC1101_BURST);
   for (size_t i = 0; i < len; i++) data[i] = this->delegate_->transfer(0x00);
   this->delegate_->end_transaction();
-  // Never retried: a second FIFO read would consume bytes this one already took.
-  if (!chip_ready_(status)) this->chip_not_ready_count_++;
 }
 
 uint8_t CC1101::rxbytes_raw_() { return this->read_status_(REG_RXBYTES); }
@@ -330,14 +268,9 @@ void CC1101::flush_rx_() {
 }
 
 void CC1101::reset_cc1101_() {
-  // TI SWRS061I manual reset sequence: wait for SO to go low (CHIP_RDYn) before
-  // issuing SRES, and again afterwards. Skipping this is only safe when the
-  // caller instead honours tsp,pd from Table 22 - and that 150 us figure was
-  // measured on a CC1101EM reference board, not on an arbitrary module.
-  this->wait_chip_ready_(CC1101_CHIP_READY_TIMEOUT_US);
-  this->raw_strobe_(CC1101_SRES);
-  delay(10);
-  this->wait_chip_ready_(CC1101_CHIP_READY_TIMEOUT_US);
+  // Standard command reset. Keep CS toggling under the SPI delegate.
+  this->strobe_(CC1101_SRES);
+  delay(5);
 }
 
 void CC1101::set_frequency_mhz(float frequency_mhz) {
@@ -351,55 +284,14 @@ void CC1101::set_frequency_mhz(float frequency_mhz) {
 
 void CC1101::set_frequency_(uint32_t frequency_hz) {
   const uint32_t freq = (uint32_t) (((uint64_t) frequency_hz << 16) / CC1101_FOSC_HZ);
-  // Verified like the rest of the profile. These three used to be the only
-  // startup registers written without a read-back, and issue #22 caught exactly
-  // that: FREQ1 landed while FREQ2 and FREQ0 stayed at their reset defaults,
-  // leaving the radio listening on 790.961 MHz while every other register was
-  // correct.
-  this->write_reg_verified_(REG_FREQ2, (uint8_t) ((freq >> 16) & 0xFF));
-  this->write_reg_verified_(REG_FREQ1, (uint8_t) ((freq >> 8) & 0xFF));
-  this->write_reg_verified_(REG_FREQ0, (uint8_t) (freq & 0xFF));
+  this->write_reg_(REG_FREQ2, (uint8_t) ((freq >> 16) & 0xFF));
+  this->write_reg_(REG_FREQ1, (uint8_t) ((freq >> 8) & 0xFF));
+  this->write_reg_(REG_FREQ0, (uint8_t) (freq & 0xFF));
 }
 
 void CC1101::set_sync_word_(uint8_t sync2) {
-  // A sync word that fails to land means the receiver listens for a pattern that
-  // is never transmitted and hears nothing at all - silently. Worth two extra
-  // reads per RX restart, which is noise next to the flush this sits beside.
-  this->write_reg_verified_(REG_SYNC1, 0x54);
-  this->write_reg_verified_(REG_SYNC0, sync2);
-}
-
-// Write a configuration register, read it back, and repeat while they differ.
-//
-// The startup self-check already reports that the profile is wrong, but only
-// after the fact and only as a list of final values. It cannot say which write
-// failed, whether repeating it helps, or how often. That distinction is the
-// whole diagnosis: if a repeat fixes the value the transport is corrupting
-// bytes, and if the register keeps reverting to its reset default no amount of
-// retrying will help and the fault is in the part or its supply.
-//
-// Failure is reported, never fatal. A few registers may legitimately read back
-// differently from what was written (reserved or read-only bits), and refusing
-// to boot over that would be worse than the problem being measured.
-bool CC1101::write_reg_verified_(uint8_t address, uint8_t value) {
-  for (uint8_t attempt = 0; attempt < CC1101_VERIFY_RETRIES; attempt++) {
-    this->write_reg_(address, value);
-    const uint8_t got = this->read_reg_(address);
-    if (got == value) {
-      this->reg_retry_count_ += attempt;
-      return true;
-    }
-    esp_rom_delay_us(CC1101_RETRY_GAP_US);
-  }
-  this->reg_retry_count_ += CC1101_VERIFY_RETRIES;
-  this->reg_failed_count_++;
-  const uint8_t last = this->read_reg_(address);
-  ESP_LOGW(TAG,
-           "CC1101 register 0x%02X did not hold 0x%02X after %u attempts (last read 0x%02X) / "
-           "rejestr 0x%02X nie utrzymal 0x%02X po %u probach (ostatni odczyt 0x%02X)",
-           address, value, (unsigned) CC1101_VERIFY_RETRIES, last,
-           address, value, (unsigned) CC1101_VERIFY_RETRIES, last);
-  return false;
+  this->write_reg_(REG_SYNC1, 0x54);
+  this->write_reg_(REG_SYNC0, sync2);
 }
 
 void CC1101::apply_radio_profile_() {
@@ -409,21 +301,21 @@ void CC1101::apply_radio_profile_() {
   // - GDO0 = FIFO threshold/data hint
   // - non-inverted GDO levels, because this driver uses rising-edge IRQ and
   //   polls the actual GDO levels directly.
-  this->write_reg_verified_(REG_IOCFG2, GDO_SYNC_WORD);
-  this->write_reg_verified_(REG_IOCFG1, 0x2E);  // GDO1 high impedance, do not fight MISO/GDO1
-  this->write_reg_verified_(REG_IOCFG0, GDO_RXFIFO_THR);
+  this->write_reg_(REG_IOCFG2, GDO_SYNC_WORD);
+  this->write_reg_(REG_IOCFG1, 0x2E);  // GDO1 high impedance, do not fight MISO/GDO1
+  this->write_reg_(REG_IOCFG0, GDO_RXFIFO_THR);
 
   // Source: TI CC1101 datasheet, FIFOTHR.FIFO_THRESHOLD. 0x07 selects the
   // 32-byte RX FIFO threshold that drives GDO0 (GDO_RXFIFO_THR above).
-  this->write_reg_verified_(REG_FIFOTHR, 0x07);
+  this->write_reg_(REG_FIFOTHR, 0x07);
 
   this->set_frequency_(this->configured_frequency_hz_);
-  // wM-Bus sync word 0x543D, shared by mode T and mode C. See restart_rx() for
-  // why 0x54CD is not a second sync word to listen on.
-  this->write_reg_verified_(REG_SYNC1, 0x54);
-  this->write_reg_verified_(REG_SYNC0, 0x3D);
-  this->write_reg_verified_(REG_PKTLEN, 0xFF);
-  this->write_reg_verified_(REG_PKTCTRL1, 0x00);  // no address check, no appended status
+  // wM-Bus T/C mode sync word 0x54 0x3D. C1 also exists with 0xCD as the second
+  // byte, which restart_rx() alternates between (see EXP_SYNC_T1 / EXP_SYNC_C1).
+  this->write_reg_(REG_SYNC1, 0x54);
+  this->write_reg_(REG_SYNC0, 0x3D);
+  this->write_reg_(REG_PKTLEN, 0xFF);
+  this->write_reg_(REG_PKTCTRL1, 0x00);  // no address check, no appended status
 
   // Source: TI CC1101 datasheet, PKTCTRL0.LENGTH_CONFIG — 0b10 = infinite packet
   // length. This is the documented setting for receiving packets whose length is
@@ -433,9 +325,9 @@ void CC1101::apply_radio_profile_() {
   // used 0x00 (fixed) until PR #407 (JarDol, merged 2026-07-19) changed it to
   // 0x02 as well — his design decodes on the ESP, where frames are shorter, so
   // fixed length looked adequate there until someone fed it a long telegram.
-  this->write_reg_verified_(REG_PKTCTRL0, 0x02);  // infinite packet length, CRC off, whitening off
-  this->write_reg_verified_(REG_ADDR, 0x00);
-  this->write_reg_verified_(REG_CHANNR, 0x00);
+  this->write_reg_(REG_PKTCTRL0, 0x02);  // infinite packet length, CRC off, whitening off
+  this->write_reg_(REG_ADDR, 0x00);
+  this->write_reg_(REG_CHANNR, 0x00);
 
   // ---------------------------------------------------------------------------
   // RF profile — PROVENANCE: inherited, not derived here.
@@ -456,76 +348,40 @@ void CC1101::apply_radio_profile_() {
   // Deviations from that baseline are deliberate and are commented at the site
   // that deviates (PKTCTRL0 above, dual-GDO IOCFG mapping further up).
   // ---------------------------------------------------------------------------
-  this->write_reg_verified_(REG_FSCTRL1, 0x08);
-  this->write_reg_verified_(REG_FSCTRL0, 0x00);
-  this->write_reg_verified_(REG_MDMCFG4, 0x5C);
-  this->write_reg_verified_(REG_MDMCFG3, 0x04);
-  this->write_reg_verified_(REG_MDMCFG2, 0x06);
-  this->write_reg_verified_(REG_MDMCFG1, 0x22);
-  this->write_reg_verified_(REG_MDMCFG0, 0xF8);
-  this->write_reg_verified_(REG_DEVIATN, 0x44);
+  this->write_reg_(REG_FSCTRL1, 0x08);
+  this->write_reg_(REG_FSCTRL0, 0x00);
+  this->write_reg_(REG_MDMCFG4, 0x5C);
+  this->write_reg_(REG_MDMCFG3, 0x04);
+  this->write_reg_(REG_MDMCFG2, 0x06);
+  this->write_reg_(REG_MDMCFG1, 0x22);
+  this->write_reg_(REG_MDMCFG0, 0xF8);
+  this->write_reg_(REG_DEVIATN, 0x44);
 
-  this->write_reg_verified_(REG_MCSM2, 0x07);
-  this->write_reg_verified_(REG_MCSM1, 0x00);
-  this->write_reg_verified_(REG_MCSM0, 0x18);  // auto-calibrate from IDLE to RX/TX
-  this->write_reg_verified_(REG_FOCCFG, 0x2E);
-  this->write_reg_verified_(REG_BSCFG, 0xBF);
-  this->write_reg_verified_(REG_AGCCTRL2, 0x43);
-  this->write_reg_verified_(REG_AGCCTRL1, 0x09);
-  this->write_reg_verified_(REG_AGCCTRL0, 0xB5);
-  this->write_reg_verified_(REG_WOREVT1, 0x87);
-  this->write_reg_verified_(REG_WOREVT0, 0x6B);
-  this->write_reg_verified_(REG_WORCTRL, 0xFB);
-  this->write_reg_verified_(REG_FREND1, 0xB6);
-  this->write_reg_verified_(REG_FREND0, 0x10);
-  this->write_reg_verified_(REG_FSCAL3, 0xEA);
-  this->write_reg_verified_(REG_FSCAL2, 0x2A);
-  this->write_reg_verified_(REG_FSCAL1, 0x00);
-  this->write_reg_verified_(REG_FSCAL0, 0x1F);
-  this->write_reg_verified_(REG_RCCTRL1, 0x41);
-  this->write_reg_verified_(REG_RCCTRL0, 0x00);
-  this->write_reg_verified_(REG_FSTEST, 0x59);
-  this->write_reg_verified_(REG_PTEST, 0x7F);
-  this->write_reg_verified_(REG_AGCTEST, 0x3F);
-  this->write_reg_verified_(REG_TEST2, 0x81);
-  this->write_reg_verified_(REG_TEST1, 0x35);
-  this->write_reg_verified_(REG_TEST0, 0x09);
-
-  if (this->reg_retry_count_ != 0 || this->reg_failed_count_ != 0) {
-    ESP_LOGW(TAG,
-             "CC1101 profile write-back / zapis profilu: %u register(s) never held their value, "
-             "%u extra attempt(s) were needed / %u rejestr(ow) nie utrzymalo wartosci, "
-             "potrzeba bylo %u dodatkowych prob",
-             (unsigned) this->reg_failed_count_, (unsigned) this->reg_retry_count_,
-             (unsigned) this->reg_failed_count_, (unsigned) this->reg_retry_count_);
-    // CHIP_RDYn was checked for every one of these and was never the cause
-    // (chip_not_ready_count_ is logged separately and covers that). A write
-    // that needed a retry means the chip accepted the transaction and the
-    // value still did not match on readback - the bus corrupted a byte in
-    // transit. Issue #22 traced one real case of this to an intermittent
-    // short between two jumper wires: reg_retry_count_ went from double
-    // digits to zero the moment the short was fixed, with nothing else
-    // changed. One correlated report is a lead, not a proof, hence "likely".
-    if (this->reg_failed_count_ != 0) {
-      ESP_LOGW(TAG,
-               "CC1101 hint / wskazowka: registers that never held their value even after retries "
-               "point at a persistent fault, not an intermittent one - reseat or resolder every "
-               "connection on this module, check for a short between adjacent pins/wires, and try a "
-               "shorter cable before suspecting the chip itself / rejestry ktore nie utrzymaly "
-               "wartosci mimo powtorek wskazuja na trwaly, nie przejsciowy blad - sprawdz kazde "
-               "polaczenie na tym module, szukaj zwarcia miedzy sasiednimi pinami/przewodami i "
-               "sprobuj krotszego kabla, zanim podejrzewasz sam uklad");
-    } else {
-      ESP_LOGW(TAG,
-               "CC1101 hint / wskazowka: registers needing a retry but eventually landing likely "
-               "means a marginal SPI connection - a loose header pin, an intermittent short between "
-               "two wires, or a cable that is too long for the clock speed. Worth checking the "
-               "wiring even though setup will proceed / rejestry ktore potrzebowaly powtorki, ale "
-               "ostatecznie sie zapisaly, wskazuja prawdopodobnie na niepewne polaczenie SPI - luzny "
-               "pin, przejsciowe zwarcie miedzy dwoma przewodami albo kabel za dlugi jak na predkosc "
-               "zegara. Warto sprawdzic okablowanie, mimo ze uruchomienie przejdzie dalej");
-    }
-  }
+  this->write_reg_(REG_MCSM2, 0x07);
+  this->write_reg_(REG_MCSM1, 0x00);
+  this->write_reg_(REG_MCSM0, 0x18);  // auto-calibrate from IDLE to RX/TX
+  this->write_reg_(REG_FOCCFG, 0x2E);
+  this->write_reg_(REG_BSCFG, 0xBF);
+  this->write_reg_(REG_AGCCTRL2, 0x43);
+  this->write_reg_(REG_AGCCTRL1, 0x09);
+  this->write_reg_(REG_AGCCTRL0, 0xB5);
+  this->write_reg_(REG_WOREVT1, 0x87);
+  this->write_reg_(REG_WOREVT0, 0x6B);
+  this->write_reg_(REG_WORCTRL, 0xFB);
+  this->write_reg_(REG_FREND1, 0xB6);
+  this->write_reg_(REG_FREND0, 0x10);
+  this->write_reg_(REG_FSCAL3, 0xEA);
+  this->write_reg_(REG_FSCAL2, 0x2A);
+  this->write_reg_(REG_FSCAL1, 0x00);
+  this->write_reg_(REG_FSCAL0, 0x1F);
+  this->write_reg_(REG_RCCTRL1, 0x41);
+  this->write_reg_(REG_RCCTRL0, 0x00);
+  this->write_reg_(REG_FSTEST, 0x59);
+  this->write_reg_(REG_PTEST, 0x7F);
+  this->write_reg_(REG_AGCTEST, 0x3F);
+  this->write_reg_(REG_TEST2, 0x81);
+  this->write_reg_(REG_TEST1, 0x35);
+  this->write_reg_(REG_TEST0, 0x09);
 
   this->strobe_(CC1101_SCAL);
   delay(2);
@@ -555,10 +411,6 @@ bool CC1101::validate_startup_config_() {
   const uint8_t agc0 = this->read_reg_(REG_AGCCTRL0);
   const uint8_t frend1 = this->read_reg_(REG_FREND1);
   const uint8_t fscal3 = this->read_reg_(REG_FSCAL3);
-
-  const uint8_t freq2 = this->read_reg_(REG_FREQ2);
-  const uint8_t freq1 = this->read_reg_(REG_FREQ1);
-  const uint8_t freq0 = this->read_reg_(REG_FREQ0);
 
   bool ok = true;
 
@@ -619,30 +471,6 @@ bool CC1101::validate_startup_config_() {
              "CC1101 CONFIG MISMATCH / blad konfiguracji: FSCAL3 expected config bits=0x%02X got=0x%02X "
              "(only FSCAL3[7:4] are validated / sprawdzane sa tylko bity FSCAL3[7:4])",
              EXP_FSCAL3 & 0xF0, fscal3);
-  }
-
-  // FREQ2/1/0 is the only part of the profile that depends on user YAML, and it
-  // used to be written without ever being read back. A carrier that silently
-  // stayed at the reset default cannot be told apart from a dead antenna in any
-  // other log line, so it is checked here explicitly.
-  const uint32_t freq_want = (uint32_t) (((uint64_t) this->configured_frequency_hz_ << 16) / CC1101_FOSC_HZ);
-  const uint32_t freq_got = ((uint32_t) freq2 << 16) | ((uint32_t) freq1 << 8) | (uint32_t) freq0;
-  const bool freq_ok = freq_got == freq_want;
-  ok = ok && freq_ok;
-  if (freq_ok) {
-    ESP_LOGI(TAG,
-             "CC1101 check OK / test OK: FREQ=0x%06X (%.3f MHz carrier / nosna %.3f MHz)",
-             (unsigned) freq_got, this->configured_frequency_hz_ / 1000000.0f,
-             this->configured_frequency_hz_ / 1000000.0f);
-  } else {
-    const double got_mhz = ((double) freq_got * (double) CC1101_FOSC_HZ) / 65536.0 / 1000000.0;
-    ESP_LOGE(TAG,
-             "CC1101 CONFIG MISMATCH / blad konfiguracji: FREQ expected=0x%06X got=0x%06X "
-             "(radio is tuned to %.3f MHz instead of %.3f MHz / radio jest nastrojone na %.3f MHz "
-             "zamiast %.3f MHz)",
-             (unsigned) freq_want, (unsigned) freq_got, got_mhz,
-             this->configured_frequency_hz_ / 1000000.0f, got_mhz,
-             this->configured_frequency_hz_ / 1000000.0f);
   }
 
   if (ok) {
@@ -849,12 +677,10 @@ void CC1101::dump_debug_status(const char *reason) {
   ESP_LOGW(TAG,
            "CC1101 debug status / status debug: reason=%s PARTNUM=0x%02X VERSION=0x%02X "
            "MARCSTATE=0x%02X(%u) RXBYTES=0x%02X(count=%u overflow=%s) "
-           "GDO0=%d GDO2=%d chip_not_ready=%u reg_write_failed=%u reg_write_retries=%u",
+           "GDO0=%d GDO2=%d",
            reason ? reason : "unknown", partnum, version,
            marc_raw, (unsigned) marc, rxbytes_raw, (unsigned) rxbytes,
-           overflow ? "true" : "false", gdo0, gdo2,
-           (unsigned) this->chip_not_ready_count_, (unsigned) this->reg_failed_count_,
-           (unsigned) this->reg_retry_count_);
+           overflow ? "true" : "false", gdo0, gdo2);
 
   ESP_LOGW(TAG,
            "CC1101 config snapshot / zrzut konfiguracji: IOCFG2=0x%02X IOCFG0=0x%02X "
@@ -928,8 +754,8 @@ void CC1101::restart_rx() {
     // of S-mode sync as an experimental raw sniffer. SX1262/SX1276 are preferred for S1.
     sync2 = 0x96;
     this->flush_rx_();
-    this->write_reg_verified_(REG_SYNC1, 0x76);
-    this->write_reg_verified_(REG_SYNC0, sync2);
+    this->write_reg_(REG_SYNC1, 0x76);
+    this->write_reg_(REG_SYNC0, sync2);
     this->chunk_len_ = 0;
     this->chunk_idx_ = 0;
     this->rssi_captured_ = false;
@@ -938,25 +764,11 @@ void CC1101::restart_rx() {
     this->strobe_(CC1101_SRX);
     return;
   }
-  // The 3:1 cycle onto 0x54CD is kept deliberately, and it is NOT settled.
-  //
-  // Argument for removing it: mode T and mode C share the sync word 0x543D, and
-  // in the one C1 capture we have (issue #22) the 0x54CD that follows arrives as
-  // DATA - which is exactly why packet.cpp strips it as WMBUS_MODE_C_SUFIX_LEN.
-  // On that reading, arming on 0x54CD cannot catch a C1 frame from its start and
-  // only spends listening windows. Neither reference CC1101 driver
-  // (SzczepanLeon, alex-icesoft) cycles this register.
-  //
-  // Why it stays anyway: that capture came from a board whose RF profile does
-  // not apply correctly, so it is not evidence about what a healthy receiver
-  // sees. The sibling drivers cycle for a documented reason (transceiver_sx1262
-  // .cpp), and CC1101 reports "3:1 bias" in its own dump_config. Changing this
-  // one driver on a hypothesis would break that consistency for users it
-  // currently works for.
-  //
-  // Settle it with a measurement from a working CC1101, not by reasoning.
   if (this->listen_mode_ == LISTEN_MODE_T1) {
     sync2 = 0x3D;
+  } else if (this->listen_mode_ == LISTEN_MODE_C1) {
+    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
+    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
   } else {
     sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
     this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);

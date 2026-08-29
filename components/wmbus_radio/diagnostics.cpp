@@ -110,7 +110,7 @@ void Radio::publish_rx_path_event_(const char *event, const char *stage, const c
              "{\"event\":\"%s\",\"uptime_ms\":%lu,\"listen_mode\":\"%s\",\"stage\":\"%s\",\"rssi\":%d}",
              event, (unsigned long) now_ms, listen_mode, stage, rssi);
   }
-  mqtt->publish(this->diag_topic_, payload);
+  mqtt->publish(this->diag_topic_, payload, this->diag_qos_, false);
 }
 
 // Publish a suggestion event, throttled to once per hour per code.
@@ -121,6 +121,7 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
                                 std::unordered_map<std::string, uint32_t> &last_ms,
                                 uint32_t now_ms,
                                 uint32_t throttle_ms,
+                                uint8_t qos,
                                 const char *chip,
                                 const char *code,
                                 const char *yaml_key,
@@ -147,7 +148,7 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
            "}",
            chip, code, yaml_key, suggested_value, yaml_snippet, hint_en, hint_pl);
 
-  mqtt->publish(topic, std::string(payload), static_cast<uint8_t>(0), false);
+  mqtt->publish(topic, std::string(payload), qos, false);
   ESP_LOGI("wmbus", "SUGGESTION / SUGESTIA [%s]: %s", code, hint_en);
 }
 
@@ -183,7 +184,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   // belongs to the health pulse (sec_since_last_rx), not to this suggestion.
   if (total == 0) {
     if (!this->any_rx_ && now_ms >= NO_METERS_MIN_UPTIME_MS_) {
-      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
           chip, "NO_METERS_DETECTED",
           "listen_mode", "t1",
           "listen_mode: t1",
@@ -203,7 +204,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
     // wmbusmeters, so telling the user to look up its id there sends them
     // hunting for something that was never published.
     if (this->diag_ok_ > 0) {
-      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
           chip, "ADD_HIGHLIGHT_METERS",
           "highlight_meters", "<meter_id>",
           "highlight_meters:\n  - \"<meter_id>\"",
@@ -220,7 +221,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   // when high fsl is just RF background noise with no actual losses.
   // Skip if already enabled in YAML.
   if (is_sx1276 && fsl >= 80 && drop_pct >= 10 && !this->diag_publish_rx_path_events_) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "ENABLE_RX_PATH_EVENTS",
         "diagnostic_publish_rx_path_events", "true",
         "diagnostic_publish_rx_path_events: true",
@@ -236,7 +237,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   // genuinely overrunning, which these counters - not RF noise - are what say so.
   if (is_sx1276 && this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL &&
       (this->diag_rx_path_.fifo_overrun > 0 || this->diag_truncated_ > 0) && drop_pct >= 10) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "CONSIDER_BUSY_ETHER_ADAPTIVE",
         "sx1276_busy_ether_mode", "adaptive",
         "sx1276_busy_ether_mode: adaptive",
@@ -250,7 +251,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   if (total >= 20 && drop_pct >= 40 && this->diag_rssi_ok_n_ > 0 && (!this->diag_publish_drop_events_ || !this->diag_publish_raw_)) {
     const int32_t avg_ok_rssi = this->diag_rssi_ok_sum_ / (int32_t) this->diag_rssi_ok_n_;
     if (avg_ok_rssi <= -85) {
-      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
           chip, "ENABLE_DROP_EVENTS_RAW",
           "diagnostic_publish_drop_events", "true",
           "diagnostic_publish_drop_events: true\ndiagnostic_publish_raw: true",
@@ -269,7 +270,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
       && this->diag_t1_symbols_total_ >= 500
       && drop_pct >= 5
       && total >= 20) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "SX1262_SYMBOL_ERRORS",
         "cpu_frequency", "160MHz",
         "cpu_frequency: 160MHz",
@@ -284,7 +285,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
       this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE &&
       now_ms > this->busy_ether_active_until_ms_ &&
       fsl < 20 && total >= 30) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "QUIET_ETHER_ADAPTIVE_IDLE",
         "sx1276_busy_ether_mode", "normal",
         "sx1276_busy_ether_mode: normal",
@@ -335,7 +336,7 @@ void Radio::maybe_publish_health_(uint32_t now_ms) {
     // std::string(...) disambiguates the publish() overload set: a bare char[]
     // is ambiguous between the (const char*, size_t, ...) and (const std::string&,
     // ...) signatures; wrapping forces the string overload (as elsewhere here).
-    mqtt->publish(this->health_topic_, std::string(payload), static_cast<uint8_t>(0), false);
+    mqtt->publish(this->health_topic_, std::string(payload), this->health_qos_, false);
   }
 
   if (!this->meters_topic_.empty()) {
@@ -363,7 +364,7 @@ void Radio::maybe_publish_health_(uint32_t now_ms) {
     }
     arr += ']';
     std::string payload = "{\"target\":\"" + this->target_meter_id_str_ + "\",\"highlight\":" + arr + "}";
-    mqtt->publish(this->meters_topic_, payload, static_cast<uint8_t>(0), false);
+    mqtt->publish(this->meters_topic_, payload, this->health_qos_, false);
   }
 }
 
@@ -771,7 +772,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_topic_();
-  mqtt->publish(summary_topic, payload);
+  mqtt->publish(summary_topic, payload, this->diag_qos_, false);
   ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) total, (unsigned) this->diag_ok_,
@@ -1195,7 +1196,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_15min_topic_();
-  mqtt->publish(summary_topic, payload);
+  mqtt->publish(summary_topic, payload, this->diag_qos_, false);
   ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) total, (unsigned) this->diag_15m_ok_,
@@ -1632,7 +1633,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_60min_topic_();
-  mqtt->publish(summary_topic, payload);
+  mqtt->publish(summary_topic, payload, this->diag_qos_, false);
   ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) total, (unsigned) this->diag_60min_ok_,
