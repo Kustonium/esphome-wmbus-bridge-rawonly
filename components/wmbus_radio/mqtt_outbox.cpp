@@ -93,6 +93,11 @@ static constexpr size_t MAX_SUGGESTED_CAPACITY_PSRAM = 4096;       // ~1.6 MB of
 
 static inline bool board_has_psram_() { return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0; }
 
+// Low 32 bits of a meter_bucket_key = the printable meter id, i.e. the value
+// the receive log shows as id:XXXXXXXX (raw A-field, or the BCD id for a
+// meter that has no raw form). Used for the per-meter drop breakdown.
+static inline uint32_t outbox_display_id_(uint64_t meter_key) { return (uint32_t) (meter_key & 0xFFFFFFFFu); }
+
 size_t Radio::suggested_mqtt_outbox_capacity_() const {
   const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
 
@@ -186,17 +191,29 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
     // publishing out of turn.
   }
 
-  // meter_bucket_key() tags whichever of meter_id/meter_id_raw is the real
-  // identity for this meter (see meter_filter.h) - stable across BCD and
-  // non-BCD meters, and consistent with how buffer_priority weights were
-  // keyed when parsed in setup(). Computed up here so every drop path below
-  // can attribute the loss to a meter (note_outbox_drop_).
-  const uint64_t key = meter_bucket_key(meter_id, meter_id_raw);
+  // A frame carries BOTH forms of its id at runtime: meter_id (BCD-decoded,
+  // non-zero for a BCD-able A-field) and meter_id_raw (the raw A-field). A
+  // buffer_priority / forward_meters entry was keyed with only ONE of them,
+  // whichever the YAML token implied (hex -> raw, decimal -> BCD). So resolve
+  // the quota by trying BOTH key forms and canonicalise msg.meter_key to the
+  // one the quota actually uses - otherwise the keys never match, the quota
+  // is bypassed, and recompute_buffer_quotas_ treats every queued frame as
+  // "not whitelisted" and wipes the buffer on its next 30s pass.
+  const uint64_t key_bcd = (meter_id != 0) ? meter_bucket_key(meter_id, 0) : 0;
+  const uint64_t key_raw = (meter_id_raw != 0) ? meter_bucket_key(0, meter_id_raw) : 0;
+  const uint32_t display_id = (meter_id_raw != 0) ? meter_id_raw : meter_id;
+  uint64_t key = key_bcd != 0 ? key_bcd : key_raw;  // fallback identity when no quota matches
+  MeterQuota *mq = nullptr;
+  if (key_raw != 0 && (mq = this->find_meter_quota_(key_raw)) != nullptr) {
+    key = key_raw;
+  } else if (key_bcd != 0 && (mq = this->find_meter_quota_(key_bcd)) != nullptr) {
+    key = key_bcd;
+  }
 
   if (this->mqtt_outbox_capacity_ == 0) {
     // Buffering disabled (mqtt_buffer_size: 0, or lowered to 0 at runtime):
     // behave exactly like the upstream project today - drop silently.
-    this->note_outbox_drop_(key, false);
+    this->note_outbox_drop_(display_id, false);
     return;
   }
 
@@ -220,7 +237,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       why = "free heap below reserve";
     }
     if (refuse) {
-      this->note_outbox_drop_(key, true);
+      this->note_outbox_drop_(display_id, true);
       const uint32_t now_ms = (uint32_t) esphome::millis();
       if (this->last_outbox_heap_warning_ms_ == 0 ||
           (now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
@@ -234,8 +251,6 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
     }
   }
 
-  MeterQuota *mq = this->find_meter_quota_(key);
-
   if (mq != nullptr) {
     // Per-meter mode active (non-empty forward_meters whitelist): this
     // meter's own slice of the buffer, not the buffer as a whole, is what
@@ -246,7 +261,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       // capacity (more whitelisted meters than capacity allows). It gets no
       // buffer space at all rather than opportunistically borrowing room
       // that the next recompute would immediately reclaim from it anyway.
-      this->note_outbox_drop_(key, false);
+      this->note_outbox_drop_(display_id, false);
       return;
     }
     if (mq->count >= mq->quota) {
@@ -256,7 +271,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
         if (it->meter_key == key) {
           this->mqtt_outbox_.erase(it);
           mq->count--;
-          this->note_outbox_drop_(key, false);
+          this->note_outbox_drop_(display_id, false);
           break;
         }
       }
@@ -269,9 +284,9 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       // A long outage should keep the most recent readings, not lock onto
       // whatever was first in the window - the newest state is what a
       // reconnecting consumer needs most.
-      const uint64_t evicted_key = this->mqtt_outbox_.front().meter_key;
+      const uint32_t evicted_id = outbox_display_id_(this->mqtt_outbox_.front().meter_key);
       this->mqtt_outbox_.pop_front();
-      this->note_outbox_drop_(evicted_key, false);
+      this->note_outbox_drop_(evicted_id, false);
     }
   }
 
@@ -287,7 +302,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       // Out of room even after the fallback - same outcome as the reserve
       // check above: refuse, count it as a heap refusal. msg's destructor
       // frees whatever partially allocated.
-      this->note_outbox_drop_(key, true);
+      this->note_outbox_drop_(display_id, true);
       return;
     }
     memcpy(msg.topic, topic.data(), tlen);
@@ -413,9 +428,9 @@ void Radio::recompute_buffer_quotas_() {
     // capacity (e.g. after the capacity number entity is lowered at runtime).
     this->mqtt_outbox_meter_quotas_.clear();
     while (this->mqtt_outbox_.size() > this->mqtt_outbox_capacity_) {
-      const uint64_t evicted_key = this->mqtt_outbox_.front().meter_key;
+      const uint32_t evicted_id = outbox_display_id_(this->mqtt_outbox_.front().meter_key);
       this->mqtt_outbox_.pop_front();
-      this->note_outbox_drop_(evicted_key, false);
+      this->note_outbox_drop_(evicted_id, false);
     }
     return;
   }
@@ -449,9 +464,9 @@ void Radio::recompute_buffer_quotas_() {
     // zero if it ever does.
     this->mqtt_outbox_meter_quotas_.clear();
     while (this->mqtt_outbox_.size() > this->mqtt_outbox_capacity_) {
-      const uint64_t evicted_key = this->mqtt_outbox_.front().meter_key;
+      const uint32_t evicted_id = outbox_display_id_(this->mqtt_outbox_.front().meter_key);
       this->mqtt_outbox_.pop_front();
-      this->note_outbox_drop_(evicted_key, false);
+      this->note_outbox_drop_(evicted_id, false);
     }
     return;
   }
@@ -487,42 +502,39 @@ void Radio::recompute_buffer_quotas_() {
     this->mqtt_outbox_meter_quotas_.push_back(mq);
   }
 
-  // Re-derive live counts from what is actually queued right now - a
-  // recompute can be triggered mid-flight by a runtime capacity change (auto
-  // mode, or the buffer_capacity number entity), not just once at boot with
-  // an empty queue.
+  // Rebuild the queue in one O(n) pass (not erase()-in-a-loop, which is
+  // O(n^2) and, on a large PSRAM-backed buffer, long enough to trip the task
+  // watchdog): drop frames that match no quota at all (stale after a config
+  // change) and frames that are over their meter's quota, keeping the NEWEST
+  // `quota` frames per meter - same "keep the freshest" rule the enqueue
+  // path uses. First count each meter's queued total, then walk again.
+  std::unordered_map<uint64_t, uint32_t> queued_total;
   for (const auto &msg : this->mqtt_outbox_) {
     MeterQuota *mq = this->find_meter_quota_(msg.meter_key);
-    if (mq != nullptr) mq->count++;
+    if (mq != nullptr)
+      queued_total[mq->key]++;
   }
 
-  // Drop anything that no longer matches any whitelist entry at all (stale
-  // messages from before a config change), then trim any meter that is now
-  // over its (possibly just-shrunk) quota, oldest-of-that-meter first.
-  for (auto it = this->mqtt_outbox_.begin(); it != this->mqtt_outbox_.end();) {
-    if (this->find_meter_quota_(it->meter_key) == nullptr) {
-      const uint64_t stale_key = it->meter_key;
-      it = this->mqtt_outbox_.erase(it);
-      this->note_outbox_drop_(stale_key, false);
+  std::deque<OutboxMsg> kept;
+  std::unordered_map<uint64_t, uint32_t> seen;
+  for (auto &msg : this->mqtt_outbox_) {
+    MeterQuota *mq = this->find_meter_quota_(msg.meter_key);
+    if (mq == nullptr) {
+      // No matching quota -> not (or no longer) whitelisted for priority.
+      this->note_outbox_drop_(outbox_display_id_(msg.meter_key), false);
+      continue;
+    }
+    const uint32_t total = queued_total[mq->key];
+    const uint32_t drop_first = (total > mq->quota) ? (total - mq->quota) : 0;
+    if (seen[mq->key]++ < drop_first) {
+      // One of this meter's oldest frames, over quota -> drop it.
+      this->note_outbox_drop_(outbox_display_id_(msg.meter_key), false);
     } else {
-      ++it;
+      mq->count++;
+      kept.push_back(std::move(msg));
     }
   }
-  for (auto &mq : this->mqtt_outbox_meter_quotas_) {
-    while (mq.count > mq.quota) {
-      bool erased = false;
-      for (auto it = this->mqtt_outbox_.begin(); it != this->mqtt_outbox_.end(); ++it) {
-        if (it->meter_key == mq.key) {
-          this->mqtt_outbox_.erase(it);
-          mq.count--;
-          this->note_outbox_drop_(mq.key, false);
-          erased = true;
-          break;
-        }
-      }
-      if (!erased) break;  // safety net: count/quota mismatch should not happen
-    }
-  }
+  this->mqtt_outbox_.swap(kept);
 }
 
 void Radio::publish_initial_buffer_state_() {
@@ -547,11 +559,11 @@ void Radio::publish_initial_buffer_state_() {
 // and the per-outage per-meter breakdown used by the 30s stats line. The
 // per-outage figures are zeroed by update_outbox_stats_ the moment the MQTT
 // link drops.
-void Radio::note_outbox_drop_(uint64_t meter_key, bool refused_heap) {
+void Radio::note_outbox_drop_(uint32_t display_id, bool refused_heap) {
   this->mqtt_outbox_dropped_total_++;
   this->mqtt_outbox_dropped_this_outage_++;
   if (refused_heap) this->mqtt_outbox_refused_heap_this_outage_++;
-  if (meter_key != 0) this->outbox_drop_by_meter_[meter_key]++;
+  if (display_id != 0) this->outbox_drop_by_meter_[display_id]++;
 }
 
 void Radio::update_outbox_stats_(uint32_t now_ms) {

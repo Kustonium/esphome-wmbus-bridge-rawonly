@@ -392,9 +392,12 @@ protected:
   // The lifetime mqtt_outbox_dropped_total_ above is never reset.
   uint32_t mqtt_outbox_dropped_this_outage_{0};
   uint32_t mqtt_outbox_refused_heap_this_outage_{0};  // subset of the above refused at the door by the 40 KB heap valve
-  std::unordered_map<uint64_t, uint32_t> outbox_drop_by_meter_{};  // per-meter drops this outage (30s stats line only)
+  // Per-meter drops this outage, keyed by the printable meter id (raw A-field
+  // when available, else the BCD id) - i.e. the value the receive log prints
+  // as id:XXXXXXXX. 30s stats line only.
+  std::unordered_map<uint32_t, uint32_t> outbox_drop_by_meter_{};
   bool outbox_was_connected_{true};        // MQTT link state at the previous stats tick, to catch the edge into an outage
-  void note_outbox_drop_(uint64_t meter_key, bool refused_heap);
+  void note_outbox_drop_(uint32_t display_id, bool refused_heap);
   uint32_t last_outbox_stats_ms_{0};
   uint32_t last_outbox_stats_log_ms_{0};   // 30s periodic "MQTT outbox stats" INFO line
   uint32_t last_outbox_autosize_ms_{0};
