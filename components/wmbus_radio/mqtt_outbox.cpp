@@ -581,51 +581,48 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
   this->outbox_was_connected_ = connected;
 
   // Gauges for an HA panel, not an event stream. Re-evaluated at most once a
-  // second, and each sensor is only actually published when its value
-  // changed - otherwise an idle bridge emitted identical sensor lines every
-  // second forever.
+  // second.
   if (this->last_outbox_stats_ms_ != 0 && (now_ms - this->last_outbox_stats_ms_) < 1000) return;
   this->last_outbox_stats_ms_ = now_ms;
 
-  if (this->buffer_dropped_last_outage_sensor_ != nullptr) {
-    const float v = (float) this->mqtt_outbox_dropped_this_outage_;
-    if (v != this->last_pub_dropped_outage_) {
-      this->buffer_dropped_last_outage_sensor_->publish_state(v);
-      this->last_pub_dropped_outage_ = v;
-    }
+  const float depth = (float) this->mqtt_outbox_.size();
+  const float dropped_total = (float) this->mqtt_outbox_dropped_total_;
+  const float dropped_outage = (float) this->mqtt_outbox_dropped_this_outage_;
+  float oldest_age = 0.0f;
+  if (!this->mqtt_outbox_.empty()) {
+    const uint32_t age_ms = now_ms - this->mqtt_outbox_.front().enqueued_ms;  // unsigned: still correct across the ~49-day millis() wrap
+    oldest_age = (float) age_ms / 1000.0f;
   }
-  if (this->buffer_depth_sensor_ != nullptr) {
-    const float v = (float) this->mqtt_outbox_.size();
-    if (v != this->last_pub_depth_) {
-      this->buffer_depth_sensor_->publish_state(v);
-      this->last_pub_depth_ = v;
-    }
-  }
-  if (this->buffer_dropped_sensor_ != nullptr) {
-    const float v = (float) this->mqtt_outbox_dropped_total_;
-    if (v != this->last_pub_dropped_) {
-      this->buffer_dropped_sensor_->publish_state(v);
-      this->last_pub_dropped_ = v;
-    }
-  }
-  if (this->buffer_oldest_age_sensor_ != nullptr) {
-    float v = 0.0f;
-    if (!this->mqtt_outbox_.empty()) {
-      const uint32_t age_ms = now_ms - this->mqtt_outbox_.front().enqueued_ms;  // unsigned: still correct across the ~49-day millis() wrap
-      v = (float) age_ms / 1000.0f;
-    }
-    // While a backlog exists this genuinely changes every tick (that is the
-    // point); once drained it settles at 0 and stops publishing.
-    if (v != this->last_pub_oldest_age_) {
-      this->buffer_oldest_age_sensor_->publish_state(v);
-      this->last_pub_oldest_age_ = v;
-    }
+
+  const bool tick30 =
+      (this->last_outbox_stats_log_ms_ == 0 || (now_ms - this->last_outbox_stats_log_ms_) >= 30000);
+
+  // Publish all four buffer sensors TOGETHER, and only when something moved
+  // (a frame entered the queue, or drained, or was dropped) or on the 30s
+  // tick. The oldest-age gauge would otherwise change - and re-publish - every
+  // second for the whole length of an outage; here HA just sees it refreshed
+  // alongside depth/drops and at least every 30s.
+  const bool moved = depth != this->last_pub_depth_ || dropped_total != this->last_pub_dropped_ ||
+                     dropped_outage != this->last_pub_dropped_outage_;
+  if (moved || tick30) {
+    if (this->buffer_depth_sensor_ != nullptr && depth != this->last_pub_depth_)
+      this->buffer_depth_sensor_->publish_state(depth);
+    if (this->buffer_dropped_sensor_ != nullptr && dropped_total != this->last_pub_dropped_)
+      this->buffer_dropped_sensor_->publish_state(dropped_total);
+    if (this->buffer_dropped_last_outage_sensor_ != nullptr && dropped_outage != this->last_pub_dropped_outage_)
+      this->buffer_dropped_last_outage_sensor_->publish_state(dropped_outage);
+    if (this->buffer_oldest_age_sensor_ != nullptr && oldest_age != this->last_pub_oldest_age_)
+      this->buffer_oldest_age_sensor_->publish_state(oldest_age);
+    this->last_pub_depth_ = depth;
+    this->last_pub_dropped_ = dropped_total;
+    this->last_pub_dropped_outage_ = dropped_outage;
+    this->last_pub_oldest_age_ = oldest_age;
   }
 
   // Once every 30s, one INFO line with the running buffer figures - but only
   // while it is worth reading: something queued now, or the lifetime drop
   // count moved since the last line. A healthy, idle bridge stays silent.
-  if (this->last_outbox_stats_log_ms_ == 0 || (now_ms - this->last_outbox_stats_log_ms_) >= 30000) {
+  if (tick30) {
     this->last_outbox_stats_log_ms_ = now_ms;
     if (!this->mqtt_outbox_.empty() || this->mqtt_outbox_dropped_total_ != this->last_stats_log_dropped_) {
       this->last_stats_log_dropped_ = this->mqtt_outbox_dropped_total_;
