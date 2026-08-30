@@ -39,16 +39,22 @@ class CC1101 : public RadioTransceiver {
   InternalGPIOPin *gdo0_pin_{nullptr};
   InternalGPIOPin *gdo2_pin_{nullptr};
 
+  uint8_t sync_cycle_{0};
   std::array<uint8_t, CC1101_CHUNK_SIZE> chunk_buffer_{};
   size_t chunk_len_{0};
   size_t chunk_idx_{0};
 
-  uint8_t sync_cycle_{0};
   uint32_t configured_frequency_hz_{868950000UL};
   int8_t last_rssi_dbm_{-127};
   bool rssi_captured_{false};
   bool abort_requested_{false};
   uint32_t fifo_overrun_count_{0};
+  // SPI transactions the chip answered with CHIP_RDYn still high.
+  uint32_t chip_not_ready_count_{0};
+  // Boot-profile registers that never held their value, and how many extra
+  // write attempts the profile needed in total.
+  uint32_t reg_failed_count_{0};
+  uint32_t reg_retry_count_{0};
 
   void reset_cc1101_();
   void apply_radio_profile_();
@@ -57,9 +63,12 @@ class CC1101 : public RadioTransceiver {
   void set_sync_word_(uint8_t sync2);
 
   uint8_t strobe_(uint8_t cmd);
+  uint8_t raw_strobe_(uint8_t cmd);
+  bool wait_chip_ready_(uint32_t timeout_us);
   uint8_t read_reg_(uint8_t address);
   uint8_t read_status_(uint8_t address);
   void write_reg_(uint8_t address, uint8_t value);
+  bool write_reg_verified_(uint8_t address, uint8_t value);
   void write_burst_(uint8_t address, const uint8_t *data, size_t len);
   void read_burst_(uint8_t address, uint8_t *data, size_t len);
 
