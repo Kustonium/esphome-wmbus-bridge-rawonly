@@ -262,29 +262,15 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   }
 
   if (mq != nullptr) {
-    // Per-meter mode active (non-empty forward_meters whitelist): this
-    // meter's own slice of the buffer, not the buffer as a whole, is what
-    // has to make room. A noisy meter can then never crowd out a quiet one -
-    // the noisy one just cycles through its own quota.
-    if (mq->quota == 0) {
-      // This meter's weight rounded down to zero slices of the current
-      // capacity (more whitelisted meters than capacity allows). It gets no
-      // buffer space at all rather than opportunistically borrowing room
-      // that the next recompute would immediately reclaim from it anyway.
-      this->note_outbox_drop_(display_id, false);
-      return;
-    }
-    if (mq->count >= mq->quota) {
-      // Full for this meter: drop ITS oldest queued message, not necessarily
-      // the buffer's oldest overall, so other meters' quotas are untouched.
-      for (auto it = this->mqtt_outbox_.begin(); it != this->mqtt_outbox_.end(); ++it) {
-        if (it->meter_key == key) {
-          this->mqtt_outbox_.erase(it);
-          mq->count--;
-          this->note_outbox_drop_(display_id, false);
-          break;
-        }
-      }
+    // Per-meter mode active (non-empty forward_meters whitelist). Quotas are
+    // LAZY: a meter may use as much of the buffer as is free, exceeding its
+    // buffer_priority slice, and nothing is dropped for that. The quota only
+    // decides who loses a frame when the WHOLE buffer is actually full - then
+    // the meter most over its fair share is trimmed, oldest first, so a quiet
+    // meter's arriving frame always finds room. If the outage clears while
+    // there is still space, the "over-quota" data was never thrown away.
+    if (this->mqtt_outbox_.size() >= this->mqtt_outbox_capacity_) {
+      this->evict_one_for_priority_();
     }
   } else {
     // Shared-pool mode (no whitelist, so no per-meter quotas exist): the
@@ -517,39 +503,70 @@ void Radio::recompute_buffer_quotas_() {
   if (this->mqtt_outbox_.empty())
     return;
 
-  // Rebuild the queue in one O(n) pass (not erase()-in-a-loop, which is
-  // O(n^2) and, on a large PSRAM-backed buffer, long enough to trip the task
-  // watchdog): drop frames that match no quota at all (stale after a config
-  // change) and frames that are over their meter's quota, keeping the NEWEST
-  // `quota` frames per meter - same "keep the freshest" rule the enqueue
-  // path uses. First count each meter's queued total, then walk again.
-  std::unordered_map<uint64_t, uint32_t> queued_total;
+  // One O(n) pass: drop only frames whose meter matches no quota at all
+  // (stale after a config change) - those genuinely no longer belong.
+  {
+    std::deque<OutboxMsg> kept;
+    for (auto &msg : this->mqtt_outbox_) {
+      if (this->find_meter_quota_(msg.meter_key) != nullptr) {
+        kept.push_back(std::move(msg));
+      } else {
+        this->note_outbox_drop_(outbox_display_id_(msg.meter_key), false);
+      }
+    }
+    this->mqtt_outbox_.swap(kept);
+  }
+
+  // Re-derive live per-meter counts from what survived.
+  for (auto &mq : this->mqtt_outbox_meter_quotas_)
+    mq.count = 0;
   for (const auto &msg : this->mqtt_outbox_) {
     MeterQuota *mq = this->find_meter_quota_(msg.meter_key);
     if (mq != nullptr)
-      queued_total[mq->key]++;
+      mq->count++;
   }
 
-  std::deque<OutboxMsg> kept;
-  std::unordered_map<uint64_t, uint32_t> seen;
-  for (auto &msg : this->mqtt_outbox_) {
-    MeterQuota *mq = this->find_meter_quota_(msg.meter_key);
-    if (mq == nullptr) {
-      // No matching quota -> not (or no longer) whitelisted for priority.
-      this->note_outbox_drop_(outbox_display_id_(msg.meter_key), false);
-      continue;
-    }
-    const uint32_t total = queued_total[mq->key];
-    const uint32_t drop_first = (total > mq->quota) ? (total - mq->quota) : 0;
-    if (seen[mq->key]++ < drop_first) {
-      // One of this meter's oldest frames, over quota -> drop it.
-      this->note_outbox_drop_(outbox_display_id_(msg.meter_key), false);
-    } else {
-      mq->count++;
-      kept.push_back(std::move(msg));
+  // Lazy quotas: enforce only the GLOBAL cap here. A capacity drop while the
+  // buffer is not actually full trims NOTHING - a meter over its quota keeps
+  // its frames until a competing frame needs the room (handled in
+  // enqueue_or_publish_). This is what stops a shrink from throwing away
+  // e.g. 60 real readings just to reserve empty slots for meters that may
+  // not transmit for minutes.
+  while (this->mqtt_outbox_.size() > this->mqtt_outbox_capacity_)
+    this->evict_one_for_priority_();
+}
+
+void Radio::evict_one_for_priority_() {
+  if (this->mqtt_outbox_.empty())
+    return;
+
+  // Victim meter: the one furthest over its quota (largest count - quota).
+  MeterQuota *victim = nullptr;
+  long worst_over = 0;
+  for (auto &mq : this->mqtt_outbox_meter_quotas_) {
+    const long over = (long) mq.count - (long) mq.quota;
+    if (over > worst_over) {
+      worst_over = over;
+      victim = &mq;
     }
   }
-  this->mqtt_outbox_.swap(kept);
+
+  auto it = this->mqtt_outbox_.begin();  // default: globally oldest
+  if (victim != nullptr) {
+    for (auto scan = this->mqtt_outbox_.begin(); scan != this->mqtt_outbox_.end(); ++scan) {
+      if (this->find_meter_quota_(scan->meter_key) == victim) {
+        it = scan;  // oldest frame of the over-quota meter
+        break;
+      }
+    }
+  }
+
+  const uint32_t drop_id = outbox_display_id_(it->meter_key);
+  MeterQuota *mq = this->find_meter_quota_(it->meter_key);
+  if (mq != nullptr && mq->count > 0)
+    mq->count--;
+  this->mqtt_outbox_.erase(it);
+  this->note_outbox_drop_(drop_id, false);
 }
 
 void Radio::publish_initial_buffer_state_() {

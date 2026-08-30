@@ -450,6 +450,11 @@ protected:
   };
   std::vector<MeterQuota> mqtt_outbox_meter_quotas_{};
   MeterQuota *find_meter_quota_(uint64_t key);
+  // Make exactly one slot in a full buffer. Victim = the meter furthest over
+  // its buffer_priority quota (oldest frame first); if none is over quota,
+  // the globally oldest frame. Lazy: only ever called when depth == capacity,
+  // never to pre-emptively reserve empty space.
+  void evict_one_for_priority_();
   // Rebuilds mqtt_outbox_meter_quotas_ from buffer_priority_weights_ + the
   // forward_meters whitelist + the current capacity, and trims any meter
   // that is now over its (possibly shrunk) quota. Called once at the end of
