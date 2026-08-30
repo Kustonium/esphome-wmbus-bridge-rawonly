@@ -285,14 +285,15 @@ void Radio::setup() {
   {
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const bool store_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
     ESP_LOGI(TAG,
-             "MQTT outbox / bufor MQTT: capacity=%u (max=%u, %s) free_heap=%u B free_psram=%u B / "
-             "pojemnosc=%u (maksimum=%u, %s) wolny_heap=%u B wolny_psram=%u B",
+             "MQTT outbox / bufor MQTT: capacity=%u (max=%u, %s, store=%s) free_heap=%u B free_psram=%u B / "
+             "pojemnosc=%u (maksimum=%u, %s, storage=%s) wolny_heap=%u B wolny_psram=%u B",
              (unsigned) this->mqtt_outbox_capacity_, (unsigned) this->mqtt_outbox_max_capacity_,
-             this->mqtt_outbox_auto_ ? "auto" : "fixed",
+             this->mqtt_outbox_auto_ ? "auto" : "fixed", store_psram ? "PSRAM" : "internal",
              (unsigned) free_internal, (unsigned) free_psram,
              (unsigned) this->mqtt_outbox_capacity_, (unsigned) this->mqtt_outbox_max_capacity_,
-             this->mqtt_outbox_auto_ ? "auto" : "fixed",
+             this->mqtt_outbox_auto_ ? "auto" : "fixed", store_psram ? "PSRAM" : "internal",
              (unsigned) free_internal, (unsigned) free_psram);
   }
   // Push the compiled starting capacity to the optional number entity (if the

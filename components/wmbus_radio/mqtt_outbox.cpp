@@ -37,6 +37,7 @@
 #include "esphome/components/select/select.h"
 
 #include <algorithm>
+#include <cstring>
 #include <esp_heap_caps.h>
 
 namespace esphome {
@@ -75,14 +76,45 @@ static constexpr size_t RAM_RESERVE_BYTES = 40 * 1024;       // never eat into t
 static constexpr float OUTBOX_HEAP_BUDGET_FRACTION = 0.25f;  // at most 25% of what's free above the reserve
 static constexpr size_t EST_BYTES_PER_QUEUED_MSG = 400;      // conservative average, see note above
 static constexpr size_t MIN_SUGGESTED_CAPACITY = 4;
-static constexpr size_t MAX_SUGGESTED_CAPACITY = 512;  // sanity cap even on a board with lots of free heap
+static constexpr size_t MAX_SUGGESTED_CAPACITY = 512;  // sanity cap when the buffer lives in internal heap
 static constexpr uint32_t AUTOSIZE_INTERVAL_MS = 30000;      // re-evaluate every ~30s in auto mode
 static constexpr uint32_t HEAP_WARNING_THROTTLE_MS = 60000;  // at most one "buffer refused" warning per minute
 
+// PSRAM-backed buffer sizing (used only when the board actually has PSRAM;
+// RAMAllocator<char> then places topic+payload bytes there instead of internal
+// heap). PSRAM is roomy, so the caps are much higher, but the reserve still
+// protects other PSRAM users and the internal-heap reserve still applies to
+// the small per-message deque node.
+static constexpr size_t PSRAM_RESERVE_BYTES = 256 * 1024;          // keep this much PSRAM free for everything else
+static constexpr float OUTBOX_PSRAM_BUDGET_FRACTION = 0.5f;        // at most 50% of free PSRAM above the reserve
+static constexpr size_t INTERNAL_RESERVE_WITH_PSRAM = 24 * 1024;   // smaller internal margin: only deque nodes are internal now
+static constexpr size_t EST_DEQUE_NODE_BYTES = 40;                 // OutboxMsg + deque bookkeeping, internal heap
+static constexpr size_t MAX_SUGGESTED_CAPACITY_PSRAM = 4096;       // ~1.6 MB of payloads at EST_BYTES_PER_QUEUED_MSG
+
+static inline bool board_has_psram_() { return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0; }
+
 size_t Radio::suggested_mqtt_outbox_capacity_() const {
   const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-  if (free_internal <= RAM_RESERVE_BYTES) return MIN_SUGGESTED_CAPACITY;
 
+  if (board_has_psram_()) {
+    // Payload bytes go to PSRAM; only the deque nodes cost internal heap.
+    // The suggestion is the lower of "what fits in the PSRAM budget" and
+    // "what fits in internal heap as deque nodes", so neither pool is
+    // pushed past its reserve.
+    const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (free_psram <= PSRAM_RESERVE_BYTES || free_internal <= INTERNAL_RESERVE_WITH_PSRAM)
+      return MIN_SUGGESTED_CAPACITY;
+    const size_t psram_budget = (size_t) ((free_psram - PSRAM_RESERVE_BYTES) * OUTBOX_PSRAM_BUDGET_FRACTION);
+    const size_t by_psram = psram_budget / EST_BYTES_PER_QUEUED_MSG;
+    const size_t by_internal = (free_internal - INTERNAL_RESERVE_WITH_PSRAM) / EST_DEQUE_NODE_BYTES;
+    size_t suggested = by_psram < by_internal ? by_psram : by_internal;
+    if (suggested < MIN_SUGGESTED_CAPACITY) suggested = MIN_SUGGESTED_CAPACITY;
+    if (suggested > MAX_SUGGESTED_CAPACITY_PSRAM) suggested = MAX_SUGGESTED_CAPACITY_PSRAM;
+    return suggested;
+  }
+
+  // No PSRAM: everything is in internal heap, exactly as before this option.
+  if (free_internal <= RAM_RESERVE_BYTES) return MIN_SUGGESTED_CAPACITY;
   const size_t budget_bytes = (size_t) ((free_internal - RAM_RESERVE_BYTES) * OUTBOX_HEAP_BUDGET_FRACTION);
   size_t suggested = budget_bytes / EST_BYTES_PER_QUEUED_MSG;
   if (suggested < MIN_SUGGESTED_CAPACITY) suggested = MIN_SUGGESTED_CAPACITY;
@@ -171,18 +203,35 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   // Hard backstop, independent of mqtt_outbox_capacity_: even a manually
   // chosen mqtt_buffer_size that looked safe at boot must not be allowed to
   // starve WiFi/MQTT/TLS of RAM later (more diagnostics enabled, unusually
-  // large payloads, heap fragmentation over uptime, ...). This is the same
-  // reserve auto-sizing budgets around; here it applies unconditionally.
-  if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < RAM_RESERVE_BYTES) {
-    this->note_outbox_drop_(key, true);
-    const uint32_t now_ms = (uint32_t) esphome::millis();
-    if (this->last_outbox_heap_warning_ms_ == 0 || (now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
-      this->last_outbox_heap_warning_ms_ = now_ms;
-      ESP_LOGW(TAG, "MQTT outbox: free heap below reserve (%u B), refusing to buffer / "
-                    "bufor MQTT: wolny heap ponizej rezerwy (%u B), odmowa buforowania",
-               (unsigned) RAM_RESERVE_BYTES, (unsigned) RAM_RESERVE_BYTES);
+  // large payloads, heap fragmentation over uptime, ...). Applies
+  // unconditionally. On a PSRAM board the payload bytes are in PSRAM, so the
+  // limiting reserve is PSRAM's (plus a small internal margin for the deque
+  // node); without PSRAM it is the internal-heap reserve, as before.
+  {
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    bool refuse;
+    const char *why;
+    if (board_has_psram_()) {
+      const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+      refuse = free_psram < PSRAM_RESERVE_BYTES || free_internal < INTERNAL_RESERVE_WITH_PSRAM;
+      why = "psram/heap below reserve";
+    } else {
+      refuse = free_internal < RAM_RESERVE_BYTES;
+      why = "free heap below reserve";
     }
-    return;
+    if (refuse) {
+      this->note_outbox_drop_(key, true);
+      const uint32_t now_ms = (uint32_t) esphome::millis();
+      if (this->last_outbox_heap_warning_ms_ == 0 ||
+          (now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
+        this->last_outbox_heap_warning_ms_ = now_ms;
+        ESP_LOGW(TAG, "MQTT outbox: %s, refusing to buffer (free heap=%u B, free psram=%u B) / "
+                      "odmowa buforowania: %s (wolny heap=%u B, wolny psram=%u B)",
+                 why, (unsigned) free_internal, (unsigned) heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 why, (unsigned) free_internal, (unsigned) heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+      }
+      return;
+    }
   }
 
   MeterQuota *mq = this->find_meter_quota_(key);
@@ -227,8 +276,28 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   }
 
   OutboxMsg msg;
-  msg.topic = topic;
-  msg.payload = payload;
+  {
+    // PSRAM first, internal-heap fallback (see OutboxMsg doc in component.h).
+    RAMAllocator<char> alloc;
+    const size_t tlen = topic.size();
+    const size_t plen = payload.size();
+    msg.topic = alloc.allocate(tlen + 1);
+    char *pbuf = (plen > 0) ? alloc.allocate(plen) : nullptr;
+    if (msg.topic == nullptr || (plen > 0 && pbuf == nullptr)) {
+      // Out of room even after the fallback - same outcome as the reserve
+      // check above: refuse, count it as a heap refusal. msg's destructor
+      // frees whatever partially allocated.
+      this->note_outbox_drop_(key, true);
+      return;
+    }
+    memcpy(msg.topic, topic.data(), tlen);
+    msg.topic[tlen] = '\0';
+    if (pbuf != nullptr) {
+      memcpy(pbuf, payload.data(), plen);
+      msg.payload = pbuf;
+      msg.payload_len = (uint16_t) plen;
+    }
+  }
   msg.qos = qos;
   msg.retain = retain;
   msg.enqueued_ms = (uint32_t) esphome::millis();
@@ -279,7 +348,10 @@ void Radio::flush_mqtt_outbox_() {
   size_t sent = 0;
   while (!this->mqtt_outbox_.empty() && sent < MAX_FLUSH_PER_CALL) {
     const OutboxMsg &msg = this->mqtt_outbox_.front();
-    if (!mqtt->publish(msg.topic, msg.payload, msg.qos, msg.retain)) {
+    // Length-explicit overload: msg.payload is a raw char buffer, not a
+    // NUL-terminated string. msg.topic is NUL-terminated.
+    if (!mqtt->publish(std::string(msg.topic), msg.payload != nullptr ? msg.payload : "",
+                       (size_t) msg.payload_len, msg.qos, msg.retain)) {
       // Publish failed (e.g. connection dropped mid-flush): stop and retry
       // next loop() rather than dropping the message.
       break;
@@ -547,17 +619,19 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
       this->last_stats_log_dropped_ = this->mqtt_outbox_dropped_total_;
       const uint32_t evicted_outage =
           this->mqtt_outbox_dropped_this_outage_ - this->mqtt_outbox_refused_heap_this_outage_;
+      const char *mode = board_has_psram_() ? (this->mqtt_outbox_auto_ ? " auto,psram" : " psram")
+                                            : (this->mqtt_outbox_auto_ ? " auto" : "");
       ESP_LOGI(TAG,
                "MQTT outbox stats: depth=%u cap=%u/%u%s | dropped total=%u this-outage=%u "
                "(heap-refused=%u evicted=%u) | queued total=%u / statystyki bufora MQTT: kolejka=%u "
                "poj=%u/%u%s | odrzucone total=%u ta-awaria=%u (brak-RAM=%u eksmisja=%u) | zakolejkowane=%u",
                (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
-               (unsigned) this->mqtt_outbox_max_capacity_, this->mqtt_outbox_auto_ ? " auto" : "",
+               (unsigned) this->mqtt_outbox_max_capacity_, mode,
                (unsigned) this->mqtt_outbox_dropped_total_, (unsigned) this->mqtt_outbox_dropped_this_outage_,
                (unsigned) this->mqtt_outbox_refused_heap_this_outage_, (unsigned) evicted_outage,
                (unsigned) this->mqtt_outbox_queued_total_,
                (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
-               (unsigned) this->mqtt_outbox_max_capacity_, this->mqtt_outbox_auto_ ? " auto" : "",
+               (unsigned) this->mqtt_outbox_max_capacity_, mode,
                (unsigned) this->mqtt_outbox_dropped_total_, (unsigned) this->mqtt_outbox_dropped_this_outage_,
                (unsigned) this->mqtt_outbox_refused_heap_this_outage_, (unsigned) evicted_outage,
                (unsigned) this->mqtt_outbox_queued_total_);

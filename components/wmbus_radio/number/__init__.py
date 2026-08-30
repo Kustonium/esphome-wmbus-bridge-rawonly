@@ -38,7 +38,7 @@ WMBusBufferCapacityNumber = radio_ns.class_(
 # to (_validate_mqtt_buffer_size's cv.int_range max, and
 # MAX_SUGGESTED_CAPACITY in mqtt_outbox.cpp) so the slider can always reach
 # the real ceiling instead of silently capping below it.
-_MAX_BUFFER_CAPACITY = 512
+_MAX_BUFFER_CAPACITY = 8192  # PSRAM boards can go this high; without PSRAM the runtime reserve pins it far lower
 
 CONFIG_SCHEMA = cv.Schema(
     {

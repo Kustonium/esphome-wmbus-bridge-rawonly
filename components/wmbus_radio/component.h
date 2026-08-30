@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 #include <deque>
 #include <unordered_map>
@@ -321,16 +322,61 @@ protected:
   // so buffering works the same way for the telegram publish and its /rx
   // metadata companion without either one needing to know it might be
   // deferred. See mqtt_outbox.cpp.
+  // One queued MQTT publish. topic + payload bytes are allocated on the enqueue
+  // path (mqtt_outbox.cpp) through esphome::RAMAllocator<char>, whose default
+  // policy is "PSRAM first, fall back to internal heap". So on a board with
+  // PSRAM the buffer is bounded by PSRAM, not the ~40 KB internal-heap
+  // reserve, and on a board without PSRAM the bytes land in internal heap
+  // exactly as before. Move-only: the two buffers are owned and freed on
+  // destruction, so std::deque pop_front/erase/clear release them with no
+  // manual bookkeeping at the call sites.
   struct OutboxMsg {
-    std::string topic;
-    std::string payload;
-    uint8_t qos{0};
-    bool retain{false};
+    char *topic{nullptr};    // NUL-terminated
+    char *payload{nullptr};  // NOT NUL-terminated; length in payload_len
     uint32_t enqueued_ms{0};
     // 0 = not meter-specific (should not currently happen: every call site
     // that enqueues is meter-specific). See meter_bucket_key() in
     // meter_filter.h - a real key is always non-zero (bit 32/33 tag).
     uint64_t meter_key{0};
+    uint16_t payload_len{0};  // MQTT payloads here are a few hundred bytes; 64 KiB cap is plenty
+    uint8_t qos{0};
+    bool retain{false};
+
+    OutboxMsg() = default;
+    OutboxMsg(const OutboxMsg &) = delete;
+    OutboxMsg &operator=(const OutboxMsg &) = delete;
+    OutboxMsg(OutboxMsg &&o) noexcept { this->steal_(o); }
+    OutboxMsg &operator=(OutboxMsg &&o) noexcept {
+      if (this != &o) {
+        this->free_();
+        this->steal_(o);
+      }
+      return *this;
+    }
+    ~OutboxMsg() { this->free_(); }
+
+   private:
+    // deallocate() in RAMAllocator is a plain free(), and heap_caps_malloc'd
+    // blocks (internal or PSRAM) are freed with the ordinary free(), so this
+    // needs no allocator instance.
+    void free_() {
+      ::free(this->topic);
+      ::free(this->payload);
+      this->topic = nullptr;
+      this->payload = nullptr;
+    }
+    void steal_(OutboxMsg &o) {
+      this->topic = o.topic;
+      this->payload = o.payload;
+      this->enqueued_ms = o.enqueued_ms;
+      this->meter_key = o.meter_key;
+      this->payload_len = o.payload_len;
+      this->qos = o.qos;
+      this->retain = o.retain;
+      o.topic = nullptr;
+      o.payload = nullptr;
+      o.payload_len = 0;
+    }
   };
   std::deque<OutboxMsg> mqtt_outbox_{};
   size_t mqtt_outbox_capacity_{64};      // current effective cap (runtime-adjustable, <= max)

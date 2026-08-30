@@ -297,15 +297,18 @@ def _validate_mqtt_buffer_size(value):
     heap at runtime (see Radio::suggested_mqtt_outbox_capacity_ in
     mqtt_outbox.cpp - re-evaluated every ~30s, not just once at boot).
 
-    The explicit-number path keeps a generous sanity cap (512): typos like an
-    extra zero should fail validation, not silently compile. It is a soft
-    ceiling either way - the C++ side also refuses to grow the buffer once
-    free heap drops below its safety reserve, regardless of what number is
-    configured here.
+    The explicit-number path keeps a sanity cap (8192): typos like an extra
+    zero should fail validation, not silently compile. It is a soft ceiling
+    either way - the C++ side refuses to grow the buffer once free heap (or
+    free PSRAM, on a board whose payloads live there) drops below its safety
+    reserve, regardless of what number is configured here. On a board without
+    PSRAM a value in the thousands is simply unreachable and the runtime
+    reserve pins the effective size far lower; "auto" is the sane choice
+    there. On a PSRAM board a few thousand frames is realistic.
     """
     if isinstance(value, str) and value.strip().lower() == "auto":
         return "auto"
-    return cv.int_range(min=0, max=512)(value)
+    return cv.int_range(min=0, max=8192)(value)
 
 
 def _normalize_diagnostic_mode(mode):
