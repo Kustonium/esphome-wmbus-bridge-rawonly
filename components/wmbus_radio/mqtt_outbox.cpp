@@ -233,12 +233,39 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   this->mqtt_outbox_.push_back(std::move(msg));
   this->mqtt_outbox_queued_total_++;
   if (mq != nullptr) mq->count++;
+
+  // One INFO line when a backlog first starts (broker just went unreachable);
+  // every further frame during the same outage is DEBUG so a long outage does
+  // not flood the log. The periodic "MQTT outbox stats" line (every 30s, see
+  // update_outbox_stats_) carries the running depth.
+  if (this->mqtt_outbox_.size() == 1) {
+    ESP_LOGI(TAG, "MQTT outbox: buffering started, broker unreachable (1 frame queued) / "
+                  "bufor MQTT: rozpoczeto buforowanie, broker nieosiagalny (1 ramka w kolejce)");
+  } else {
+    ESP_LOGD(TAG, "MQTT outbox: queued frame (%u in queue) / zakolejkowano ramke (%u w kolejce)",
+             (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_.size());
+  }
 }
 
 void Radio::flush_mqtt_outbox_() {
-  if (this->mqtt_outbox_.empty()) return;
+  if (this->mqtt_outbox_.empty()) {
+    if (this->outbox_draining_) {
+      this->outbox_draining_ = false;
+      ESP_LOGI(TAG, "MQTT outbox: backlog cleared / bufor MQTT: kolejka oprozniona");
+    }
+    return;
+  }
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr || !mqtt->is_connected()) return;
+
+  // One INFO line when draining actually begins (broker came back); the
+  // per-batch progress below is DEBUG so a large backlog does not flood.
+  if (!this->outbox_draining_) {
+    this->outbox_draining_ = true;
+    ESP_LOGI(TAG, "MQTT outbox: broker reachable again, draining %u queued frame(s) / "
+                  "bufor MQTT: broker znow osiagalny, oproznianie %u ramek",
+             (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_.size());
+  }
 
   // Bounded per call: a receiver that was offline for hours can wake up with
   // thousands of queued frames, and publishing all of them in one loop()
@@ -262,8 +289,12 @@ void Radio::flush_mqtt_outbox_() {
     sent++;
   }
   if (sent > 0) {
-    ESP_LOGI(TAG, "MQTT outbox: flushed %u queued frame(s), %u still pending / bufor MQTT: wyslano %u ramek, w kolejce %u",
+    ESP_LOGD(TAG, "MQTT outbox: flushed %u queued frame(s), %u still pending / bufor MQTT: wyslano %u ramek, w kolejce %u",
              (unsigned) sent, (unsigned) this->mqtt_outbox_.size(), (unsigned) sent, (unsigned) this->mqtt_outbox_.size());
+  }
+  if (this->mqtt_outbox_.empty() && this->outbox_draining_) {
+    this->outbox_draining_ = false;
+    ESP_LOGI(TAG, "MQTT outbox: backlog cleared / bufor MQTT: kolejka oprozniona");
   }
 }
 
@@ -434,25 +465,57 @@ void Radio::publish_initial_buffer_state_() {
 }
 
 void Radio::update_outbox_stats_(uint32_t now_ms) {
-  // Throttled: these are gauges for a web_server/HA panel, not an event
-  // stream: once a second is more than enough resolution and keeps this from
-  // adding its own publish traffic on every single frame.
+  // Gauges for a web_server/HA panel, not an event stream. Re-evaluated at
+  // most once a second, and each sensor is only actually published when its
+  // value changed - otherwise an idle bridge emitted three identical sensor
+  // lines every second forever.
   if (this->last_outbox_stats_ms_ != 0 && (now_ms - this->last_outbox_stats_ms_) < 1000) return;
   this->last_outbox_stats_ms_ = now_ms;
 
   if (this->buffer_depth_sensor_ != nullptr) {
-    this->buffer_depth_sensor_->publish_state((float) this->mqtt_outbox_.size());
+    const float v = (float) this->mqtt_outbox_.size();
+    if (v != this->last_pub_depth_) {
+      this->buffer_depth_sensor_->publish_state(v);
+      this->last_pub_depth_ = v;
+    }
   }
   if (this->buffer_dropped_sensor_ != nullptr) {
-    this->buffer_dropped_sensor_->publish_state((float) this->mqtt_outbox_dropped_total_);
+    const float v = (float) this->mqtt_outbox_dropped_total_;
+    if (v != this->last_pub_dropped_) {
+      this->buffer_dropped_sensor_->publish_state(v);
+      this->last_pub_dropped_ = v;
+    }
   }
   if (this->buffer_oldest_age_sensor_ != nullptr) {
-    if (this->mqtt_outbox_.empty()) {
-      this->buffer_oldest_age_sensor_->publish_state(0.0f);
-    } else {
-      const uint32_t oldest_ms = this->mqtt_outbox_.front().enqueued_ms;
-      const uint32_t age_ms = now_ms - oldest_ms;  // millis() wraps every ~49 days; unsigned subtraction is still correct across the wrap
-      this->buffer_oldest_age_sensor_->publish_state((float) age_ms / 1000.0f);
+    float v = 0.0f;
+    if (!this->mqtt_outbox_.empty()) {
+      const uint32_t age_ms = now_ms - this->mqtt_outbox_.front().enqueued_ms;  // unsigned: still correct across the ~49-day millis() wrap
+      v = (float) age_ms / 1000.0f;
+    }
+    // While a backlog exists this genuinely changes every tick (that is the
+    // point); once drained it settles at 0 and stops publishing.
+    if (v != this->last_pub_oldest_age_) {
+      this->buffer_oldest_age_sensor_->publish_state(v);
+      this->last_pub_oldest_age_ = v;
+    }
+  }
+
+  // Once every 30s, a single INFO line with the running buffer figures - but
+  // only while it is worth reading: something queued now, or the lifetime
+  // drop count moved since the last line. A healthy, idle bridge stays silent.
+  if (this->last_outbox_stats_log_ms_ == 0 || (now_ms - this->last_outbox_stats_log_ms_) >= 30000) {
+    this->last_outbox_stats_log_ms_ = now_ms;
+    if (!this->mqtt_outbox_.empty() || this->mqtt_outbox_dropped_total_ != this->last_stats_log_dropped_) {
+      this->last_stats_log_dropped_ = this->mqtt_outbox_dropped_total_;
+      ESP_LOGI(TAG,
+               "MQTT outbox stats: depth=%u capacity=%u/%u dropped_total=%u queued_total=%u%s / "
+               "statystyki bufora MQTT: kolejka=%u pojemnosc=%u/%u odrzucone=%u zakolejkowane=%u%s",
+               (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
+               (unsigned) this->mqtt_outbox_max_capacity_, (unsigned) this->mqtt_outbox_dropped_total_,
+               (unsigned) this->mqtt_outbox_queued_total_, this->mqtt_outbox_auto_ ? " (auto)" : "",
+               (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
+               (unsigned) this->mqtt_outbox_max_capacity_, (unsigned) this->mqtt_outbox_dropped_total_,
+               (unsigned) this->mqtt_outbox_queued_total_, this->mqtt_outbox_auto_ ? " (auto)" : "");
     }
   }
 }

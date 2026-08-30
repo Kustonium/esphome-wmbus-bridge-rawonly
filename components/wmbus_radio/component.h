@@ -340,8 +340,17 @@ protected:
   uint32_t mqtt_outbox_dropped_total_{0};   // lifetime count dropped because the buffer was full
                                              // OR refused by the free-heap safety valve
   uint32_t last_outbox_stats_ms_{0};
+  uint32_t last_outbox_stats_log_ms_{0};   // 30s periodic "MQTT outbox stats" INFO line
   uint32_t last_outbox_autosize_ms_{0};
   uint32_t last_outbox_heap_warning_ms_{0};
+  // Last value pushed to each buffer_* sensor, so update_outbox_stats_ only
+  // republishes (and the sensor: framework only logs) on an actual change
+  // instead of once a second forever. -1 = nothing published yet.
+  float last_pub_depth_{-1.0f};
+  float last_pub_dropped_{-1.0f};
+  float last_pub_oldest_age_{-1.0f};
+  uint32_t last_stats_log_dropped_{0};     // dropped_total at the last 30s stats line, to stay quiet when idle
+  bool outbox_draining_{false};            // currently working through a backlog (flush logging)
   sensor::Sensor *buffer_depth_sensor_{nullptr};
   sensor::Sensor *buffer_dropped_sensor_{nullptr};
   sensor::Sensor *buffer_oldest_age_sensor_{nullptr};
