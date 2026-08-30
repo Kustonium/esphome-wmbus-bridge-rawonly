@@ -31,8 +31,13 @@ enum ListenMode : uint8_t { LISTEN_MODE_BOTH = 0, LISTEN_MODE_T1 = 1, LISTEN_MOD
 static constexpr uint32_t WMBUS_NOTIFY_WAIT_MS = 2;
 class RadioTransceiver
     : public Component,
+      // 4 MHz: well inside the CC1101's 6.5 MHz ceiling and comfortable for the
+      // SX126x/SX127x/LR1121, and it halves the time to drain the CC1101's
+      // 64-byte RX FIFO - the margin that decides "FIFO overflow" vs "frame
+      // read in time" on a single-core SoC. Drop back to 2 MHz only if a board
+      // with long/marginal SPI wiring shows read errors.
       public spi::SPIDevice<spi::BIT_ORDER_MSB_FIRST, spi::CLOCK_POLARITY_LOW,
-                            spi::CLOCK_PHASE_LEADING, spi::DATA_RATE_2MHZ> {
+                            spi::CLOCK_PHASE_LEADING, spi::DATA_RATE_4MHZ> {
 public:
   virtual void setup() override = 0;
   void dump_config() override;

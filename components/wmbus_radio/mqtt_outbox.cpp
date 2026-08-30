@@ -77,8 +77,13 @@ static constexpr float OUTBOX_HEAP_BUDGET_FRACTION = 0.25f;  // at most 25% of w
 static constexpr size_t EST_BYTES_PER_QUEUED_MSG = 400;      // conservative average, see note above
 static constexpr size_t MIN_SUGGESTED_CAPACITY = 4;
 static constexpr size_t MAX_SUGGESTED_CAPACITY = 512;  // sanity cap when the buffer lives in internal heap
-static constexpr uint32_t AUTOSIZE_INTERVAL_MS = 30000;      // re-evaluate every ~30s in auto mode
+static constexpr uint32_t AUTOSIZE_INTERVAL_MS = 60000;      // re-evaluate every ~60s in auto mode
 static constexpr uint32_t HEAP_WARNING_THROTTLE_MS = 60000;  // at most one "buffer refused" warning per minute
+// Only actually resize (and pay for recompute_buffer_quotas_) when the new
+// suggestion differs from the current ceiling by more than this fraction -
+// otherwise free-heap jitter of a few KB flaps the capacity, and the number
+// entity, every interval for no practical gain.
+static constexpr float AUTOSIZE_HYSTERESIS_FRACTION = 0.15f;
 
 // PSRAM-backed buffer sizing (used only when the board actually has PSRAM;
 // RAMAllocator<char> then places topic+payload bytes there instead of internal
@@ -91,7 +96,13 @@ static constexpr size_t INTERNAL_RESERVE_WITH_PSRAM = 24 * 1024;   // smaller in
 static constexpr size_t EST_DEQUE_NODE_BYTES = 40;                 // OutboxMsg + deque bookkeeping, internal heap
 static constexpr size_t MAX_SUGGESTED_CAPACITY_PSRAM = 4096;       // ~1.6 MB of payloads at EST_BYTES_PER_QUEUED_MSG
 
-static inline bool board_has_psram_() { return heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0; }
+// Whether this SoC has usable PSRAM. Resolved once - heap_caps_get_total_size()
+// takes the heap lock, and the radio_recv task can block on that same lock
+// while doing a malloc mid-reception, so it must not be called every loop.
+static bool board_has_psram_() {
+  static const bool has = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
+  return has;
+}
 
 // Low 32 bits of a meter_bucket_key = the printable meter id, i.e. the value
 // the receive log shows as id:XXXXXXXX (raw A-field, or the BCD id for a
@@ -133,29 +144,28 @@ void Radio::maybe_reautosize_outbox_(uint32_t now_ms) {
   this->last_outbox_autosize_ms_ = now_ms;
 
   const size_t suggested = this->suggested_mqtt_outbox_capacity_();
-  if (suggested != this->mqtt_outbox_max_capacity_) {
+  const size_t current = this->mqtt_outbox_max_capacity_;
+  const size_t delta = (suggested > current) ? (suggested - current) : (current - suggested);
+  // Resize only on a meaningful change, or when the ceiling must drop below
+  // what is queued right now (a real overflow that has to be trimmed). Small
+  // free-heap jitter is ignored - that flap was firing recompute_buffer_quotas_
+  // (twice) every interval, taking the heap lock the radio_recv task needs.
+  const bool must_shrink = suggested < this->mqtt_outbox_.size();
+  if ((float) delta > (float) current * AUTOSIZE_HYSTERESIS_FRACTION || must_shrink) {
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG,
              "MQTT outbox auto-size: %u -> %u frames (free heap=%u B, free psram=%u B) / "
              "auto-dobor bufora MQTT: %u -> %u ramek (wolny heap=%u B, wolny psram=%u B)",
-             (unsigned) this->mqtt_outbox_max_capacity_, (unsigned) suggested,
-             (unsigned) free_internal, (unsigned) free_psram,
-             (unsigned) this->mqtt_outbox_max_capacity_, (unsigned) suggested,
-             (unsigned) free_internal, (unsigned) free_psram);
-    // If free heap has shrunk enough to lower the ceiling below what is
-    // currently queued, the setters below trigger recompute_buffer_quotas_()
-    // (see component.h), which trims the overflow immediately - oldest
-    // messages first in shared-pool mode, or oldest-of-its-own-meter first
-    // per meter when buffer_priority quotas are active. Nothing here waits
-    // for the buffer to drain on its own; capturing dropped_total_ before/
-    // after just makes that trim visible in the log instead of silent.
+             (unsigned) current, (unsigned) suggested, (unsigned) free_internal, (unsigned) free_psram,
+             (unsigned) current, (unsigned) suggested, (unsigned) free_internal, (unsigned) free_psram);
     const uint32_t dropped_before = this->mqtt_outbox_dropped_total_;
-    this->set_mqtt_outbox_max_capacity(suggested);
-    // Auto mode has no separate user-facing "target" to preserve independently
-    // of the ceiling (unlike the number: entity in manual mode) - the ceiling
-    // IS the current target, always.
-    this->set_mqtt_outbox_capacity(suggested);
+    // Set both members, then recompute ONCE (the two setters would each call
+    // recompute_buffer_quotas_ - wasteful, and it is the recompute that costs).
+    this->mqtt_outbox_max_capacity_ = suggested;
+    this->mqtt_outbox_capacity_ = suggested;
+    if (this->setup_done_)
+      this->recompute_buffer_quotas_();
     if (this->buffer_capacity_number_ != nullptr) {
       this->buffer_capacity_number_->publish_state((float) this->mqtt_outbox_capacity_);
     }
@@ -502,6 +512,11 @@ void Radio::recompute_buffer_quotas_() {
     this->mqtt_outbox_meter_quotas_.push_back(mq);
   }
 
+  // Nothing queued (the normal case - a recompute fired only because the
+  // capacity moved): the fresh quota vector above is all that was needed.
+  if (this->mqtt_outbox_.empty())
+    return;
+
   // Rebuild the queue in one O(n) pass (not erase()-in-a-loop, which is
   // O(n^2) and, on a large PSRAM-backed buffer, long enough to trip the task
   // watchdog): drop frames that match no quota at all (stale after a config
@@ -567,10 +582,17 @@ void Radio::note_outbox_drop_(uint32_t display_id, bool refused_heap) {
 }
 
 void Radio::update_outbox_stats_(uint32_t now_ms) {
+  // Gauges for an HA panel, not an event stream - everything here (including
+  // the MQTT link-state check) is gated to at most once a second so it stays
+  // out of the way of the radio_recv task.
+  if (this->last_outbox_stats_ms_ != 0 && (now_ms - this->last_outbox_stats_ms_) < 1000) return;
+  this->last_outbox_stats_ms_ = now_ms;
+
   // A new outage starts the instant the MQTT link goes down: reset the
   // per-outage drop accounting so buffer_dropped_last_outage and the 30s
   // stats breakdown always describe the current (or most recent) outage.
-  // The lifetime mqtt_outbox_dropped_total_ is left alone.
+  // The lifetime mqtt_outbox_dropped_total_ is left alone. 1 s granularity
+  // is fine - the outbox itself reacts to the disconnect on its own path.
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   const bool connected = (mqtt != nullptr && mqtt->is_connected());
   if (this->outbox_was_connected_ && !connected) {
@@ -579,11 +601,6 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
     this->outbox_drop_by_meter_.clear();
   }
   this->outbox_was_connected_ = connected;
-
-  // Gauges for an HA panel, not an event stream. Re-evaluated at most once a
-  // second.
-  if (this->last_outbox_stats_ms_ != 0 && (now_ms - this->last_outbox_stats_ms_) < 1000) return;
-  this->last_outbox_stats_ms_ = now_ms;
 
   const float depth = (float) this->mqtt_outbox_.size();
   const float dropped_total = (float) this->mqtt_outbox_dropped_total_;
