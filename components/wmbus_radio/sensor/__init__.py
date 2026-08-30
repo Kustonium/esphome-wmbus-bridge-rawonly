@@ -25,6 +25,7 @@ DEPENDENCIES = ["wmbus_radio"]
 CONF_WMBUS_RADIO_ID = "wmbus_radio_id"
 CONF_BUFFER_DEPTH = "buffer_depth"
 CONF_BUFFER_DROPPED_TOTAL = "buffer_dropped_total"
+CONF_BUFFER_DROPPED_LAST_OUTAGE = "buffer_dropped_last_outage"
 CONF_BUFFER_OLDEST_PENDING_AGE = "buffer_oldest_pending_age"
 
 CONFIG_SCHEMA = cv.Schema(
@@ -42,6 +43,17 @@ CONFIG_SCHEMA = cv.Schema(
             icon="mdi:tray-remove",
             accuracy_decimals=0,
             state_class=STATE_CLASS_TOTAL_INCREASING,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        # Drops attributable to the current, or most recent, broker outage.
+        # Reset to 0 the moment the MQTT link drops (a new outage begins);
+        # holds the final count afterwards until the next outage. MEASUREMENT,
+        # not TOTAL_INCREASING, because it legitimately jumps back to 0.
+        cv.Optional(CONF_BUFFER_DROPPED_LAST_OUTAGE): sensor.sensor_schema(
+            unit_of_measurement="frames",
+            icon="mdi:tray-remove",
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         cv.Optional(CONF_BUFFER_OLDEST_PENDING_AGE): sensor.sensor_schema(
@@ -65,6 +77,10 @@ async def to_code(config):
     if CONF_BUFFER_DROPPED_TOTAL in config:
         sens = await sensor.new_sensor(config[CONF_BUFFER_DROPPED_TOTAL])
         cg.add(radio.set_buffer_dropped_sensor(sens))
+
+    if CONF_BUFFER_DROPPED_LAST_OUTAGE in config:
+        sens = await sensor.new_sensor(config[CONF_BUFFER_DROPPED_LAST_OUTAGE])
+        cg.add(radio.set_buffer_dropped_last_outage_sensor(sens))
 
     if CONF_BUFFER_OLDEST_PENDING_AGE in config:
         sens = await sensor.new_sensor(config[CONF_BUFFER_OLDEST_PENDING_AGE])

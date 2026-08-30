@@ -131,6 +131,7 @@ public:
   // nullptr (and simply not updated) when the user has not declared them.
   void set_buffer_depth_sensor(sensor::Sensor *s) { this->buffer_depth_sensor_ = s; }
   void set_buffer_dropped_sensor(sensor::Sensor *s) { this->buffer_dropped_sensor_ = s; }
+  void set_buffer_dropped_last_outage_sensor(sensor::Sensor *s) { this->buffer_dropped_last_outage_sensor_ = s; }
   void set_buffer_oldest_age_sensor(sensor::Sensor *s) { this->buffer_oldest_age_sensor_ = s; }
   void set_buffer_capacity_number(number::Number *n) { this->buffer_capacity_number_ = n; }
 
@@ -339,6 +340,15 @@ protected:
   uint32_t mqtt_outbox_queued_total_{0};    // lifetime count of frames that ever entered the buffer
   uint32_t mqtt_outbox_dropped_total_{0};   // lifetime count dropped because the buffer was full
                                              // OR refused by the free-heap safety valve
+  // Per-outage drop accounting: all three reset the moment the MQTT link
+  // goes down (a new outage begins), so buffer_dropped_last_outage always
+  // reads "drops caused by the current, or most recent, broker outage".
+  // The lifetime mqtt_outbox_dropped_total_ above is never reset.
+  uint32_t mqtt_outbox_dropped_this_outage_{0};
+  uint32_t mqtt_outbox_refused_heap_this_outage_{0};  // subset of the above refused at the door by the 40 KB heap valve
+  std::unordered_map<uint64_t, uint32_t> outbox_drop_by_meter_{};  // per-meter drops this outage (30s stats line only)
+  bool outbox_was_connected_{true};        // MQTT link state at the previous stats tick, to catch the edge into an outage
+  void note_outbox_drop_(uint64_t meter_key, bool refused_heap);
   uint32_t last_outbox_stats_ms_{0};
   uint32_t last_outbox_stats_log_ms_{0};   // 30s periodic "MQTT outbox stats" INFO line
   uint32_t last_outbox_autosize_ms_{0};
@@ -348,11 +358,13 @@ protected:
   // instead of once a second forever. -1 = nothing published yet.
   float last_pub_depth_{-1.0f};
   float last_pub_dropped_{-1.0f};
+  float last_pub_dropped_outage_{-1.0f};
   float last_pub_oldest_age_{-1.0f};
   uint32_t last_stats_log_dropped_{0};     // dropped_total at the last 30s stats line, to stay quiet when idle
   bool outbox_draining_{false};            // currently working through a backlog (flush logging)
   sensor::Sensor *buffer_depth_sensor_{nullptr};
   sensor::Sensor *buffer_dropped_sensor_{nullptr};
+  sensor::Sensor *buffer_dropped_last_outage_sensor_{nullptr};
   sensor::Sensor *buffer_oldest_age_sensor_{nullptr};
   number::Number *buffer_capacity_number_{nullptr};
   // Optional runtime QoS controls (select: platform), see the setters above.

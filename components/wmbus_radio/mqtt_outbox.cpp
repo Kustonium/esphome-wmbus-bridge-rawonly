@@ -154,10 +154,17 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
     // publishing out of turn.
   }
 
+  // meter_bucket_key() tags whichever of meter_id/meter_id_raw is the real
+  // identity for this meter (see meter_filter.h) - stable across BCD and
+  // non-BCD meters, and consistent with how buffer_priority weights were
+  // keyed when parsed in setup(). Computed up here so every drop path below
+  // can attribute the loss to a meter (note_outbox_drop_).
+  const uint64_t key = meter_bucket_key(meter_id, meter_id_raw);
+
   if (this->mqtt_outbox_capacity_ == 0) {
     // Buffering disabled (mqtt_buffer_size: 0, or lowered to 0 at runtime):
     // behave exactly like the upstream project today - drop silently.
-    this->mqtt_outbox_dropped_total_++;
+    this->note_outbox_drop_(key, false);
     return;
   }
 
@@ -167,7 +174,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   // large payloads, heap fragmentation over uptime, ...). This is the same
   // reserve auto-sizing budgets around; here it applies unconditionally.
   if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < RAM_RESERVE_BYTES) {
-    this->mqtt_outbox_dropped_total_++;
+    this->note_outbox_drop_(key, true);
     const uint32_t now_ms = (uint32_t) esphome::millis();
     if (this->last_outbox_heap_warning_ms_ == 0 || (now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
       this->last_outbox_heap_warning_ms_ = now_ms;
@@ -178,11 +185,6 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
     return;
   }
 
-  // meter_bucket_key() tags whichever of meter_id/meter_id_raw is the real
-  // identity for this meter (see meter_filter.h) - stable across BCD and
-  // non-BCD meters, and consistent with how buffer_priority weights were
-  // keyed when parsed in setup().
-  const uint64_t key = meter_bucket_key(meter_id, meter_id_raw);
   MeterQuota *mq = this->find_meter_quota_(key);
 
   if (mq != nullptr) {
@@ -195,7 +197,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       // capacity (more whitelisted meters than capacity allows). It gets no
       // buffer space at all rather than opportunistically borrowing room
       // that the next recompute would immediately reclaim from it anyway.
-      this->mqtt_outbox_dropped_total_++;
+      this->note_outbox_drop_(key, false);
       return;
     }
     if (mq->count >= mq->quota) {
@@ -205,7 +207,7 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
         if (it->meter_key == key) {
           this->mqtt_outbox_.erase(it);
           mq->count--;
-          this->mqtt_outbox_dropped_total_++;
+          this->note_outbox_drop_(key, false);
           break;
         }
       }
@@ -218,8 +220,9 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       // A long outage should keep the most recent readings, not lock onto
       // whatever was first in the window - the newest state is what a
       // reconnecting consumer needs most.
+      const uint64_t evicted_key = this->mqtt_outbox_.front().meter_key;
       this->mqtt_outbox_.pop_front();
-      this->mqtt_outbox_dropped_total_++;
+      this->note_outbox_drop_(evicted_key, false);
     }
   }
 
@@ -338,8 +341,9 @@ void Radio::recompute_buffer_quotas_() {
     // capacity (e.g. after the capacity number entity is lowered at runtime).
     this->mqtt_outbox_meter_quotas_.clear();
     while (this->mqtt_outbox_.size() > this->mqtt_outbox_capacity_) {
+      const uint64_t evicted_key = this->mqtt_outbox_.front().meter_key;
       this->mqtt_outbox_.pop_front();
-      this->mqtt_outbox_dropped_total_++;
+      this->note_outbox_drop_(evicted_key, false);
     }
     return;
   }
@@ -373,8 +377,9 @@ void Radio::recompute_buffer_quotas_() {
     // zero if it ever does.
     this->mqtt_outbox_meter_quotas_.clear();
     while (this->mqtt_outbox_.size() > this->mqtt_outbox_capacity_) {
+      const uint64_t evicted_key = this->mqtt_outbox_.front().meter_key;
       this->mqtt_outbox_.pop_front();
-      this->mqtt_outbox_dropped_total_++;
+      this->note_outbox_drop_(evicted_key, false);
     }
     return;
   }
@@ -424,8 +429,9 @@ void Radio::recompute_buffer_quotas_() {
   // over its (possibly just-shrunk) quota, oldest-of-that-meter first.
   for (auto it = this->mqtt_outbox_.begin(); it != this->mqtt_outbox_.end();) {
     if (this->find_meter_quota_(it->meter_key) == nullptr) {
+      const uint64_t stale_key = it->meter_key;
       it = this->mqtt_outbox_.erase(it);
-      this->mqtt_outbox_dropped_total_++;
+      this->note_outbox_drop_(stale_key, false);
     } else {
       ++it;
     }
@@ -437,7 +443,7 @@ void Radio::recompute_buffer_quotas_() {
         if (it->meter_key == mq.key) {
           this->mqtt_outbox_.erase(it);
           mq.count--;
-          this->mqtt_outbox_dropped_total_++;
+          this->note_outbox_drop_(mq.key, false);
           erased = true;
           break;
         }
@@ -464,14 +470,46 @@ void Radio::publish_initial_buffer_state_() {
   }
 }
 
+// Every drop, from every path, goes through here: bumps the lifetime total,
+// the per-outage total, the per-outage heap-refusal subset when applicable,
+// and the per-outage per-meter breakdown used by the 30s stats line. The
+// per-outage figures are zeroed by update_outbox_stats_ the moment the MQTT
+// link drops.
+void Radio::note_outbox_drop_(uint64_t meter_key, bool refused_heap) {
+  this->mqtt_outbox_dropped_total_++;
+  this->mqtt_outbox_dropped_this_outage_++;
+  if (refused_heap) this->mqtt_outbox_refused_heap_this_outage_++;
+  if (meter_key != 0) this->outbox_drop_by_meter_[meter_key]++;
+}
+
 void Radio::update_outbox_stats_(uint32_t now_ms) {
-  // Gauges for a web_server/HA panel, not an event stream. Re-evaluated at
-  // most once a second, and each sensor is only actually published when its
-  // value changed - otherwise an idle bridge emitted three identical sensor
-  // lines every second forever.
+  // A new outage starts the instant the MQTT link goes down: reset the
+  // per-outage drop accounting so buffer_dropped_last_outage and the 30s
+  // stats breakdown always describe the current (or most recent) outage.
+  // The lifetime mqtt_outbox_dropped_total_ is left alone.
+  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  const bool connected = (mqtt != nullptr && mqtt->is_connected());
+  if (this->outbox_was_connected_ && !connected) {
+    this->mqtt_outbox_dropped_this_outage_ = 0;
+    this->mqtt_outbox_refused_heap_this_outage_ = 0;
+    this->outbox_drop_by_meter_.clear();
+  }
+  this->outbox_was_connected_ = connected;
+
+  // Gauges for an HA panel, not an event stream. Re-evaluated at most once a
+  // second, and each sensor is only actually published when its value
+  // changed - otherwise an idle bridge emitted identical sensor lines every
+  // second forever.
   if (this->last_outbox_stats_ms_ != 0 && (now_ms - this->last_outbox_stats_ms_) < 1000) return;
   this->last_outbox_stats_ms_ = now_ms;
 
+  if (this->buffer_dropped_last_outage_sensor_ != nullptr) {
+    const float v = (float) this->mqtt_outbox_dropped_this_outage_;
+    if (v != this->last_pub_dropped_outage_) {
+      this->buffer_dropped_last_outage_sensor_->publish_state(v);
+      this->last_pub_dropped_outage_ = v;
+    }
+  }
   if (this->buffer_depth_sensor_ != nullptr) {
     const float v = (float) this->mqtt_outbox_.size();
     if (v != this->last_pub_depth_) {
@@ -500,22 +538,44 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
     }
   }
 
-  // Once every 30s, a single INFO line with the running buffer figures - but
-  // only while it is worth reading: something queued now, or the lifetime
-  // drop count moved since the last line. A healthy, idle bridge stays silent.
+  // Once every 30s, one INFO line with the running buffer figures - but only
+  // while it is worth reading: something queued now, or the lifetime drop
+  // count moved since the last line. A healthy, idle bridge stays silent.
   if (this->last_outbox_stats_log_ms_ == 0 || (now_ms - this->last_outbox_stats_log_ms_) >= 30000) {
     this->last_outbox_stats_log_ms_ = now_ms;
     if (!this->mqtt_outbox_.empty() || this->mqtt_outbox_dropped_total_ != this->last_stats_log_dropped_) {
       this->last_stats_log_dropped_ = this->mqtt_outbox_dropped_total_;
+      const uint32_t evicted_outage =
+          this->mqtt_outbox_dropped_this_outage_ - this->mqtt_outbox_refused_heap_this_outage_;
       ESP_LOGI(TAG,
-               "MQTT outbox stats: depth=%u capacity=%u/%u dropped_total=%u queued_total=%u%s / "
-               "statystyki bufora MQTT: kolejka=%u pojemnosc=%u/%u odrzucone=%u zakolejkowane=%u%s",
+               "MQTT outbox stats: depth=%u cap=%u/%u%s | dropped total=%u this-outage=%u "
+               "(heap-refused=%u evicted=%u) | queued total=%u / statystyki bufora MQTT: kolejka=%u "
+               "poj=%u/%u%s | odrzucone total=%u ta-awaria=%u (brak-RAM=%u eksmisja=%u) | zakolejkowane=%u",
                (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
-               (unsigned) this->mqtt_outbox_max_capacity_, (unsigned) this->mqtt_outbox_dropped_total_,
-               (unsigned) this->mqtt_outbox_queued_total_, this->mqtt_outbox_auto_ ? " (auto)" : "",
+               (unsigned) this->mqtt_outbox_max_capacity_, this->mqtt_outbox_auto_ ? " auto" : "",
+               (unsigned) this->mqtt_outbox_dropped_total_, (unsigned) this->mqtt_outbox_dropped_this_outage_,
+               (unsigned) this->mqtt_outbox_refused_heap_this_outage_, (unsigned) evicted_outage,
+               (unsigned) this->mqtt_outbox_queued_total_,
                (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
-               (unsigned) this->mqtt_outbox_max_capacity_, (unsigned) this->mqtt_outbox_dropped_total_,
-               (unsigned) this->mqtt_outbox_queued_total_, this->mqtt_outbox_auto_ ? " (auto)" : "");
+               (unsigned) this->mqtt_outbox_max_capacity_, this->mqtt_outbox_auto_ ? " auto" : "",
+               (unsigned) this->mqtt_outbox_dropped_total_, (unsigned) this->mqtt_outbox_dropped_this_outage_,
+               (unsigned) this->mqtt_outbox_refused_heap_this_outage_, (unsigned) evicted_outage,
+               (unsigned) this->mqtt_outbox_queued_total_);
+
+      // Per-meter drop breakdown for this outage - shows whether buffer_priority
+      // is actually protecting the meters it should. Printed as id=count using
+      // the same id form the receive log uses (id:XXXXXXXX).
+      if (!this->outbox_drop_by_meter_.empty()) {
+        std::string by_meter;
+        for (const auto &kv : this->outbox_drop_by_meter_) {
+          char b[40];
+          snprintf(b, sizeof(b), "%s%08X=%u", by_meter.empty() ? "" : " ",
+                   (unsigned) (kv.first & 0xFFFFFFFFu), (unsigned) kv.second);
+          by_meter += b;
+        }
+        ESP_LOGI(TAG, "MQTT outbox drops this outage by meter / odrzucone w tej awarii wg licznika: %s",
+                 by_meter.c_str());
+      }
     }
   }
 }
