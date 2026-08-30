@@ -676,6 +676,23 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
         ESP_LOGI(TAG, "MQTT outbox drops this outage by meter / odrzucone w tej awarii wg licznika: %s",
                  by_meter.c_str());
       }
+
+      // Per-meter occupancy: how many of each whitelisted meter's frames are
+      // queued right now vs. the slice buffer_priority gives it (count/quota).
+      // Only meaningful with a forward_meters whitelist (otherwise the vector
+      // is empty and it is one shared FIFO). Cheap: count/quota are already
+      // maintained on the quota vector, this just formats them.
+      if (!this->mqtt_outbox_meter_quotas_.empty()) {
+        std::string per_meter;
+        for (const auto &mq : this->mqtt_outbox_meter_quotas_) {
+          char b[40];
+          snprintf(b, sizeof(b), "%s%08X=%u/%u", per_meter.empty() ? "" : " ",
+                   (unsigned) (mq.key & 0xFFFFFFFFu), (unsigned) mq.count, (unsigned) mq.quota);
+          per_meter += b;
+        }
+        ESP_LOGI(TAG, "MQTT outbox per-meter queued/quota / w buforze wg licznika (kolejka/limit): %s",
+                 per_meter.c_str());
+      }
     }
   }
 }
