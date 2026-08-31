@@ -30,7 +30,10 @@ miejsce dla najnowszej.
 
 ```yaml
 wmbus_radio:
-  mqtt_buffer_size: 64   # domyślnie 64; 0 = wyłącza buforowanie (stare zachowanie); zakres 0-512, albo "auto" (patrz punkt 4)
+  mqtt_buffer_size: 64   # DOMYSLNIE 0 = wylaczone; funkcja wlacza sie dopiero tym wpisem
+                         # jednostka to WIADOMOSCI MQTT, nie telegramy: jeden telegram
+                         # zajmuje dwa miejsca (/telegram + /rx), wiec 64 to ok. 32 odczyty
+                         # zakres 0-8192, albo "auto" (patrz punkt 4)
 ```
 
 ---

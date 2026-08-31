@@ -29,12 +29,28 @@
 #include "component.h"
 #include "meter_filter.h"
 
+#include "esphome/core/defines.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/mqtt/mqtt_client.h"
+
+// The sensor/number/select entities are OPTIONAL platforms of this component.
+// Including their headers unconditionally forced AUTO_LOAD = ["sensor",
+// "number", "select"], i.e. every user compiled three extra core components
+// whether or not they ever declared one - which contradicts the point of the
+// feature being opt-in. ESPHome defines USE_SENSOR/USE_NUMBER/USE_SELECT for
+// whichever of those components a config actually loads, and declaring a
+// `sensor: - platform: wmbus_radio` block loads the sensor component by
+// itself, so guarding here is enough and AUTO_LOAD goes back to [].
+#ifdef USE_SENSOR
 #include "esphome/components/sensor/sensor.h"
+#endif
+#ifdef USE_NUMBER
 #include "esphome/components/number/number.h"
+#endif
+#ifdef USE_SELECT
 #include "esphome/components/select/select.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -79,6 +95,11 @@ static constexpr size_t MIN_SUGGESTED_CAPACITY = 4;
 static constexpr size_t MAX_SUGGESTED_CAPACITY = 512;  // sanity cap when the buffer lives in internal heap
 static constexpr uint32_t AUTOSIZE_INTERVAL_MS = 60000;      // re-evaluate every ~60s in auto mode
 static constexpr uint32_t HEAP_WARNING_THROTTLE_MS = 60000;  // at most one "buffer refused" warning per minute
+// How often the free-heap safety valve actually reads the heap. See the note
+// at its call site in enqueue_or_publish_(): reading it per message was 2-4
+// heap-lock acquisitions per received telegram for the whole length of an
+// outage, on the exact hot path the radio task competes for.
+static constexpr uint32_t HEAP_SAMPLE_INTERVAL_MS = 1000;
 // Only actually resize (and pay for recompute_buffer_quotas_) when the new
 // suggestion differs from the current ceiling by more than this fraction -
 // otherwise free-heap jitter of a few KB flaps the capacity, and the number
@@ -166,9 +187,11 @@ void Radio::maybe_reautosize_outbox_(uint32_t now_ms) {
     this->mqtt_outbox_capacity_ = suggested;
     if (this->setup_done_)
       this->recompute_buffer_quotas_();
+#ifdef USE_NUMBER
     if (this->buffer_capacity_number_ != nullptr) {
       this->buffer_capacity_number_->publish_state((float) this->mqtt_outbox_capacity_);
     }
+#endif
     const uint32_t trimmed = this->mqtt_outbox_dropped_total_ - dropped_before;
     if (trimmed > 0) {
       ESP_LOGW(TAG,
@@ -186,20 +209,39 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   if (mqtt == nullptr) return;
 
-  if (mqtt->is_connected()) {
+  const bool connected = mqtt->is_connected();
+  if (connected) {
     // Fast path, unchanged from before this feature existed. Also drains any
     // backlog first so messages stay in order: without this, a message that
     // enqueue_or_publish_ is asked to send *while* flush_mqtt_outbox_ is
     // mid-drain (same loop iteration) could jump ahead of older queued ones.
     if (!this->mqtt_outbox_.empty()) this->flush_mqtt_outbox_();
     if (this->mqtt_outbox_.empty()) {
-      mqtt->publish(topic, payload, qos, retain);
-      return;
+      // Return value CHECKED. publish() reports whether the message was
+      // actually handed to esp-mqtt; discarding that verdict lost the
+      // telegram outright in the one window this whole feature exists to
+      // cover: the broker is already gone but ESPHome has not yet missed a
+      // PING_RESP, so is_connected() still says true (documented in this
+      // PR's own "MQTT detection lag" limitation). flush_mqtt_outbox_()
+      // below already checks the same return value on the drain path;
+      // ignoring it here was the asymmetry. On failure we fall through and
+      // queue the message instead of dropping it.
+      if (mqtt->publish(topic, payload, qos, retain))
+        return;
     }
     // Flush could not fully drain this tick (see the cap in flush_mqtt_outbox_);
     // keep strict ordering by queuing behind what is still pending rather than
     // publishing out of turn.
   }
+
+  // Notice the start of an outage HERE, on the frame path, not only from the
+  // 1 Hz sampler in update_outbox_stats_. The sampler resets the per-outage
+  // counters when it observes the connected->disconnected edge, so every
+  // drop counted during the up-to-one-second gap between "broker gone" and
+  // "sampler noticed" was being zeroed a moment later - losing exactly the
+  // beginning of the outage, which is the interesting part. Called before
+  // any note_outbox_drop_() below so this call's own drops survive.
+  this->note_outbox_link_state_(connected);
 
   // A frame carries BOTH forms of its id at runtime: meter_id (BCD-decoded,
   // non-zero for a BCD-able A-field) and meter_id_raw (the raw A-field). A
@@ -235,11 +277,30 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   // limiting reserve is PSRAM's (plus a small internal margin for the deque
   // node); without PSRAM it is the internal-heap reserve, as before.
   {
-    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    // Free heap is SAMPLED, not read per message. heap_caps_get_free_size()
+    // takes the heap lock, and the radio_recv task can block on that same
+    // lock while doing a malloc mid-reception - which is exactly why
+    // board_has_psram_() above is memoised. Reading it on every enqueue
+    // undid that: 2 reads per message here plus 2 more in the warning path,
+    // and every telegram enqueues TWO messages (itself + its /rx
+    // companion), so a busy outage meant up to 8 heap-lock acquisitions per
+    // received telegram, sustained. On a single-core part (ESP32-S2/C3,
+    // where this was tested) that is the margin between "FIFO drained in
+    // time" and "RX FIFO overflow". One sample per second is just as
+    // protective: at ~400 B per queued message the buffer cannot take free
+    // heap from "above reserve" to "dangerously low" inside one second.
+    const uint32_t heap_now_ms = (uint32_t) esphome::millis();
+    if (this->last_heap_sample_ms_ == 0 ||
+        (heap_now_ms - this->last_heap_sample_ms_) >= HEAP_SAMPLE_INTERVAL_MS) {
+      this->last_heap_sample_ms_ = heap_now_ms;
+      this->cached_free_internal_ = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+      this->cached_free_psram_ = board_has_psram_() ? heap_caps_get_free_size(MALLOC_CAP_SPIRAM) : 0;
+    }
+    const size_t free_internal = this->cached_free_internal_;
+    const size_t free_psram = this->cached_free_psram_;
     bool refuse;
     const char *why;
     if (board_has_psram_()) {
-      const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
       refuse = free_psram < PSRAM_RESERVE_BYTES || free_internal < INTERNAL_RESERVE_WITH_PSRAM;
       why = "psram/heap below reserve";
     } else {
@@ -248,14 +309,13 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
     }
     if (refuse) {
       this->note_outbox_drop_(display_id, true);
-      const uint32_t now_ms = (uint32_t) esphome::millis();
       if (this->last_outbox_heap_warning_ms_ == 0 ||
-          (now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
-        this->last_outbox_heap_warning_ms_ = now_ms;
+          (heap_now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
+        this->last_outbox_heap_warning_ms_ = heap_now_ms;
         ESP_LOGW(TAG, "MQTT outbox: %s, refusing to buffer (free heap=%u B, free psram=%u B) / "
                       "odmowa buforowania: %s (wolny heap=%u B, wolny psram=%u B)",
-                 why, (unsigned) free_internal, (unsigned) heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-                 why, (unsigned) free_internal, (unsigned) heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+                 why, (unsigned) free_internal, (unsigned) free_psram,
+                 why, (unsigned) free_internal, (unsigned) free_psram);
       }
       return;
     }
@@ -506,15 +566,23 @@ void Radio::recompute_buffer_quotas_() {
   // One O(n) pass: drop only frames whose meter matches no quota at all
   // (stale after a config change) - those genuinely no longer belong.
   {
-    std::deque<OutboxMsg> kept;
-    for (auto &msg : this->mqtt_outbox_) {
-      if (this->find_meter_quota_(msg.meter_key) != nullptr) {
-        kept.push_back(std::move(msg));
+    // Filtered IN PLACE. Building a second std::deque and swapping temporarily
+    // doubled the deque's node storage in INTERNAL heap - and this runs
+    // precisely when the buffer is fullest, i.e. when internal heap is
+    // tightest. At the auto-sized ~1760 messages measured on a 2 MB-PSRAM
+    // board that second deque is roughly 56 KB against an
+    // INTERNAL_RESERVE_WITH_PSRAM of 24 KB, so the allocation could fail (or
+    // push internal heap under its reserve) in the middle of an outage - the
+    // one moment the buffer must not misbehave. deque::erase() is O(n) in the
+    // worst case but allocates nothing, and this loop already was O(n).
+    for (auto it = this->mqtt_outbox_.begin(); it != this->mqtt_outbox_.end();) {
+      if (this->find_meter_quota_(it->meter_key) != nullptr) {
+        ++it;
       } else {
-        this->note_outbox_drop_(outbox_display_id_(msg.meter_key), false);
+        this->note_outbox_drop_(outbox_display_id_(it->meter_key), false);
+        it = this->mqtt_outbox_.erase(it);
       }
     }
-    this->mqtt_outbox_.swap(kept);
   }
 
   // Re-derive live per-meter counts from what survived.
@@ -536,6 +604,20 @@ void Radio::recompute_buffer_quotas_() {
     this->evict_one_for_priority_();
 }
 
+// KNOWN LIMITATION, stated here because every eviction path goes through this
+// function or the shared-pool pop_front above it: a telegram and its /rx
+// metadata companion are two INDEPENDENT entries in the queue. Eviction makes
+// room for one message, so it can drop the telegram and leave its companion
+// queued (or the reverse). The backend then receives rssi_dbm/received_at for
+// a telegram that never arrives, or a telegram with no metadata - not a crash
+// or a lost reading, but a row it cannot correlate.
+//
+// Not fixed here on purpose: the clean fix is a pair id stamped on both
+// messages when the frame is forwarded (maybe_forward_frame_ in
+// mqtt_publish.cpp), with eviction removing every entry carrying that id, and
+// that is a design change to the queue's contents rather than a bug fix - it
+// deserves its own commit and its own hardware run, not a quiet edit inside a
+// review.
 void Radio::evict_one_for_priority_() {
   if (this->mqtt_outbox_.empty())
     return;
@@ -570,20 +652,24 @@ void Radio::evict_one_for_priority_() {
 }
 
 void Radio::publish_initial_buffer_state_() {
+#ifdef USE_NUMBER
   if (this->buffer_capacity_number_ != nullptr) {
     this->buffer_capacity_number_->publish_state((float) this->mqtt_outbox_capacity_);
   }
+#endif
   // Compiled starting QoS for the optional runtime select: entities (see
   // component.h) - pushed here, not from Python codegen, so it reflects
   // telegram_qos_/rx_qos_ after the YAML setters have actually run,
   // regardless of to_code() call order between the main component and the
   // select: platform.
+#ifdef USE_SELECT
   if (this->telegram_qos_select_ != nullptr) {
     this->telegram_qos_select_->publish_state(std::to_string((unsigned) this->telegram_qos_));
   }
   if (this->rx_qos_select_ != nullptr) {
     this->rx_qos_select_->publish_state(std::to_string((unsigned) this->rx_qos_));
   }
+#endif
 }
 
 // Every drop, from every path, goes through here: bumps the lifetime total,
@@ -591,6 +677,20 @@ void Radio::publish_initial_buffer_state_() {
 // and the per-outage per-meter breakdown used by the 30s stats line. The
 // per-outage figures are zeroed by update_outbox_stats_ the moment the MQTT
 // link drops.
+// Single place that decides "a new outage has begun". Called from both the
+// 1 Hz sampler (update_outbox_stats_) and the frame path (enqueue_or_publish_),
+// so whichever notices the disconnect first does the reset and the other one
+// is a no-op. Idempotent by construction: the reset only fires on the
+// connected->disconnected transition.
+void Radio::note_outbox_link_state_(bool connected) {
+  if (this->outbox_was_connected_ && !connected) {
+    this->mqtt_outbox_dropped_this_outage_ = 0;
+    this->mqtt_outbox_refused_heap_this_outage_ = 0;
+    this->outbox_drop_by_meter_.clear();
+  }
+  this->outbox_was_connected_ = connected;
+}
+
 void Radio::note_outbox_drop_(uint32_t display_id, bool refused_heap) {
   this->mqtt_outbox_dropped_total_++;
   this->mqtt_outbox_dropped_this_outage_++;
@@ -612,12 +712,7 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
   // is fine - the outbox itself reacts to the disconnect on its own path.
   auto *mqtt = esphome::mqtt::global_mqtt_client;
   const bool connected = (mqtt != nullptr && mqtt->is_connected());
-  if (this->outbox_was_connected_ && !connected) {
-    this->mqtt_outbox_dropped_this_outage_ = 0;
-    this->mqtt_outbox_refused_heap_this_outage_ = 0;
-    this->outbox_drop_by_meter_.clear();
-  }
-  this->outbox_was_connected_ = connected;
+  this->note_outbox_link_state_(connected);
 
   const float depth = (float) this->mqtt_outbox_.size();
   const float dropped_total = (float) this->mqtt_outbox_dropped_total_;
@@ -639,6 +734,7 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
   const bool moved = depth != this->last_pub_depth_ || dropped_total != this->last_pub_dropped_ ||
                      dropped_outage != this->last_pub_dropped_outage_;
   if (moved || tick30) {
+#ifdef USE_SENSOR
     if (this->buffer_depth_sensor_ != nullptr && depth != this->last_pub_depth_)
       this->buffer_depth_sensor_->publish_state(depth);
     if (this->buffer_dropped_sensor_ != nullptr && dropped_total != this->last_pub_dropped_)
@@ -647,6 +743,7 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
       this->buffer_dropped_last_outage_sensor_->publish_state(dropped_outage);
     if (this->buffer_oldest_age_sensor_ != nullptr && oldest_age != this->last_pub_oldest_age_)
       this->buffer_oldest_age_sensor_->publish_state(oldest_age);
+#endif
     this->last_pub_depth_ = depth;
     this->last_pub_dropped_ = dropped_total;
     this->last_pub_dropped_outage_ = dropped_outage;

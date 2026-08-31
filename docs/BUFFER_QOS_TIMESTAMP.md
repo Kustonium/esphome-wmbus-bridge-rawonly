@@ -18,8 +18,23 @@ Before this change, the project's own docs were explicit: when the local
 broker is unreachable, RF reception continues but every MQTT publish is
 silently skipped. The telegram is lost, not delayed.
 
-`mqtt_buffer_size` (default `64`, range `0`-`512`, or `auto` — see below) sets
-a RAM ring buffer.
+`mqtt_buffer_size` (**default `0` — the feature is off until you set it**,
+range `0`-`8192`, or `auto` — see below) sets a RAM ring buffer.
+
+**The unit is queued MQTT messages, not telegrams.** One received telegram
+enqueues two of them: the raw frame on `.../telegram` and its metadata
+companion on `.../rx`, which is published for every forwarded frame. So
+`mqtt_buffer_size: 64` carries roughly **32 telegrams** through an outage, and
+the `buffer_depth` / `buffer_dropped_*` sensors and the per-meter
+`buffer_priority` quotas all count in the same messages. Eviction also works
+per message, so a full buffer can drop a telegram while its companion stays
+queued — the backend then sees metadata it cannot pair with a frame.
+
+The default is `0` because store-and-forward is not a free improvement that
+can be turned on for everyone: it changes delivery semantics (a reconnect
+replays a burst of telegrams whose `received_at` is minutes old) and it spends
+internal heap on boards without PSRAM. An upgraded config must behave exactly
+as it did before, so enabling it is a decision made in YAML.
 While MQTT is disconnected, the raw telegram publish and its `/rx` metadata
 companion (see part 3) are queued instead of dropped; once MQTT reconnects
 they are flushed in order, oldest first, a few messages per `loop()` tick so

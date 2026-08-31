@@ -29,7 +29,6 @@ _bmad-output/
 *.tmp
 *.tmp.*
 
-# ESPHome build output and local device configs (kzajac83 fork)
+# ESPHome build output and local device configs
 /.esphome/
 /secrets.yaml
-/wm-bus-bridge-poznan-wifi.yaml

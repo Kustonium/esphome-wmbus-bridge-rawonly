@@ -1,8 +1,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Optional visibility into the RAM MQTT outbox (see ../mqtt_outbox.cpp):
-# how many frames are currently queued, how many have been dropped for lack
-# of room, and how old the oldest still-queued frame is. All three are
+# how many messages are currently queued, how many have been dropped for lack
+# of room, and how old the oldest still-queued one is.
+#
+# UNIT: messages, not telegrams. Each received telegram enqueues two entries -
+# the raw frame on .../telegram and its metadata companion on .../rx - so a
+# depth of 20 here means roughly 10 buffered readings. The unit is stated as
+# "messages" rather than "frames" so a Home Assistant panel cannot be read as
+# a telegram count that is twice the real one. All three are
 # read-only gauges; declaring this platform is entirely optional and changes
 # nothing about the buffer itself. Paired with the number: platform (buffer
 # capacity) and ESPHome's own web_server: + auth:, this is the "lightweight
@@ -32,14 +38,14 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(CONF_WMBUS_RADIO_ID): cv.use_id(RadioComponent),
         cv.Optional(CONF_BUFFER_DEPTH): sensor.sensor_schema(
-            unit_of_measurement="frames",
+            unit_of_measurement="messages",
             icon="mdi:tray-full",
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         cv.Optional(CONF_BUFFER_DROPPED_TOTAL): sensor.sensor_schema(
-            unit_of_measurement="frames",
+            unit_of_measurement="messages",
             icon="mdi:tray-remove",
             accuracy_decimals=0,
             state_class=STATE_CLASS_TOTAL_INCREASING,
@@ -50,7 +56,7 @@ CONFIG_SCHEMA = cv.Schema(
         # holds the final count afterwards until the next outage. MEASUREMENT,
         # not TOTAL_INCREASING, because it legitimately jumps back to 0.
         cv.Optional(CONF_BUFFER_DROPPED_LAST_OUTAGE): sensor.sensor_schema(
-            unit_of_measurement="frames",
+            unit_of_measurement="messages",
             icon="mdi:tray-remove",
             accuracy_decimals=0,
             state_class=STATE_CLASS_MEASUREMENT,

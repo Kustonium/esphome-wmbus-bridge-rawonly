@@ -28,13 +28,15 @@ DEPENDENCIES = ["esp32", "spi", "mqtt"]
 # Everything needed by the raw-only bridge lives inside wmbus_radio, so the user
 # can keep a simple YAML declaration: components: [wmbus_radio]
 #
-# sensor/number/select are auto-loaded because mqtt_outbox.cpp includes their
-# core headers unconditionally (the RAM-outbox gauges, the buffer-capacity
-# number and the per-topic QoS selects). The optional sensor:/number:/select:
-# platforms under this component only wire pointers that otherwise stay null,
-# so a bare `components: [wmbus_radio]` YAML still compiles and behaves exactly
-# as before.
-AUTO_LOAD = ["sensor", "number", "select"]
+# Deliberately still empty. The optional sensor:/number:/select: platforms of
+# this component are used by a minority of configs, and auto-loading their core
+# components would make every user compile three extra base components just so
+# mqtt_outbox.cpp could include their headers - the opposite of an opt-in
+# feature. Those includes are now guarded by USE_SENSOR / USE_NUMBER /
+# USE_SELECT, which ESPHome defines for whichever components a config actually
+# loads; declaring `sensor: - platform: wmbus_radio` loads the sensor component
+# on its own, so nothing is lost by keeping this empty.
+AUTO_LOAD = []
 
 MULTI_CONF = True
 
@@ -320,9 +322,19 @@ def _priority_csv(mapping):
 
 
 def _validate_mqtt_buffer_size(value):
-    """Either an explicit frame count, or "auto" to size the buffer from free
+    """Either an explicit MESSAGE count, or "auto" to size the buffer from free
     heap/PSRAM at runtime (see Radio::suggested_mqtt_outbox_capacity_ in
     mqtt_outbox.cpp - re-evaluated periodically, not just once at boot).
+
+    UNITS: this counts queued MQTT MESSAGES, not telegrams. One received
+    telegram enqueues TWO of them - the raw frame on .../telegram and its
+    metadata companion (rssi_dbm + received_at) on .../rx, which is published
+    for every forwarded frame because rx_topic is always configured. So
+    mqtt_buffer_size: 64 survives roughly 32 telegrams, not 64. Every figure
+    in this feature uses the same unit (the buffer_depth / buffer_dropped_*
+    sensors, the buffer_capacity number, the per-meter buffer_priority
+    quotas), so there is exactly one unit to reason about - but it is
+    messages, and halving it is the number of readings you actually keep.
 
     The explicit-number path keeps a sanity cap (8192): typos like an extra
     zero should fail validation, not silently compile. It is a soft ceiling
@@ -486,12 +498,21 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_RX_QOS, default=1): cv.int_range(min=0, max=2),
 
             # RAM outbox ceiling for the telegram + /rx metadata stream while
-            # MQTT is disconnected (0 = buffering disabled, matches the
-            # project's behaviour before this option existed: drop on
-            # disconnect). "auto" sizes it from free heap/PSRAM at runtime.
-            # Runtime-adjustable downward via number: buffer_capacity if
-            # declared; see the sensor:/number:/select: platforms.
-            cv.Optional(CONF_MQTT_BUFFER_SIZE, default=64): _validate_mqtt_buffer_size,
+            # MQTT is disconnected, counted in MESSAGES (two per telegram -
+            # see _validate_mqtt_buffer_size). "auto" sizes it from free
+            # heap/PSRAM at runtime. Runtime-adjustable downward via number:
+            # buffer_capacity if declared; see the sensor:/number:/select:
+            # platforms.
+            #
+            # DEFAULT 0 = OFF, i.e. opt-in. Store-and-forward is not a free
+            # improvement that can be switched on for everybody: it changes
+            # MQTT delivery semantics (a reconnect replays a burst of
+            # telegrams whose received_at is minutes old, which a backend that
+            # timestamps on arrival will render as a step) and it spends
+            # internal heap on boards without PSRAM. An existing config that
+            # is upgraded must keep behaving exactly as it did, so switching
+            # this on is a decision the user makes in YAML.
+            cv.Optional(CONF_MQTT_BUFFER_SIZE, default=0): _validate_mqtt_buffer_size,
 
             # Per-meter RAM buffer share, only meaningful with a non-empty
             # forward_meters whitelist. Every key must be a meter ID already

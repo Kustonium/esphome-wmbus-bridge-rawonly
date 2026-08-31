@@ -379,9 +379,17 @@ protected:
     }
   };
   std::deque<OutboxMsg> mqtt_outbox_{};
-  size_t mqtt_outbox_capacity_{64};      // current effective cap (runtime-adjustable, <= max)
-  size_t mqtt_outbox_max_capacity_{64};  // ceiling: fixed (mqtt_buffer_size in YAML) or, in
-                                          // auto mode, the last value computed from free heap
+  // OPT-IN: 0 = no buffering, which is this project's behaviour from before the
+  // outbox existed (publish when connected, drop when not). A store-and-forward
+  // buffer changes MQTT delivery semantics - a reconnect replays a burst of
+  // telegrams whose reception time is minutes old - and costs internal heap on
+  // boards without PSRAM, so it must never switch itself on for an existing
+  // installation that did not ask for it. mqtt_buffer_size in YAML is what
+  // turns it on; these defaults deliberately match cv.Optional(default=0)
+  // there, so the C++ side and the schema cannot drift apart.
+  size_t mqtt_outbox_capacity_{0};      // current effective cap (runtime-adjustable, <= max)
+  size_t mqtt_outbox_max_capacity_{0};  // ceiling: fixed (mqtt_buffer_size in YAML) or, in
+                                         // auto mode, the last value computed from free heap
   bool mqtt_outbox_auto_{false};
   uint32_t mqtt_outbox_queued_total_{0};    // lifetime count of frames that ever entered the buffer
   uint32_t mqtt_outbox_dropped_total_{0};   // lifetime count dropped because the buffer was full
@@ -398,10 +406,21 @@ protected:
   std::unordered_map<uint32_t, uint32_t> outbox_drop_by_meter_{};
   bool outbox_was_connected_{true};        // MQTT link state at the previous stats tick, to catch the edge into an outage
   void note_outbox_drop_(uint32_t display_id, bool refused_heap);
+  // Resets the per-outage drop accounting on the connected->disconnected edge.
+  // Called from BOTH the 1 Hz sampler and the frame path, so drops counted in
+  // the gap before the sampler notices are no longer wiped afterwards.
+  void note_outbox_link_state_(bool connected);
   uint32_t last_outbox_stats_ms_{0};
   uint32_t last_outbox_stats_log_ms_{0};   // 30s periodic "MQTT outbox stats" INFO line
   uint32_t last_outbox_autosize_ms_{0};
   uint32_t last_outbox_heap_warning_ms_{0};
+  // Sampled free-heap figures for the safety valve in enqueue_or_publish_.
+  // Held here rather than read per message because heap_caps_get_free_size()
+  // takes the heap lock that the radio_recv task also needs mid-reception -
+  // see the comment at the valve for the full reasoning.
+  uint32_t last_heap_sample_ms_{0};
+  size_t cached_free_internal_{0};
+  size_t cached_free_psram_{0};
   // Last value pushed to each buffer_* sensor, so update_outbox_stats_ only
   // republishes (and the sensor: framework only logs) on an actual change
   // instead of once a second forever. -1 = nothing published yet.
