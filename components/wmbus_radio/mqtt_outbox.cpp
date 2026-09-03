@@ -195,8 +195,8 @@ void Radio::maybe_reautosize_outbox_(uint32_t now_ms) {
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG,
-             "MQTT outbox auto-size: %u -> %u frames (free heap=%u B, free psram=%u B) / "
-             "auto-dobor bufora MQTT: %u -> %u ramek (wolny heap=%u B, wolny psram=%u B)",
+             "MQTT outbox auto-size: %u -> %u messages (free heap=%u B, free psram=%u B) / "
+             "auto-dobor bufora MQTT: %u -> %u wiadomosci (wolny heap=%u B, wolny psram=%u B)",
              (unsigned) current, (unsigned) suggested, (unsigned) free_internal, (unsigned) free_psram,
              (unsigned) current, (unsigned) suggested, (unsigned) free_internal, (unsigned) free_psram);
     const uint32_t dropped_before = this->mqtt_outbox_dropped_total_;
@@ -214,9 +214,9 @@ void Radio::maybe_reautosize_outbox_(uint32_t now_ms) {
     const uint32_t trimmed = this->mqtt_outbox_dropped_total_ - dropped_before;
     if (trimmed > 0) {
       ESP_LOGW(TAG,
-               "MQTT outbox auto-size shrink dropped %u still-queued frame(s) to fit the new, smaller "
+               "MQTT outbox auto-size shrink dropped %u still-queued message(s) to fit the new, smaller "
                "capacity (%u remaining queued) / zmniejszenie bufora MQTT (auto) odrzucilo %u "
-               "oczekujacych ramek, aby zmiescic sie w nowej, mniejszej pojemnosci (%u pozostalo w kolejce)",
+               "oczekujacych wiadomosci, aby zmiescic sie w nowej, mniejszej pojemnosci (%u pozostalo w kolejce)",
                (unsigned) trimmed, (unsigned) this->mqtt_outbox_.size(),
                (unsigned) trimmed, (unsigned) this->mqtt_outbox_.size());
     }
@@ -411,10 +411,10 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   // not flood the log. The periodic "MQTT outbox stats" line (every 30s, see
   // update_outbox_stats_) carries the running depth.
   if (this->mqtt_outbox_.size() == 1) {
-    ESP_LOGI(TAG, "MQTT outbox: buffering started, broker unreachable (1 frame queued) / "
-                  "bufor MQTT: rozpoczeto buforowanie, broker nieosiagalny (1 ramka w kolejce)");
+    ESP_LOGI(TAG, "MQTT outbox: buffering started, broker unreachable (1 message queued) / "
+                  "bufor MQTT: rozpoczeto buforowanie, broker nieosiagalny (1 wiadomosc w kolejce)");
   } else {
-    ESP_LOGD(TAG, "MQTT outbox: queued frame (%u in queue) / zakolejkowano ramke (%u w kolejce)",
+    ESP_LOGD(TAG, "MQTT outbox: queued message (%u in queue) / zakolejkowano wiadomosc (%u w kolejce)",
              (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_.size());
   }
 }
@@ -434,8 +434,8 @@ void Radio::flush_mqtt_outbox_() {
   // per-batch progress below is DEBUG so a large backlog does not flood.
   if (!this->outbox_draining_) {
     this->outbox_draining_ = true;
-    ESP_LOGI(TAG, "MQTT outbox: broker reachable again, draining %u queued frame(s) / "
-                  "bufor MQTT: broker znow osiagalny, oproznianie %u ramek",
+    ESP_LOGI(TAG, "MQTT outbox: broker reachable again, draining %u queued message(s) / "
+                  "bufor MQTT: broker znow osiagalny, oproznianie %u wiadomosci",
              (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_.size());
   }
 
@@ -464,7 +464,7 @@ void Radio::flush_mqtt_outbox_() {
     sent++;
   }
   if (sent > 0) {
-    ESP_LOGD(TAG, "MQTT outbox: flushed %u queued frame(s), %u still pending / bufor MQTT: wyslano %u ramek, w kolejce %u",
+    ESP_LOGD(TAG, "MQTT outbox: flushed %u queued message(s), %u still pending / bufor MQTT: wyslano %u wiadomosci, w kolejce %u",
              (unsigned) sent, (unsigned) this->mqtt_outbox_.size(), (unsigned) sent, (unsigned) this->mqtt_outbox_.size());
   }
   if (this->mqtt_outbox_.empty() && this->outbox_draining_) {

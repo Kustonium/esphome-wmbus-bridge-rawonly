@@ -34,8 +34,8 @@ class WMBusBufferCapacityNumber : public number::Number, public Component {
     const uint32_t trimmed = this->radio_->get_mqtt_outbox_dropped_total() - dropped_before;
     if (trimmed > 0) {
       ESP_LOGW("wmbus",
-               "WMBus buffer_capacity lowered below what was queued: dropped %u frame(s) / "
-               "zmniejszono buffer_capacity ponizej tego, co bylo w kolejce: odrzucono %u ramek",
+               "WMBus buffer_capacity lowered below what was queued: dropped %u message(s) / "
+               "zmniejszono buffer_capacity ponizej tego, co bylo w kolejce: odrzucono %u wiadomosci",
                (unsigned) trimmed, (unsigned) trimmed);
     }
     // Echo back the effective (possibly clamped to mqtt_buffer_size) value

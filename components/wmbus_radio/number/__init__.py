@@ -47,7 +47,7 @@ CONFIG_SCHEMA = cv.Schema(
             WMBusBufferCapacityNumber,
             icon="mdi:tray-full",
             entity_category=ENTITY_CATEGORY_CONFIG,
-            unit_of_measurement="frames",
+            unit_of_measurement="messages",
         ),
     }
 )
