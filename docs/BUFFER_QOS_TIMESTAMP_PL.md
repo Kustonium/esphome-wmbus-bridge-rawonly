@@ -106,6 +106,21 @@ heap wewnętrzny spadnie poniżej rezerwy 40 KB, bufor **odmawia przyjęcia
 nowej wiadomości** — nawet gdyby nominalna pojemność na to pozwalała.
 Zdarzenie logowane maks. raz na minutę.
 
+**Fragmentacja sprawdzana osobno od sumy wolnego heapu:** rezerwa to suma, a
+suma nic nie mówi o tym, czy został jeszcze jeden **ciągły** blok — a WiFi,
+lwIP i esp-tls potrzebują ciągłych buforów wewnętrznych (sam bufor rekordu
+TLS to rząd 16 KB). Długa awaria zapełnia bufor setkami małych alokacji o
+różnej wielkości, więc na płytce bez PSRAM suma wolnego heapu potrafi stać
+spokojnie ponad rezerwą 40 KB, podczas gdy największy pozostały blok spadł
+poniżej tego, czego potrzebuje rekonnekt. Dlatego zawór odmawia również, gdy
+`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)` zejdzie poniżej
+16 KB — log: `MQTT outbox: internal heap too fragmented, refusing to buffer`.
+Obie wielkości są próbkowane na tym samym takcie 1 Hz co odczyty wolnego
+heapu, z tego samego powodu: ten odczyt zajmuje lock sterty, którego
+potrzebuje task `radio_recv`. Sprawdzenie działa też na ścieżce PSRAM, gdzie
+wewnętrzne są tylko ~40-bajtowe węzły kolejki i praktycznie nie ma prawa się
+odpalić — uzasadnienie nie zależy od tego, gdzie leżą bajty payloadu.
+
 **Co się dzieje, gdy przeliczenie co 30 s zmniejsza bufor, a jest on
 zapełniony:** przycina natychmiast (nie czeka, aż się sam opróżni) —
 usuwa najstarsze wiadomości, ile trzeba, żeby zmieścić się w nowej,

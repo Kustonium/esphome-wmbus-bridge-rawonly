@@ -100,6 +100,25 @@ static constexpr uint32_t HEAP_WARNING_THROTTLE_MS = 60000;  // at most one "buf
 // heap-lock acquisitions per received telegram for the whole length of an
 // outage, on the exact hot path the radio task competes for.
 static constexpr uint32_t HEAP_SAMPLE_INTERVAL_MS = 1000;
+// Fragmentation floor for the safety valve, checked on BOTH the PSRAM and the
+// internal-heap path.
+//
+// Why total free heap is not enough: the reserves above are sums, and a sum
+// says nothing about whether a single contiguous block is still available.
+// WiFi, lwIP and esp-tls all need contiguous internal buffers (a TLS record
+// buffer alone is on the order of 16 KB), while a long outage fills the outbox
+// with hundreds of small, variable-sized topic/payload allocations. On a board
+// WITHOUT PSRAM those allocations are the outbox's payload bytes themselves,
+// so free_internal can still read comfortably above RAM_RESERVE_BYTES while the
+// largest remaining block has dropped below what a reconnect needs - the
+// classic "plenty of free heap, yet WiFi will not come back up" failure. On a
+// PSRAM board only the ~40 B deque nodes are internal, so this should
+// essentially never trigger; it is checked there anyway because the argument
+// for it does not depend on where the payload bytes live.
+//
+// Refusing to buffer is the soft failure (some frames dropped, one throttled
+// warning explaining why); losing the network stack is the hard one.
+static constexpr size_t INTERNAL_LARGEST_BLOCK_FLOOR_BYTES = 16 * 1024;
 // Only actually resize (and pay for recompute_buffer_quotas_) when the new
 // suggestion differs from the current ceiling by more than this fraction -
 // otherwise free-heap jitter of a few KB flaps the capacity, and the number
@@ -295,27 +314,37 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
       this->last_heap_sample_ms_ = heap_now_ms;
       this->cached_free_internal_ = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
       this->cached_free_psram_ = board_has_psram_() ? heap_caps_get_free_size(MALLOC_CAP_SPIRAM) : 0;
+      // Same 1 Hz tick on purpose: heap_caps_get_largest_free_block() takes
+      // the same heap lock, so reading it per message would undo exactly the
+      // contention fix the sampling above exists for.
+      this->cached_largest_internal_ = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     }
     const size_t free_internal = this->cached_free_internal_;
     const size_t free_psram = this->cached_free_psram_;
+    const size_t largest_internal = this->cached_largest_internal_;
+    // Checked on both paths - see INTERNAL_LARGEST_BLOCK_FLOOR_BYTES.
+    const bool internal_fragmented = largest_internal < INTERNAL_LARGEST_BLOCK_FLOOR_BYTES;
     bool refuse;
     const char *why;
     if (board_has_psram_()) {
-      refuse = free_psram < PSRAM_RESERVE_BYTES || free_internal < INTERNAL_RESERVE_WITH_PSRAM;
-      why = "psram/heap below reserve";
+      const bool below_reserve = free_psram < PSRAM_RESERVE_BYTES || free_internal < INTERNAL_RESERVE_WITH_PSRAM;
+      refuse = below_reserve || internal_fragmented;
+      why = below_reserve ? "psram/heap below reserve" : "internal heap too fragmented";
     } else {
-      refuse = free_internal < RAM_RESERVE_BYTES;
-      why = "free heap below reserve";
+      const bool below_reserve = free_internal < RAM_RESERVE_BYTES;
+      refuse = below_reserve || internal_fragmented;
+      why = below_reserve ? "free heap below reserve" : "internal heap too fragmented";
     }
     if (refuse) {
       this->note_outbox_drop_(display_id, true);
       if (this->last_outbox_heap_warning_ms_ == 0 ||
           (heap_now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
         this->last_outbox_heap_warning_ms_ = heap_now_ms;
-        ESP_LOGW(TAG, "MQTT outbox: %s, refusing to buffer (free heap=%u B, free psram=%u B) / "
-                      "odmowa buforowania: %s (wolny heap=%u B, wolny psram=%u B)",
-                 why, (unsigned) free_internal, (unsigned) free_psram,
-                 why, (unsigned) free_internal, (unsigned) free_psram);
+        ESP_LOGW(TAG,
+                 "MQTT outbox: %s, refusing to buffer (free heap=%u B, largest block=%u B, free psram=%u B) / "
+                 "odmowa buforowania: %s (wolny heap=%u B, najwiekszy blok=%u B, wolny psram=%u B)",
+                 why, (unsigned) free_internal, (unsigned) largest_internal, (unsigned) free_psram,
+                 why, (unsigned) free_internal, (unsigned) largest_internal, (unsigned) free_psram);
       }
       return;
     }

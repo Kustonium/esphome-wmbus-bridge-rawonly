@@ -421,6 +421,12 @@ protected:
   uint32_t last_heap_sample_ms_{0};
   size_t cached_free_internal_{0};
   size_t cached_free_psram_{0};
+  // Largest CONTIGUOUS free internal block, sampled on the same 1 Hz tick.
+  // Total free heap is not the quantity that protects WiFi/MQTT/TLS: those
+  // need single contiguous buffers, and a long outage fills the outbox with
+  // hundreds of small, variable-sized allocations. See the valve in
+  // mqtt_outbox.cpp for why both figures are checked.
+  size_t cached_largest_internal_{0};
   // Last value pushed to each buffer_* sensor, so update_outbox_stats_ only
   // republishes (and the sensor: framework only logs) on an actual change
   // instead of once a second forever. -1 = nothing published yet.

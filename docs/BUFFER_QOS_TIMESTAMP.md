@@ -211,6 +211,22 @@ safe at boot can never be the thing that starves the rest of the device of
 RAM later. This is logged (rate-limited to once a minute) as `MQTT outbox:
 free heap below reserve, refusing to buffer`.
 
+**Fragmentation is checked separately from total free heap.** A reserve is a
+sum, and a sum says nothing about whether a single contiguous block is still
+available - but WiFi, lwIP and esp-tls all need contiguous internal buffers
+(a TLS record buffer alone is on the order of 16 KB). A long outage fills the
+outbox with hundreds of small, variable-sized allocations, so on a board
+without PSRAM free internal heap can still read comfortably above the 40 KB
+reserve while the largest remaining block has dropped below what a reconnect
+needs. The valve therefore also refuses once
+`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)` falls under 16 KB,
+logged as `MQTT outbox: internal heap too fragmented, refusing to buffer`.
+Both figures are sampled on the same 1 Hz tick as the free-heap reads, for
+the same reason: that call takes the heap lock the `radio_recv` task needs.
+The check applies on the PSRAM path too, where only the ~40 B deque nodes are
+internal and it should essentially never trigger - the argument for it does
+not depend on where the payload bytes live.
+
 ## 2. Per-topic QoS
 
 Every publish in this component used to be hardcoded: QoS 0 everywhere
