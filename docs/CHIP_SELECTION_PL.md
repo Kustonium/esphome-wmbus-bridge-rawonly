@@ -33,10 +33,19 @@ radia: `CC1101`, `SX1276`, `SX1262` i `LR1121`.
 tor odczytu z całej czwórki (termin odpytywania FIFO to 1800 µs wobec 1000 µs na
 `SX1276`), a jego obsługa S1 jest surowym snifferem, nie ścieżką odbiorczą.
 
-`LR1121` to najnowszy krzem. Na testowanym tu sprzęcie dekodował ramki wyraźnie
-poniżej tego, co w tym samym domu osiągały pozostałe radia — ale nie chodził
-tygodniami i **nigdy nie był porównany z innym radiem w tym samym miejscu**,
-a tylko takie porównanie oddziela układ od anteny i ściany, przy której stoi.
+`LR1121` to najnowszy krzem, a brakujące porównanie zostało w międzyczasie
+zrobione: tygodnie obok czterech innych odbiorników w jednym mieszkaniu, a potem
+stanowisko tłumikowe ze wspólnym wejściem. **Wypadł ostatni.** Przez 12 godzin
+usłyszał 48 liczników tam, gdzie T-Beam na SX1262 przy identycznej antenie
+usłyszał 113, a na stanowisku jako pierwszy stracił sygnał całkowicie. Zamiana
+anten wykluczyła antenę — przegrywał, mając tę lepszą.
+
+Jego front end nie jest problemem. Zamienia 80% wyzwoleń odbiornika w ramki,
+najlepszy wynik w stawce, i wyzwala się najrzadziej. To po prostu najostrożniejszy
+odbiornik z tych pięciu, a przy tym obciążeniu ostrożność kosztuje zasięg.
+
+Jedno mieszkanie i po jednej płytce każdego typu, więc to szereguje te pięć
+egzemplarzy, a nie krzem.
 
 ## Co ma największe znaczenie
 

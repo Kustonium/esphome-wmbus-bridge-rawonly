@@ -32,11 +32,19 @@ Practical radio-selection guide for `wmbus_radio`. Four radios are supported:
 slowest of the four (the FIFO poll deadline is 1800 µs against 1000 µs on
 `SX1276`), and its S1 support is a raw sniffer rather than a receive path.
 
-`LR1121` is the newest silicon. On the hardware tested here it decoded frames
-well below what the other radios reached in the same house, but it has not been
-run for weeks and it has never been compared against another radio **in the same
-position**, which is the only comparison that would isolate the chip from the
-antenna and the wall it stands next to.
+`LR1121` is the newest silicon, and the comparison that used to be missing has
+since been made: weeks beside four other receivers in one flat, then on an
+attenuator bench with a shared input. **It came last.** Over 12 hours it heard 48
+meters where a T-Beam SX1262 on an identical antenna heard 113, and on the bench
+it was the first to lose the signal entirely. Swapping antennas ruled the antenna
+out - it lost while holding the better one.
+
+Its front end is not the problem. It converts 80% of its receiver triggers into
+frames, the best figure in the set, and it triggers least often. It is simply the
+most conservative receiver here, and on this workload caution costs coverage.
+
+One flat and one board of each type, so this ranks these five samples rather than
+the silicon.
 
 ## What matters most in practice
 

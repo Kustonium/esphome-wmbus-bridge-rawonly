@@ -277,9 +277,16 @@ wmbus_radio:
   # off channel - the spectrum, not the guess, should decide that.
   rx_bandwidth: "234300"  # measured on the 2026-08-19 receiving run
 
-  # Preamble detector length in bits. Shorter catches weaker signals and fires
-  # more often on noise; longer is the opposite. 16 is the compromise.
-  preamble_detector: "16"  # measured on the 2026-08-19 receiving run
+  # How many preamble bits the radio must see before it starts a reception.
+  # Shorter catches weaker signals and fires more often on noise; longer is the
+  # opposite. Measured here: 8 costs about 16% of the meters heard, so 16 is not
+  # a compromise but the better setting. For listen_mode t1 and both, 16 is also
+  # the maximum - the T1 preamble is shorter than 24 bits, so 24 decodes nothing
+  # at all and the validator refuses it.
+  #
+  # Renamed from preamble_detector: the same gate exists on SX1262 and SX1276,
+  # so the key is no longer chip-specific. Takes an integer, not a string.
+  min_preamble_bits: 16  # default: 16
 
   # payload_length is set once, further up. It used to be repeated here with a
   # different value (128), and since a later YAML key wins, this example would

@@ -27,6 +27,15 @@ DEPENDENCIES = ["esp32", "spi", "mqtt"]
 # Single public component only.
 # Everything needed by the raw-only bridge lives inside wmbus_radio, so the user
 # can keep a simple YAML declaration: components: [wmbus_radio]
+#
+# Deliberately still empty. The optional sensor:/number:/select: platforms of
+# this component are used by a minority of configs, and auto-loading their core
+# components would make every user compile three extra base components just so
+# mqtt_outbox.cpp could include their headers - the opposite of an opt-in
+# feature. Those includes are now guarded by USE_SENSOR / USE_NUMBER /
+# USE_SELECT, which ESPHome defines for whichever components a config actually
+# loads; declaring `sensor: - platform: wmbus_radio` loads the sensor component
+# on its own, so nothing is lost by keeping this empty.
 AUTO_LOAD = []
 
 MULTI_CONF = True
@@ -51,6 +60,26 @@ CONF_TARGET_LOG = "target_log"
 CONF_PUBLISH_RADIO_RAW = "publish_radio_raw"
 CONF_PUBLISH_RSSI = "publish_rssi"
 CONF_FORWARD_METERS = "forward_meters"
+
+# Per-topic MQTT QoS (0/1/2). Every default below matches the value that was
+# previously hardcoded, so an existing YAML with none of these set keeps
+# publishing exactly as before.
+CONF_TELEGRAM_QOS = "telegram_qos"
+CONF_RSSI_QOS = "rssi_qos"
+CONF_HEALTH_QOS = "health_qos"
+CONF_DIAGNOSTIC_QOS = "diagnostic_qos"
+CONF_RX_QOS = "rx_qos"
+
+# RAM store-and-forward buffer for the telegram/rx-metadata stream while MQTT
+# is disconnected. 0 disables buffering (pre-existing behaviour: drop).
+CONF_MQTT_BUFFER_SIZE = "mqtt_buffer_size"
+
+# Per-meter share of the RAM buffer, only meaningful with a non-empty
+# forward_meters whitelist. Plain positive integer weights (not percentages)
+# so there is no total the user has to make add up correctly - see
+# Radio::recompute_buffer_quotas_() in mqtt_outbox.cpp for how weights become
+# quotas that always sum to exactly the current buffer capacity.
+CONF_BUFFER_PRIORITY = "buffer_priority"
 
 # SX1262 board helpers
 CONF_DIO2_RF_SWITCH = "dio2_rf_switch"
@@ -96,6 +125,18 @@ CONF_SX1276_BUSY_ETHER_MODE = "sx1276_busy_ether_mode"
 # is a measured optimum (three-point sweep on S-mode, 2026-08-01) and is
 # pinned in the driver. T1 never got that sweep: its 312.0 kHz is inherited,
 # and 25% wider than the window the SX1276 uses for the same mode.
+# SX1262 preamble detector: how many preamble bits the radio must see before it
+# starts a reception. Upstream hardcodes 8; the LR1121 driver uses 16. Measured
+# 2026-09-01: this is the single knob that decides how aggressively a board
+# attempts weak frames, so it belongs in YAML rather than in the source.
+SX1262_PREAMBLE_DETECTORS = {
+    0: "PREAMBLE_DETECT_OFF",
+    8: "PREAMBLE_DETECT_8",
+    16: "PREAMBLE_DETECT_16",
+    24: "PREAMBLE_DETECT_24",
+    32: "PREAMBLE_DETECT_32",
+}
+
 CONF_SX1262_RX_BANDWIDTH = "sx1262_rx_bandwidth"
 SX1262_T1_RX_BANDWIDTHS = {
     "312khz": "T1_BW_312",
@@ -132,7 +173,11 @@ CONF_TCXO_VOLTAGE = "tcxo_voltage"
 # 300 RTC ticks at 32.768 kHz is ~9.2 ms, the vendor value.
 CONF_TCXO_STARTUP_TICKS = "tcxo_startup_ticks"
 CONF_RX_BANDWIDTH = "rx_bandwidth"
-CONF_PREAMBLE_DETECTOR = "preamble_detector"
+# Minimum preamble bits the receiver must see before it starts a reception.
+# Chip-agnostic on purpose: SX1262 and LR1121 expose the same knob under
+# different names. NOT the transmit preamble length - that is a separate
+# SetPacketParams field and is not configurable here.
+CONF_MIN_PREAMBLE_BITS = "min_preamble_bits"
 CONF_PAYLOAD_LENGTH = "payload_length"
 CONF_RX_BOOSTED = "rx_boosted"
 CONF_BITRATE = "bitrate"
@@ -173,11 +218,11 @@ LR1121_RX_BANDWIDTHS = {
 }
 
 LR1121_PREAMBLE_DETECTORS = {
-    "off": "LR1121_PREAMBLE_OFF",
-    "8": "LR1121_PREAMBLE_MIN_8B",
-    "16": "LR1121_PREAMBLE_MIN_16B",
-    "24": "LR1121_PREAMBLE_MIN_24B",
-    "32": "LR1121_PREAMBLE_MIN_32B",
+    0: "LR1121_PREAMBLE_OFF",
+    8: "LR1121_PREAMBLE_MIN_8B",
+    16: "LR1121_PREAMBLE_MIN_16B",
+    24: "LR1121_PREAMBLE_MIN_24B",
+    32: "LR1121_PREAMBLE_MIN_32B",
 }
 
 # Schema defaults, and the SINGLE SOURCE for them: the cv.Optional entries below
@@ -194,7 +239,8 @@ BASE_CONFIG_DEFAULTS_LR1121 = {
     CONF_TCXO_VOLTAGE: "3.0v",
     CONF_TCXO_STARTUP_TICKS: 3000,
     CONF_RX_BANDWIDTH: "234300",
-    CONF_PREAMBLE_DETECTOR: "16",
+    # Shared by SX1262/SX1276/LR1121, not LR1121-only - see the schema entry.
+    CONF_MIN_PREAMBLE_BITS: 16,
     CONF_PAYLOAD_LENGTH: 255,
     CONF_RX_BOOSTED: True,
     CONF_BITRATE: 100000,
@@ -284,6 +330,43 @@ def _meters_csv(values):
     return ",".join([str(m).strip() for m in values if str(m).strip()])
 
 
+def _priority_csv(mapping):
+    """Join a YAML buffer_priority {meter_id: weight} mapping into the
+    "<id>:<weight>,<id>:<weight>,..." CSV string parsed by
+    parse_meter_priority_csv_ in component.cpp. Keys are already validated
+    meter-ID strings (_validate_meter_id), so no further quoting is needed."""
+    return ",".join(f"{str(k).strip()}:{v}" for k, v in mapping.items())
+
+
+def _validate_mqtt_buffer_size(value):
+    """Either an explicit MESSAGE count, or "auto" to size the buffer from free
+    heap/PSRAM at runtime (see Radio::suggested_mqtt_outbox_capacity_ in
+    mqtt_outbox.cpp - re-evaluated periodically, not just once at boot).
+
+    UNITS: this counts queued MQTT MESSAGES, not telegrams. One received
+    telegram enqueues TWO of them - the raw frame on .../telegram and its
+    metadata companion (rssi_dbm + received_at) on .../rx, which is published
+    for every forwarded frame because rx_topic is always configured. So
+    mqtt_buffer_size: 64 survives roughly 32 telegrams, not 64. Every figure
+    in this feature uses the same unit (the buffer_depth / buffer_dropped_*
+    sensors, the buffer_capacity number, the per-meter buffer_priority
+    quotas), so there is exactly one unit to reason about - but it is
+    messages, and halving it is the number of readings you actually keep.
+
+    The explicit-number path keeps a sanity cap (8192): typos like an extra
+    zero should fail validation, not silently compile. It is a soft ceiling
+    either way - the C++ side refuses to grow the buffer once free heap (or
+    free PSRAM, on a board whose payloads live there) drops below its safety
+    reserve, regardless of what number is configured here. On a board without
+    PSRAM a value in the thousands is simply unreachable and the runtime
+    reserve pins the effective size far lower; "auto" is the sane choice
+    there. On a PSRAM board a few thousand frames is realistic.
+    """
+    if isinstance(value, str) and value.strip().lower() == "auto":
+        return "auto"
+    return cv.int_range(min=0, max=8192)(value)
+
+
 def _normalize_diagnostic_mode(mode):
     mode = str(mode).lower().strip()
     if mode == "medium":
@@ -363,6 +446,23 @@ BASE_CONFIG_SCHEMA = (
             # SX1276-specific board helper (for boards such as LilyGO T3 V3.0 TCXO).
             cv.Optional(CONF_TCXO_PIN): pins.internal_gpio_output_pin_schema,
 
+            # Shared by SX1262, SX1276 and LR1121 - deliberately NOT in the
+            # LR1121 block below. All three gate the start of a reception on a
+            # minimum preamble length, and the 2026-09-01 measurements made that
+            # gate the single knob deciding how aggressively a board attempts
+            # weak frames: 8 bits cost ~16% of the meters heard, reproduced on
+            # two independent antenna-matched pairs. CC1101 has the same gate
+            # (PQT) but in different units, and SX1276 has no 32-bit setting;
+            # both are rejected in the validator with a reason.
+            #
+            # The default is read out of BASE_CONFIG_DEFAULTS_LR1121 because
+            # that dict is the single source for schema defaults and the
+            # validator compares against it to tell "the user set this" from
+            # "the schema injected it". It stays there despite the name.
+            cv.Optional(CONF_MIN_PREAMBLE_BITS, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_MIN_PREAMBLE_BITS]): cv.one_of(
+                0, 8, 16, 24, 32, int=True
+            ),
+
             # LR1121-specific tuning (ignored for other radios).
             #
             # Everything the RF path depends on is exposed here on purpose. The
@@ -377,9 +477,6 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_TCXO_STARTUP_TICKS, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_TCXO_STARTUP_TICKS]): cv.int_range(min=1, max=16777215),
             cv.Optional(CONF_RX_BANDWIDTH, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_RX_BANDWIDTH]): cv.one_of(
                 *LR1121_RX_BANDWIDTHS, lower=True
-            ),
-            cv.Optional(CONF_PREAMBLE_DETECTOR, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_PREAMBLE_DETECTOR]): cv.one_of(
-                *LR1121_PREAMBLE_DETECTORS, lower=True
             ),
             cv.Optional(CONF_PAYLOAD_LENGTH, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_PAYLOAD_LENGTH]): cv.int_range(min=16, max=255),
             cv.Optional(CONF_RX_BOOSTED, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_RX_BOOSTED]): cv.boolean,
@@ -419,6 +516,46 @@ BASE_CONFIG_SCHEMA = (
             # decoded frame, as before this option existed.
             cv.Optional(CONF_FORWARD_METERS, default=[]): cv.Any(
                 cv.boolean, cv.ensure_list(_validate_meter_id)
+            ),
+
+            # Per-topic MQTT QoS. Recommended: QoS 1 on the telegram/rx path
+            # once mqtt_buffer_size > 0 (the buffered replay then also lands
+            # at-least-once on reconnect). Defaults keep the pre-existing
+            # hardcoded values, so an untouched YAML publishes identically.
+            cv.Optional(CONF_TELEGRAM_QOS, default=0): cv.int_range(min=0, max=2),
+            cv.Optional(CONF_RSSI_QOS, default=0): cv.int_range(min=0, max=2),
+            cv.Optional(CONF_HEALTH_QOS, default=0): cv.int_range(min=0, max=2),
+            cv.Optional(CONF_DIAGNOSTIC_QOS, default=0): cv.int_range(min=0, max=2),
+            cv.Optional(CONF_RX_QOS, default=1): cv.int_range(min=0, max=2),
+
+            # RAM outbox ceiling for the telegram + /rx metadata stream while
+            # MQTT is disconnected, counted in MESSAGES (two per telegram -
+            # see _validate_mqtt_buffer_size). "auto" sizes it from free
+            # heap/PSRAM at runtime. Runtime-adjustable downward via number:
+            # buffer_capacity if declared; see the sensor:/number:/select:
+            # platforms.
+            #
+            # DEFAULT 0 = OFF, i.e. opt-in. Store-and-forward is not a free
+            # improvement that can be switched on for everybody: it changes
+            # MQTT delivery semantics (a reconnect replays a burst of
+            # telegrams whose received_at is minutes old, which a backend that
+            # timestamps on arrival will render as a step) and it spends
+            # internal heap on boards without PSRAM. An existing config that
+            # is upgraded must keep behaving exactly as it did, so switching
+            # this on is a decision the user makes in YAML.
+            cv.Optional(CONF_MQTT_BUFFER_SIZE, default=0): _validate_mqtt_buffer_size,
+
+            # Per-meter RAM buffer share, only meaningful with a non-empty
+            # forward_meters whitelist. Every key must be a meter ID already
+            # usable in forward_meters/highlight_meters; the value is a plain
+            # weight (not a percentage - no total to make add up), e.g.:
+            #   buffer_priority:
+            #     "12345678": 3   # gets 3x the buffer share of a default (1) meter
+            #     "0x417F0666": 1
+            # A whitelisted meter with no entry here defaults to weight 1, so
+            # leaving this unset entirely means an equal split.
+            cv.Optional(CONF_BUFFER_PRIORITY, default={}): cv.Schema(
+                {_validate_meter_id: cv.int_range(min=1, max=1000)}
             ),
 
             # Diagnostics are opt-in by default. `diagnostic_mode` applies a preset
@@ -511,6 +648,10 @@ def _report_value(value, key=None):
     # on a setting that changes nothing.
     if key == CONF_FORWARD_METERS and (value is False or (isinstance(value, (list, tuple)) and not value)):
         return "disabled (no whitelist)"
+    if key == CONF_BUFFER_PRIORITY:
+        if not value:
+            return "disabled (shared buffer)"
+        return f"{len(value)} meter(s): " + ", ".join(f"{k}:w{v}" for k, v in value.items())
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, dict) and "number" in value:
@@ -536,16 +677,19 @@ _REPORT_CORE = (CONF_RADIO_TYPE, CONF_LISTEN_MODE, CONF_LISTEN_MODE_FILTER_AFTER
 _REPORT_RADIO = {
     "SX1262": (CONF_HAS_TCXO, CONF_TCXO_VOLTAGE, CONF_DIO2_RF_SWITCH, CONF_RF_SWITCH, CONF_RX_GAIN,
                CONF_LONG_GFSK_PACKETS, CONF_CLEAR_DEVICE_ERRORS_ON_BOOT,
-               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH),
-    "SX1276": (CONF_SX1276_BUSY_ETHER_MODE,),
+               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH,
+               CONF_MIN_PREAMBLE_BITS),
+    "SX1276": (CONF_SX1276_BUSY_ETHER_MODE, CONF_MIN_PREAMBLE_BITS),
     "CC1101": (CONF_CC1101_ALLOW_EXPERIMENTAL,),
     "LR1121": (CONF_LR1121_ALLOW_EXPERIMENTAL, CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS,
-               CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR, CONF_PAYLOAD_LENGTH,
+               CONF_RX_BANDWIDTH, CONF_MIN_PREAMBLE_BITS, CONF_PAYLOAD_LENGTH,
                CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION),
 }
 
 _REPORT_OUTPUT = (CONF_TOPIC_NAME, CONF_TELEGRAM_TOPIC, CONF_PUBLISH_RSSI,
-                  CONF_FORWARD_METERS, CONF_TARGET_METER_ID, CONF_PUBLISH_RADIO_RAW)
+                  CONF_FORWARD_METERS, CONF_TARGET_METER_ID, CONF_PUBLISH_RADIO_RAW,
+                  CONF_TELEGRAM_QOS, CONF_RSSI_QOS, CONF_HEALTH_QOS, CONF_DIAGNOSTIC_QOS,
+                  CONF_RX_QOS, CONF_MQTT_BUFFER_SIZE, CONF_BUFFER_PRIORITY)
 
 _REPORT_DIAG = (CONF_DIAGNOSTIC_MODE, CONF_DIAG_SUMMARY_INTERVAL, CONF_DIAG_TOPIC,
                 CONF_HIGHLIGHT_METERS, CONF_DIAG_METER_STATS, CONF_DIAG_VERBOSE)
@@ -652,7 +796,7 @@ def _validate_radio_pins(config):
     else:
         if config.get(CONF_LR1121_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("lr1121_allow_experimental is only valid for radio_type: LR1121.")
-        for key in (CONF_TCXO_STARTUP_TICKS, CONF_RX_BANDWIDTH, CONF_PREAMBLE_DETECTOR,
+        for key in (CONF_TCXO_STARTUP_TICKS, CONF_RX_BANDWIDTH,
                     CONF_PAYLOAD_LENGTH, CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION):
             # Defaults are always present, so only an explicit non-default value
             # is worth rejecting. Silently ignoring it would be worse: the user
@@ -668,6 +812,70 @@ def _validate_radio_pins(config):
         if (radio_type != "SX1262" and CONF_TCXO_VOLTAGE in config
                 and config[CONF_TCXO_VOLTAGE] != BASE_CONFIG_DEFAULTS_LR1121[CONF_TCXO_VOLTAGE]):
             raise cv.Invalid("tcxo_voltage is only valid for radio_type: LR1121 or SX1262.")
+
+        # min_preamble_bits is shared with SX1262 and SX1276 (2026-09-01): all
+        # three gate the start of a reception on a minimum preamble length, and
+        # that gate turned out to be the single knob deciding how aggressively a
+        # board attempts weak frames. Same key, same values, three drivers - so
+        # it is exempt from the LR1121-only loop above.
+        #
+        # Rejected elsewhere because no other driver here implements it, NOT
+        # because the hardware lacks it. The CC1101 has the same gate as PQT
+        # (PKTCTRL1 bits 7:5) - this driver pins PKTCTRL1 to 0x00, i.e. PQT=0,
+        # the fully permissive end, and verifies it stays there. Its units are
+        # quality steps 0-7, not preamble bits, so it cannot share this key's
+        # value space even if it were wired up. SX1276 gates reception
+        # differently again (its own abort machinery).
+        if CONF_MIN_PREAMBLE_BITS in config and config[CONF_MIN_PREAMBLE_BITS] != BASE_CONFIG_DEFAULTS_LR1121[CONF_MIN_PREAMBLE_BITS]:
+            if radio_type == "CC1101":
+                raise cv.Invalid(
+                    "min_preamble_bits is not supported on CC1101. The chip has the same gate "
+                    "(PQT, PKTCTRL1 bits 7:5) but this driver pins PKTCTRL1 to 0x00 and verifies "
+                    "it stays there, and PQT counts quality steps 0-7, not preamble bits. / "
+                    "min_preamble_bits nie jest obsługiwane na CC1101. Układ ma tę samą bramkę "
+                    "(PQT, bity 7:5 rejestru PKTCTRL1), ale ten sterownik ustawia PKTCTRL1 na 0x00 "
+                    "i tego pilnuje, a PQT liczy stopnie jakości 0-7, nie bity preambuły."
+                )
+            if radio_type == "SX1276" and config[CONF_MIN_PREAMBLE_BITS] == 32:
+                raise cv.Invalid(
+                    "min_preamble_bits: 32 is not available on SX1276 - RegPreambleDetect sizes "
+                    "the detector in 1/2/3 bytes, so 8, 16 and 24 are the only non-zero values. / "
+                    "min_preamble_bits: 32 nie istnieje na SX1276 - RegPreambleDetect wymiarowuje "
+                    "detektor w 1/2/3 bajtach, więc 8, 16 i 24 to jedyne wartości niezerowe."
+                )
+
+    # min_preamble_bits above 16 makes a T1 receiver deaf. Measured on hardware
+    # 2026-09-03: an SX1262 on listen_mode: t1 with min_preamble_bits: 24 took
+    # 184 receiver triggers over two minutes and decoded ZERO frames. The
+    # detector waits for 24 bits of continuous preamble, the T1 preamble is
+    # shorter than that, so detection never completes and every frame flies
+    # past. 16 works, so the usable preamble is 16..23 bits - consistent with
+    # the 19 commonly quoted for T-mode.
+    #
+    # So 24 and 32 are not stricter thresholds for T1, they are values outside
+    # its range, and a board configured that way receives nothing at all while
+    # looking healthy: the radio triggers, the frame count stays at zero, and
+    # nothing in the logs points at the preamble unless you know to look. That
+    # is exactly the failure worth refusing at validation time rather than
+    # discovering on a roof. Applies to every radio - this is a property of the
+    # T1 signal, not of the chip - and to `both`, which includes T1.
+    #
+    # C1 and S1 are left alone: their preambles were not measured here, and
+    # guessing in the direction that silently disables a receiver is the wrong
+    # way to be wrong.
+    if (config.get(CONF_MIN_PREAMBLE_BITS, 0) > 16
+            and config.get(CONF_LISTEN_MODE) in ("t1", "both")):
+        raise cv.Invalid(
+            "min_preamble_bits: {} makes a T1 receiver deaf - the T1 preamble is shorter than "
+            "24 bits, so the detector never completes and no frame is ever decoded (measured: "
+            "184 triggers, 0 frames). Use 16 (the default) or 8 for listen_mode {}. / "
+            "min_preamble_bits: {} czyni odbiornik T1 gluchym - preambula T1 jest krotsza niz "
+            "24 bity, wiec detektor nigdy nie konczy detekcji i zadna ramka nie zostaje "
+            "zdekodowana (zmierzone: 184 wyzwolenia, 0 ramek). Uzyj 16 (domyslnie) albo 8 dla "
+            "listen_mode {}.".format(
+                config[CONF_MIN_PREAMBLE_BITS], config.get(CONF_LISTEN_MODE),
+                config[CONF_MIN_PREAMBLE_BITS], config.get(CONF_LISTEN_MODE))
+        )
 
     return config
 
@@ -742,6 +950,15 @@ async def to_code(config):
                 )
             )
         )
+        SX1262PreambleDetector = radio_ns.enum("SX1262PreambleDetector")
+        cg.add(
+            radio_var.set_preamble_detector(
+                getattr(
+                    SX1262PreambleDetector,
+                    SX1262_PREAMBLE_DETECTORS[config.get(CONF_MIN_PREAMBLE_BITS, 16)],
+                )
+            )
+        )
 
         # Clear SX1262 device errors on boot (optional)
         cg.add(radio_var.set_clear_device_errors_on_boot(config.get(CONF_CLEAR_DEVICE_ERRORS_ON_BOOT, False)))
@@ -781,12 +998,15 @@ async def to_code(config):
             getattr(LR1121RxBandwidth, LR1121_RX_BANDWIDTHS[config[CONF_RX_BANDWIDTH]])
         ))
         cg.add(radio_var.set_preamble_detector(
-            getattr(LR1121PreambleDetector, LR1121_PREAMBLE_DETECTORS[config[CONF_PREAMBLE_DETECTOR]])
+            getattr(LR1121PreambleDetector, LR1121_PREAMBLE_DETECTORS[config[CONF_MIN_PREAMBLE_BITS]])
         ))
         cg.add(radio_var.set_payload_length(config[CONF_PAYLOAD_LENGTH]))
         cg.add(radio_var.set_rx_boosted(config[CONF_RX_BOOSTED]))
         cg.add(radio_var.set_bitrate(config[CONF_BITRATE]))
         cg.add(radio_var.set_deviation(config[CONF_DEVIATION]))
+
+    if config[CONF_RADIO_TYPE] == "SX1276":
+        cg.add(radio_var.set_min_preamble_bits(config[CONF_MIN_PREAMBLE_BITS]))
 
     if config[CONF_RADIO_TYPE] == "SX1276" and CONF_TCXO_PIN in config:
         tcxo_pin = await cg.gpio_pin_expression(config[CONF_TCXO_PIN])
@@ -942,6 +1162,24 @@ async def to_code(config):
     cg.add(var.set_publish_radio_raw(config.get(CONF_PUBLISH_RADIO_RAW, False)))
     cg.add(var.set_publish_rssi(config.get(CONF_PUBLISH_RSSI, False)))
 
+    cg.add(var.set_telegram_qos(config[CONF_TELEGRAM_QOS]))
+    cg.add(var.set_rssi_qos(config[CONF_RSSI_QOS]))
+    cg.add(var.set_health_qos(config[CONF_HEALTH_QOS]))
+    cg.add(var.set_diag_qos(config[CONF_DIAGNOSTIC_QOS]))
+    cg.add(var.set_rx_qos(config[CONF_RX_QOS]))
+
+    _buffer_size = config[CONF_MQTT_BUFFER_SIZE]
+    if _buffer_size == "auto":
+        cg.add(var.set_mqtt_outbox_auto(True))
+        # Real ceiling is computed on-device from free heap/PSRAM at setup()
+        # and re-checked periodically (see mqtt_outbox.cpp); this is just a
+        # safe, small starting point in case that first computation is skipped.
+        cg.add(var.set_mqtt_outbox_max_capacity(16))
+        cg.add(var.set_mqtt_outbox_capacity(16))
+    else:
+        cg.add(var.set_mqtt_outbox_max_capacity(_buffer_size))
+        cg.add(var.set_mqtt_outbox_capacity(_buffer_size))
+
     # forward_meters accepts an explicit list, or `true` meaning "reuse
     # highlight_meters" so the same IDs do not have to be written twice.
     forward_meters = config.get(CONF_FORWARD_METERS, [])
@@ -964,6 +1202,19 @@ async def to_code(config):
         forward_meters_csv = _meters_csv(forward_meters)
     cg.add(var.set_forward_meters_csv(forward_meters_csv))
     cg.add(var.set_forward_meters_inherited(forward_meters_inherited))
+
+    buffer_priority = config.get(CONF_BUFFER_PRIORITY, {})
+    if buffer_priority and not forward_meters_csv:
+        # forward_meters_csv is the RESOLVED whitelist (after the true/false/
+        # inherited handling above), so this also catches "forward_meters: true"
+        # resolving to nothing because highlight_meters was empty too.
+        warnings.append(
+            "buffer_priority is set but forward_meters resolves to an empty whitelist - "
+            "there is no per-meter whitelist to prioritise, ignoring / "
+            "ustawiono buffer_priority, ale forward_meters jest puste - brak whitelisty "
+            "do priorytetyzacji, ignorowanie."
+        )
+    cg.add(var.set_buffer_priority_csv(_priority_csv(buffer_priority)))
 
     diag_events_highlight_only = (
         config[CONF_DIAG_EVENTS_HIGHLIGHT_ONLY]

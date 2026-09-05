@@ -97,25 +97,34 @@ void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter
   }
 
   auto *mqtt = esphome::mqtt::global_mqtt_client;
-  if (mqtt == nullptr || !mqtt->is_connected()) return;
+  if (mqtt == nullptr) return;
 
   std::string hex = frame.as_hex();
   if (want_all) {
-    mqtt->publish(this->telegram_topic_, hex);
-    this->publish_rx_metadata_(frame, id_str);
+    // Not gated on mqtt->is_connected(): enqueue_or_publish_ publishes
+    // immediately when connected (identical to the previous behaviour) and
+    // buffers in RAM when not, instead of the frame being silently lost.
+    // See mqtt_outbox.cpp for the buffering policy.
+    this->enqueue_or_publish_(this->telegram_topic_, hex, this->telegram_qos_, false, meter_id, meter_id_raw);
+    this->publish_rx_metadata_(frame, id_str, meter_id, meter_id_raw);
 
     // Keep the telegram payload contract unchanged. RSSI is a separate,
     // retained scalar and is published only when this frame carries a real
     // radio measurement (-126/-127 are sentinels, not signal levels).
+    //
+    // Deliberately NOT buffered: this topic is retained "latest known", not
+    // an event stream, so a value queued during an outage could land after a
+    // fresher one on reconnect. Skipping it here is fine - the next frame
+    // (buffered or live) republishes it.
     const int rssi_dbm = (int) frame.rssi();
     if (this->publish_rssi_ && !this->rssi_topic_.empty() && id_str != nullptr && id_str[0] != '\0' &&
-        rssi_dbm >= -125 && rssi_dbm <= -1) {
+        rssi_dbm >= -125 && rssi_dbm <= -1 && mqtt->is_connected()) {
       const std::string topic = this->rssi_topic_ + "/" + id_str;
-      mqtt->publish(topic, std::to_string(rssi_dbm), static_cast<uint8_t>(0), true);
+      mqtt->publish(topic, std::to_string(rssi_dbm), this->rssi_qos_, true);
     }
   }
 
-  if (want_target) {
+  if (want_target && mqtt->is_connected()) {
     if (this->target_log_) {
       ESP_LOGI(log_tag != nullptr ? log_tag : TAG, "TARGET %s caught / przechwycono RSSI=%d len=%u",
                id_str != nullptr ? id_str : "????????",
@@ -171,9 +180,13 @@ static bool frame_received_at_iso_(uint64_t rx_task_wakeup_us, char *out, size_t
   return snprintf(out, out_len, "%s.%03uZ", base, ms) > 0;
 }
 
-void Radio::publish_rx_metadata_(Frame &frame, const char *id_str) {
+void Radio::publish_rx_metadata_(Frame &frame, const char *id_str, uint32_t meter_id, uint32_t meter_id_raw) {
+  // Not gated on is_connected(): this metadata (rssi_dbm + received_at,
+  // "obok RSSI") is exactly the companion data a disconnect must not lose,
+  // so it goes through the same RAM outbox as the telegram it describes
+  // instead of being dropped when the broker is unreachable.
   auto *mqtt = esphome::mqtt::global_mqtt_client;
-  if (mqtt == nullptr || !mqtt->is_connected() || this->rx_topic_.empty() ||
+  if (mqtt == nullptr || this->rx_topic_.empty() ||
       id_str == nullptr || id_str[0] == '\0')
     return;
 
@@ -202,7 +215,7 @@ void Radio::publish_rx_metadata_(Frame &frame, const char *id_str) {
            link_mode_name(frame.link_mode()), rssi_json.c_str(),
            (unsigned long) crc, (unsigned) data.size(), received_at_json.c_str());
 
-  mqtt->publish(this->rx_topic_, std::string(payload), static_cast<uint8_t>(1), false);
+  this->enqueue_or_publish_(this->rx_topic_, std::string(payload), this->rx_qos_, false, meter_id, meter_id_raw);
 }
 
 std::string Radio::diag_summary_topic_() const {

@@ -3,7 +3,9 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
+#include <deque>
 #include <unordered_map>
 
 #include <functional>
@@ -20,6 +22,16 @@
 
 #include "packet.h"
 #include "transceiver.h"
+
+// Only pointers to these entity types are kept on Radio, and only the sensor/
+// number platform .cpp files call methods on them, so a forward declaration
+// is enough here and keeps sensor.h/number.h out of every translation unit
+// that includes component.h.
+namespace esphome {
+namespace sensor { class Sensor; }
+namespace number { class Number; }
+namespace select { class Select; }
+}  // namespace esphome
 
 namespace esphome {
 namespace wmbus_radio {
@@ -46,6 +58,83 @@ public:
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
   void set_publish_radio_raw(bool enabled) { this->publish_radio_raw_ = enabled; }
   void set_publish_rssi(bool enabled) { this->publish_rssi_ = enabled; }
+
+  // Per-topic MQTT QoS (0/1/2). Defaults all preserve the pre-existing
+  // hardcoded behaviour: telegram/rssi/health/diagnostics stayed at 0, the
+  // /rx metadata channel stayed at 1. See mqtt_publish.cpp / diagnostics.cpp /
+  // meter_stats.cpp / rf_runtime.cpp for where each is used.
+  void set_telegram_qos(uint8_t qos) { this->telegram_qos_ = qos; }
+  void set_rssi_qos(uint8_t qos) { this->rssi_qos_ = qos; }
+  void set_health_qos(uint8_t qos) { this->health_qos_ = qos; }
+  void set_diag_qos(uint8_t qos) { this->diag_qos_ = qos; }
+  void set_rx_qos(uint8_t qos) { this->rx_qos_ = qos; }
+
+  // Optional runtime QoS control for the two RAM-buffered topics (raw
+  // telegram + /rx metadata - see mqtt_outbox.cpp for why exactly these two).
+  // Wired in from the optional select: platform (components/wmbus_radio/
+  // select). set_telegram_qos()/set_rx_qos() above already are what the
+  // select's control() calls into - these pointers only exist so setup() can
+  // push the compiled starting value to the entity once, the same way
+  // buffer_capacity_number_ is seeded by publish_initial_buffer_state_().
+  void set_telegram_qos_select(select::Select *s) { this->telegram_qos_select_ = s; }
+  void set_rx_qos_select(select::Select *s) { this->rx_qos_select_ = s; }
+
+  // RAM store-and-forward for the telegram/rx-metadata stream. See
+  // mqtt_outbox.cpp for the rationale: today, when the broker is unreachable,
+  // reception continues but every publish is silently skipped (confirmed by
+  // the project's own docs). This buffers whatever could not be published and
+  // flushes it, oldest first, once MQTT reconnects, instead of losing it.
+  //
+  // mqtt_buffer_size (YAML) sets the compiled ceiling. The runtime capacity
+  // can be lowered (never raised past the ceiling) live from the optional
+  // `number` entity below, e.g. from ESPHome's web_server with `auth:` set -
+  // a lightweight authenticated portal to inspect/tune the buffer without
+  // reflashing, without this component running its own HTTP server.
+  // Both setters only update the numbers here; the actual quota
+  // recalculation (and, if the queue is already non-empty, trimming
+  // whatever no longer fits) happens in recompute_buffer_quotas_(), called
+  // from here ONLY once setup_done_ is true. Before that (still applying the
+  // compiled YAML defaults, before Radio::setup() has run) the outbox is
+  // always empty anyway, so there is nothing to trim yet - recompute_buffer_
+  // quotas_() runs once explicitly at the end of setup() instead, by which
+  // point forward_meters/buffer_priority have actually been parsed.
+  void set_mqtt_outbox_max_capacity(size_t max_capacity) {
+    this->mqtt_outbox_max_capacity_ = max_capacity;
+    if (this->mqtt_outbox_capacity_ > max_capacity) this->mqtt_outbox_capacity_ = max_capacity;
+    if (this->setup_done_) this->recompute_buffer_quotas_();
+  }
+  void set_mqtt_outbox_capacity(size_t capacity) {
+    this->mqtt_outbox_capacity_ = (capacity > this->mqtt_outbox_max_capacity_) ? this->mqtt_outbox_max_capacity_ : capacity;
+    if (this->setup_done_) this->recompute_buffer_quotas_();
+  }
+  size_t get_mqtt_outbox_capacity() const { return this->mqtt_outbox_capacity_; }
+  size_t get_mqtt_outbox_max_capacity() const { return this->mqtt_outbox_max_capacity_; }
+  // Lifetime count of frames dropped (buffer full, heap safety valve, or
+  // trimmed by a capacity/quota shrink). Exposed so the optional
+  // buffer_capacity number: entity can report how many of ITS OWN action's
+  // drops just happened, by diffing this before/after control() - see
+  // wmbus_buffer_capacity_number.h.
+  uint32_t get_mqtt_outbox_dropped_total() const { return this->mqtt_outbox_dropped_total_; }
+  // mqtt_buffer_size: auto - re-evaluate the ceiling periodically from free
+  // heap instead of a fixed compiled number. See mqtt_outbox.cpp for the
+  // sizing formula and its (documented) limits.
+  void set_mqtt_outbox_auto(bool auto_size) { this->mqtt_outbox_auto_ = auto_size; }
+  bool get_mqtt_outbox_auto() const { return this->mqtt_outbox_auto_; }
+
+  // buffer_priority (YAML): "<meter_id>:<weight>,..." - only meaningful once
+  // forward_meters is a non-empty whitelist. Parsed in setup(); see
+  // recompute_buffer_quotas_() in mqtt_outbox.cpp for how weights become
+  // per-meter quotas that always sum to exactly the current capacity.
+  void set_buffer_priority_csv(const std::string &csv) { this->buffer_priority_csv_ = csv; }
+
+  // Optional entities wired in from the sensor:/number: YAML platforms
+  // (components/wmbus_radio/sensor, components/wmbus_radio/number). All
+  // nullptr (and simply not updated) when the user has not declared them.
+  void set_buffer_depth_sensor(sensor::Sensor *s) { this->buffer_depth_sensor_ = s; }
+  void set_buffer_dropped_sensor(sensor::Sensor *s) { this->buffer_dropped_sensor_ = s; }
+  void set_buffer_dropped_last_outage_sensor(sensor::Sensor *s) { this->buffer_dropped_last_outage_sensor_ = s; }
+  void set_buffer_oldest_age_sensor(sensor::Sensor *s) { this->buffer_oldest_age_sensor_ = s; }
+  void set_buffer_capacity_number(number::Number *n) { this->buffer_capacity_number_ = n; }
 
   // Optional whitelist limiting which meters reach telegram_topic. Meters are
   // provided as a CSV string in YAML (list is joined in python). An empty list
@@ -221,6 +310,213 @@ protected:
   bool publish_radio_raw_{false};
   bool publish_rssi_{false};
 
+  // Per-topic QoS, see the set_*_qos() setters above.
+  uint8_t telegram_qos_{0};
+  uint8_t rssi_qos_{0};
+  uint8_t health_qos_{0};
+  uint8_t diag_qos_{0};
+  uint8_t rx_qos_{1};
+
+  // RAM store-and-forward outbox. Holds fully-serialized MQTT messages
+  // (already-built topic/payload/qos/retain) rather than raw Frame objects,
+  // so buffering works the same way for the telegram publish and its /rx
+  // metadata companion without either one needing to know it might be
+  // deferred. See mqtt_outbox.cpp.
+  // One queued MQTT publish. topic + payload bytes are allocated on the enqueue
+  // path (mqtt_outbox.cpp) through esphome::RAMAllocator<char>, whose default
+  // policy is "PSRAM first, fall back to internal heap". So on a board with
+  // PSRAM the buffer is bounded by PSRAM, not the ~40 KB internal-heap
+  // reserve, and on a board without PSRAM the bytes land in internal heap
+  // exactly as before. Move-only: the two buffers are owned and freed on
+  // destruction, so std::deque pop_front/erase/clear release them with no
+  // manual bookkeeping at the call sites.
+  struct OutboxMsg {
+    char *topic{nullptr};    // NUL-terminated
+    char *payload{nullptr};  // NOT NUL-terminated; length in payload_len
+    uint32_t enqueued_ms{0};
+    // 0 = not meter-specific (should not currently happen: every call site
+    // that enqueues is meter-specific). See meter_bucket_key() in
+    // meter_filter.h - a real key is always non-zero (bit 32/33 tag).
+    uint64_t meter_key{0};
+    uint16_t payload_len{0};  // MQTT payloads here are a few hundred bytes; 64 KiB cap is plenty
+    uint8_t qos{0};
+    bool retain{false};
+
+    OutboxMsg() = default;
+    OutboxMsg(const OutboxMsg &) = delete;
+    OutboxMsg &operator=(const OutboxMsg &) = delete;
+    OutboxMsg(OutboxMsg &&o) noexcept { this->steal_(o); }
+    OutboxMsg &operator=(OutboxMsg &&o) noexcept {
+      if (this != &o) {
+        this->free_();
+        this->steal_(o);
+      }
+      return *this;
+    }
+    ~OutboxMsg() { this->free_(); }
+
+   private:
+    // deallocate() in RAMAllocator is a plain free(), and heap_caps_malloc'd
+    // blocks (internal or PSRAM) are freed with the ordinary free(), so this
+    // needs no allocator instance.
+    void free_() {
+      ::free(this->topic);
+      ::free(this->payload);
+      this->topic = nullptr;
+      this->payload = nullptr;
+    }
+    void steal_(OutboxMsg &o) {
+      this->topic = o.topic;
+      this->payload = o.payload;
+      this->enqueued_ms = o.enqueued_ms;
+      this->meter_key = o.meter_key;
+      this->payload_len = o.payload_len;
+      this->qos = o.qos;
+      this->retain = o.retain;
+      o.topic = nullptr;
+      o.payload = nullptr;
+      o.payload_len = 0;
+    }
+  };
+  std::deque<OutboxMsg> mqtt_outbox_{};
+  // OPT-IN: 0 = no buffering, which is this project's behaviour from before the
+  // outbox existed (publish when connected, drop when not). A store-and-forward
+  // buffer changes MQTT delivery semantics - a reconnect replays a burst of
+  // telegrams whose reception time is minutes old - and costs internal heap on
+  // boards without PSRAM, so it must never switch itself on for an existing
+  // installation that did not ask for it. mqtt_buffer_size in YAML is what
+  // turns it on; these defaults deliberately match cv.Optional(default=0)
+  // there, so the C++ side and the schema cannot drift apart.
+  size_t mqtt_outbox_capacity_{0};      // current effective cap (runtime-adjustable, <= max)
+  size_t mqtt_outbox_max_capacity_{0};  // ceiling: fixed (mqtt_buffer_size in YAML) or, in
+                                         // auto mode, the last value computed from free heap
+  bool mqtt_outbox_auto_{false};
+  uint32_t mqtt_outbox_queued_total_{0};    // lifetime count of frames that ever entered the buffer
+  uint32_t mqtt_outbox_dropped_total_{0};   // lifetime count dropped because the buffer was full
+                                             // OR refused by the free-heap safety valve
+  // Per-outage drop accounting: all three reset the moment the MQTT link
+  // goes down (a new outage begins), so buffer_dropped_last_outage always
+  // reads "drops caused by the current, or most recent, broker outage".
+  // The lifetime mqtt_outbox_dropped_total_ above is never reset.
+  uint32_t mqtt_outbox_dropped_this_outage_{0};
+  uint32_t mqtt_outbox_refused_heap_this_outage_{0};  // subset of the above refused at the door by the 40 KB heap valve
+  // Per-meter drops this outage, keyed by the printable meter id (raw A-field
+  // when available, else the BCD id) - i.e. the value the receive log prints
+  // as id:XXXXXXXX. 30s stats line only.
+  std::unordered_map<uint32_t, uint32_t> outbox_drop_by_meter_{};
+  bool outbox_was_connected_{true};        // MQTT link state at the previous stats tick, to catch the edge into an outage
+  void note_outbox_drop_(uint32_t display_id, bool refused_heap);
+  // Resets the per-outage drop accounting on the connected->disconnected edge.
+  // Called from BOTH the 1 Hz sampler and the frame path, so drops counted in
+  // the gap before the sampler notices are no longer wiped afterwards.
+  void note_outbox_link_state_(bool connected);
+  uint32_t last_outbox_stats_ms_{0};
+  uint32_t last_outbox_stats_log_ms_{0};   // 30s periodic "MQTT outbox stats" INFO line
+  uint32_t last_outbox_autosize_ms_{0};
+  uint32_t last_outbox_heap_warning_ms_{0};
+  // Sampled free-heap figures for the safety valve in enqueue_or_publish_.
+  // Held here rather than read per message because heap_caps_get_free_size()
+  // takes the heap lock that the radio_recv task also needs mid-reception -
+  // see the comment at the valve for the full reasoning.
+  uint32_t last_heap_sample_ms_{0};
+  size_t cached_free_internal_{0};
+  size_t cached_free_psram_{0};
+  // Largest CONTIGUOUS free internal block, sampled on the same 1 Hz tick.
+  // Total free heap is not the quantity that protects WiFi/MQTT/TLS: those
+  // need single contiguous buffers, and a long outage fills the outbox with
+  // hundreds of small, variable-sized allocations. See the valve in
+  // mqtt_outbox.cpp for why both figures are checked.
+  size_t cached_largest_internal_{0};
+  // Last value pushed to each buffer_* sensor, so update_outbox_stats_ only
+  // republishes (and the sensor: framework only logs) on an actual change
+  // instead of once a second forever. -1 = nothing published yet.
+  float last_pub_depth_{-1.0f};
+  float last_pub_dropped_{-1.0f};
+  float last_pub_dropped_outage_{-1.0f};
+  float last_pub_oldest_age_{-1.0f};
+  uint32_t last_stats_log_dropped_{0};     // dropped_total at the last 30s stats line, to stay quiet when idle
+  bool outbox_draining_{false};            // currently working through a backlog (flush logging)
+  sensor::Sensor *buffer_depth_sensor_{nullptr};
+  sensor::Sensor *buffer_dropped_sensor_{nullptr};
+  sensor::Sensor *buffer_dropped_last_outage_sensor_{nullptr};
+  sensor::Sensor *buffer_oldest_age_sensor_{nullptr};
+  number::Number *buffer_capacity_number_{nullptr};
+  // Optional runtime QoS controls (select: platform), see the setters above.
+  select::Select *telegram_qos_select_{nullptr};
+  select::Select *rx_qos_select_{nullptr};
+  // Set true at the very end of setup(). Guards the two capacity setters
+  // above: before this point the outbox is always empty (nothing has been
+  // received yet) and forward_meters/buffer_priority have not been parsed
+  // yet either, so recompute_buffer_quotas_() would see an empty whitelist
+  // regardless of what YAML actually configured. setup() calls it explicitly
+  // once, after parsing, instead.
+  bool setup_done_{false};
+
+  // buffer_priority (YAML "<id>:<weight>,..."), parsed once in setup() into
+  // weights keyed by meter_bucket_key(). A meter in the whitelist without an
+  // explicit entry here defaults to weight 1 - so leaving this unset entirely
+  // means an equal split across all whitelisted meters, not "undefined".
+  std::string buffer_priority_csv_{};
+  std::unordered_map<uint64_t, uint32_t> buffer_priority_weights_{};
+
+  // Per-meter outbox quotas. Empty = per-meter mode disabled (forward_meters
+  // is empty, i.e. no whitelist): the outbox behaves as one shared FIFO
+  // exactly as before this feature existed. Non-empty = every whitelisted
+  // meter gets its own slice of mqtt_outbox_capacity_, proportional to its
+  // weight, always summing to exactly the current capacity (largest-
+  // remainder apportionment - see recompute_buffer_quotas_() in
+  // mqtt_outbox.cpp for why that avoids needing weights to add up to
+  // anything in particular).
+  struct MeterQuota {
+    uint64_t key{0};
+    uint32_t weight{1};
+    size_t quota{0};
+    size_t count{0};  // currently queued for this meter (re-derived on every recompute)
+  };
+  std::vector<MeterQuota> mqtt_outbox_meter_quotas_{};
+  MeterQuota *find_meter_quota_(uint64_t key);
+  // Make exactly one slot in a full buffer. Victim = the meter furthest over
+  // its buffer_priority quota (oldest frame first); if none is over quota,
+  // the globally oldest frame. Lazy: only ever called when depth == capacity,
+  // never to pre-emptively reserve empty space.
+  void evict_one_for_priority_();
+  // Rebuilds mqtt_outbox_meter_quotas_ from buffer_priority_weights_ + the
+  // forward_meters whitelist + the current capacity, and trims any meter
+  // that is now over its (possibly shrunk) quota. Called once at the end of
+  // setup(), and again automatically by the capacity setters above once
+  // setup_done_ is true (auto re-sizing, or the buffer_capacity number
+  // entity). When the whitelist is empty this instead just enforces the
+  // flat global capacity - the pre-existing single-shared-buffer behaviour.
+  void recompute_buffer_quotas_();
+
+  // If MQTT is connected, publish immediately (unchanged fast path). If not,
+  // queue the message (dropping the oldest queued one first if already at
+  // capacity - the oldest of the SAME meter's own messages, when per-meter
+  // quotas are active) instead of discarding it outright. Also refuses to
+  // grow the queue - regardless of the nominal capacity - once free heap
+  // drops below a safety floor, so a manually-set large mqtt_buffer_size can
+  // never be the thing that starves WiFi/MQTT/TLS of RAM. See
+  // mqtt_outbox.cpp. meter_id/meter_id_raw identify which meter this message
+  // is about (see meter_bucket_key()); every current call site is
+  // meter-specific, so both are always meaningful today.
+  void enqueue_or_publish_(const std::string &topic, const std::string &payload, uint8_t qos, bool retain,
+                           uint32_t meter_id, uint32_t meter_id_raw);
+  // Drains the outbox in FIFO order once MQTT is connected again. Called from
+  // loop(); bounded per call so a large backlog cannot starve radio servicing.
+  void flush_mqtt_outbox_();
+  void update_outbox_stats_(uint32_t now_ms);
+  // Pushes mqtt_outbox_capacity_ to buffer_capacity_number_ once at boot, if set.
+  void publish_initial_buffer_state_();
+  // mqtt_buffer_size: auto only. Re-evaluates the ceiling from currently free
+  // heap every ~30s, so it adapts if free RAM changes after boot (more
+  // diagnostics enabled, TLS handshake buffers, etc.) instead of freezing a
+  // single boot-time guess.
+  void maybe_reautosize_outbox_(uint32_t now_ms);
+  // The formula behind both the periodic auto re-sizing above and the
+  // one-shot boot log line. See mqtt_outbox.cpp for the reasoning and its
+  // documented limits (internal heap only - see note there on PSRAM).
+  size_t suggested_mqtt_outbox_capacity_() const;
+
   // Forwarding whitelist (sorted + deduplicated by the CSV parser, so lookups
   // can use binary search). Both empty means "forward everything".
   // _raw_ holds A-field values for meters whose ID is not BCD.
@@ -299,6 +595,11 @@ protected:
   };
 
   struct RxPathCounters {
+    // How many times the radio actually raised the data interrupt, i.e. the
+    // receiver started something at all. Counted before any parsing, so it is
+    // the only counter that separates "never triggered" from "triggered and
+    // then lost downstream".
+    uint32_t irq_fired{0};
     uint32_t irq_timeout{0};
     uint32_t preamble_read_failed{0};
     uint32_t preamble_retry_recovered{0};
@@ -444,7 +745,7 @@ protected:
   std::string forward_whitelist_summary_() const;
   void maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter_id_raw, const char *id_str,
                             const char *log_tag);
-  void publish_rx_metadata_(Frame &frame, const char *id_str);
+  void publish_rx_metadata_(Frame &frame, const char *id_str, uint32_t meter_id, uint32_t meter_id_raw);
   void maybe_publish_radio_raw_(Packet *packet, uint32_t now_ms);
   bool should_publish_packet_event_(const Packet *packet) const;
   void maybe_publish_diag_summary_(uint32_t now_ms);

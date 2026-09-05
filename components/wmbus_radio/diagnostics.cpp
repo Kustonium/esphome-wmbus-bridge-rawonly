@@ -110,7 +110,7 @@ void Radio::publish_rx_path_event_(const char *event, const char *stage, const c
              "{\"event\":\"%s\",\"uptime_ms\":%lu,\"listen_mode\":\"%s\",\"stage\":\"%s\",\"rssi\":%d}",
              event, (unsigned long) now_ms, listen_mode, stage, rssi);
   }
-  mqtt->publish(this->diag_topic_, payload);
+  mqtt->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
 }
 
 // Publish a suggestion event, throttled to once per hour per code.
@@ -121,6 +121,7 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
                                 std::unordered_map<std::string, uint32_t> &last_ms,
                                 uint32_t now_ms,
                                 uint32_t throttle_ms,
+                                uint8_t qos,
                                 const char *chip,
                                 const char *code,
                                 const char *yaml_key,
@@ -147,7 +148,7 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
            "}",
            chip, code, yaml_key, suggested_value, yaml_snippet, hint_en, hint_pl);
 
-  mqtt->publish(topic, std::string(payload), static_cast<uint8_t>(0), false);
+  mqtt->publish(topic, std::string(payload), qos, false);
   ESP_LOGI("wmbus", "SUGGESTION / SUGESTIA [%s]: %s", code, hint_en);
 }
 
@@ -183,7 +184,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   // belongs to the health pulse (sec_since_last_rx), not to this suggestion.
   if (total == 0) {
     if (!this->any_rx_ && now_ms >= NO_METERS_MIN_UPTIME_MS_) {
-      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
           chip, "NO_METERS_DETECTED",
           "listen_mode", "t1",
           "listen_mode: t1",
@@ -203,7 +204,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
     // wmbusmeters, so telling the user to look up its id there sends them
     // hunting for something that was never published.
     if (this->diag_ok_ > 0) {
-      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
           chip, "ADD_HIGHLIGHT_METERS",
           "highlight_meters", "<meter_id>",
           "highlight_meters:\n  - \"<meter_id>\"",
@@ -220,7 +221,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   // when high fsl is just RF background noise with no actual losses.
   // Skip if already enabled in YAML.
   if (is_sx1276 && fsl >= 80 && drop_pct >= 10 && !this->diag_publish_rx_path_events_) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "ENABLE_RX_PATH_EVENTS",
         "diagnostic_publish_rx_path_events", "true",
         "diagnostic_publish_rx_path_events: true",
@@ -236,7 +237,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   // genuinely overrunning, which these counters - not RF noise - are what say so.
   if (is_sx1276 && this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::NORMAL &&
       (this->diag_rx_path_.fifo_overrun > 0 || this->diag_truncated_ > 0) && drop_pct >= 10) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "CONSIDER_BUSY_ETHER_ADAPTIVE",
         "sx1276_busy_ether_mode", "adaptive",
         "sx1276_busy_ether_mode: adaptive",
@@ -250,7 +251,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   if (total >= 20 && drop_pct >= 40 && this->diag_rssi_ok_n_ > 0 && (!this->diag_publish_drop_events_ || !this->diag_publish_raw_)) {
     const int32_t avg_ok_rssi = this->diag_rssi_ok_sum_ / (int32_t) this->diag_rssi_ok_n_;
     if (avg_ok_rssi <= -85) {
-      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+      publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
           chip, "ENABLE_DROP_EVENTS_RAW",
           "diagnostic_publish_drop_events", "true",
           "diagnostic_publish_drop_events: true\ndiagnostic_publish_raw: true",
@@ -269,7 +270,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
       && this->diag_t1_symbols_total_ >= 500
       && drop_pct >= 5
       && total >= 20) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "SX1262_SYMBOL_ERRORS",
         "cpu_frequency", "160MHz",
         "cpu_frequency: 160MHz",
@@ -284,7 +285,7 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
       this->sx1276_busy_ether_mode_ == SX1276BusyEtherMode::ADAPTIVE &&
       now_ms > this->busy_ether_active_until_ms_ &&
       fsl < 20 && total >= 30) {
-    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_,
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
         chip, "QUIET_ETHER_ADAPTIVE_IDLE",
         "sx1276_busy_ether_mode", "normal",
         "sx1276_busy_ether_mode: normal",
@@ -335,7 +336,7 @@ void Radio::maybe_publish_health_(uint32_t now_ms) {
     // std::string(...) disambiguates the publish() overload set: a bare char[]
     // is ambiguous between the (const char*, size_t, ...) and (const std::string&,
     // ...) signatures; wrapping forces the string overload (as elsewhere here).
-    mqtt->publish(this->health_topic_, std::string(payload), static_cast<uint8_t>(0), false);
+    mqtt->publish(this->health_topic_, std::string(payload), this->health_qos_, false);
   }
 
   if (!this->meters_topic_.empty()) {
@@ -363,7 +364,7 @@ void Radio::maybe_publish_health_(uint32_t now_ms) {
     }
     arr += ']';
     std::string payload = "{\"target\":\"" + this->target_meter_id_str_ + "\",\"highlight\":" + arr + "}";
-    mqtt->publish(this->meters_topic_, payload, static_cast<uint8_t>(0), false);
+    mqtt->publish(this->meters_topic_, payload, this->health_qos_, false);
   }
 }
 
@@ -443,10 +444,24 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   const bool is_sx1276 = (this->radio != nullptr && strcmp(this->radio->get_name(), "SX1276") == 0);
   const int32_t ok_vs_drop_rssi_gap =
       (this->diag_rssi_ok_n_ == 0 || this->diag_rssi_drop_n_ == 0) ? 0 : (avg_ok_rssi - avg_drop_rssi);
+  // payload_size_unknown and raw_drain_skipped_weak fire on the SAME event on
+  // the SX126x path - the drain is skipped precisely because no length could be
+  // derived and the signal was weak - so adding them counted every false start
+  // twice. Measured 2026-09-02/03 on ten consecutive summaries from four boards:
+  // the two were equal to the unit every time and the total was exactly double.
+  // That matters because the hint below triggers at >= 40, i.e. it was really
+  // firing at 20.
+  //
+  // max() rather than dropping one of them: on the SX1276 path they are NOT the
+  // same event (raw_drain_skipped_weak stays 0 while probe_start_aborted carries
+  // the count), and that case was already correct - 2905 = 522 + 76 + 69 + 2238.
+  // Taking the larger of the pair keeps both drivers right and survives another
+  // counter later overlapping the same way.
+  const uint32_t diag_rx_path_no_length = std::max(this->diag_rx_path_.payload_size_unknown,
+                                          this->diag_rx_path_.raw_drain_skipped_weak);
   const uint32_t rx_false_start_like =
-      this->diag_rx_path_.preamble_read_failed + this->diag_rx_path_.payload_size_unknown +
-      this->diag_rx_path_.weak_start_aborted + this->diag_rx_path_.probe_start_aborted +
-      this->diag_rx_path_.raw_drain_skipped_weak;
+      this->diag_rx_path_.preamble_read_failed + diag_rx_path_no_length +
+      this->diag_rx_path_.weak_start_aborted + this->diag_rx_path_.probe_start_aborted;
   const uint32_t raw_drain_recovery_pct =
       (this->diag_rx_path_.raw_drain_attempted == 0)
           ? 0
@@ -466,9 +481,19 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   const char *hint_en = "looks good";
   const char *hint_pl = "wygląda dobrze";
   if (total == 0) {
-    hint_code = "NO_DATA";
-    hint_en = "no packets in this window";
-    hint_pl = "brak ramek w tym oknie";
+    // Split by irq_fired: the receiver either never triggered at all, or it
+    // triggered and nothing survived to the listen_mode filter. Those are two
+    // completely different faults and used to look identical here. The count
+    // itself is on the summary line above as irq=.
+    if (this->diag_rx_path_.irq_fired == 0) {
+      hint_code = "NO_DATA";
+      hint_en = "no packets and the receiver never triggered; check antenna, frequency and wiring";
+      hint_pl = "brak ramek, a odbiornik ani razu się nie wyzwolił; sprawdź antenę, częstotliwość i połączenia";
+    } else {
+      hint_code = "RX_NO_MATCH";
+      hint_en = "receiver triggered but nothing passed the filter - something IS transmitting; check listen_mode, min_preamble_bits and the meter's mode";
+      hint_pl = "odbiornik się wyzwalał, ale nic nie przeszło filtru - coś NADAJE; sprawdź listen_mode, min_preamble_bits i tryb licznika";
+    }
   } else {
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
@@ -567,6 +592,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            "\"interval_s\":%u,"
            "\"uptime_ms\":%lu,"
            "\"listen_mode\":\"%s\","
+           "\"irq_fired\":%u,"
            "\"total\":%u,"
            "\"ok\":%u,"
            "\"truncated\":%u,"
@@ -625,6 +651,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
              "\"other\":%u"
            "},"
            "\"rx_path\":{"
+             "\"irq_fired\":%u,"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -653,6 +680,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) interval_s,
            (unsigned long) now_ms,
            listen_mode,
+           (unsigned) this->diag_rx_path_.irq_fired,
            (unsigned) total,
            (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_,
@@ -724,6 +752,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_dropped_by_stage_[SB_DLL_CRC_B2],
            (unsigned) this->diag_dropped_by_stage_[SB_LINK_MODE],
            (unsigned) this->diag_dropped_by_stage_[SB_OTHER],
+           (unsigned) this->diag_rx_path_.irq_fired,
            (unsigned) this->diag_rx_path_.irq_timeout,
            (unsigned) this->diag_rx_path_.preamble_read_failed,
            (unsigned) this->diag_rx_path_.preamble_retry_recovered,
@@ -771,9 +800,10 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_topic_();
-  mqtt->publish(summary_topic, payload);
-  ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
+  ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
+           (unsigned) this->diag_rx_path_.irq_fired,
            (unsigned) total, (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
 
@@ -882,10 +912,24 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   const bool is_sx1276 = (this->radio != nullptr && strcmp(this->radio->get_name(), "SX1276") == 0);
   const int32_t ok_vs_drop_rssi_gap =
       (this->diag_15m_rssi_ok_n_ == 0 || this->diag_15m_rssi_drop_n_ == 0) ? 0 : (avg_ok_rssi - avg_drop_rssi);
+  // payload_size_unknown and raw_drain_skipped_weak fire on the SAME event on
+  // the SX126x path - the drain is skipped precisely because no length could be
+  // derived and the signal was weak - so adding them counted every false start
+  // twice. Measured 2026-09-02/03 on ten consecutive summaries from four boards:
+  // the two were equal to the unit every time and the total was exactly double.
+  // That matters because the hint below triggers at >= 40, i.e. it was really
+  // firing at 20.
+  //
+  // max() rather than dropping one of them: on the SX1276 path they are NOT the
+  // same event (raw_drain_skipped_weak stays 0 while probe_start_aborted carries
+  // the count), and that case was already correct - 2905 = 522 + 76 + 69 + 2238.
+  // Taking the larger of the pair keeps both drivers right and survives another
+  // counter later overlapping the same way.
+  const uint32_t diag_15m_rx_path_no_length = std::max(this->diag_15m_rx_path_.payload_size_unknown,
+                                          this->diag_15m_rx_path_.raw_drain_skipped_weak);
   const uint32_t rx_false_start_like =
-      this->diag_15m_rx_path_.preamble_read_failed + this->diag_15m_rx_path_.payload_size_unknown +
-      this->diag_15m_rx_path_.weak_start_aborted + this->diag_15m_rx_path_.probe_start_aborted +
-      this->diag_15m_rx_path_.raw_drain_skipped_weak;
+      this->diag_15m_rx_path_.preamble_read_failed + diag_15m_rx_path_no_length +
+      this->diag_15m_rx_path_.weak_start_aborted + this->diag_15m_rx_path_.probe_start_aborted;
   const uint32_t raw_drain_recovery_pct =
       (this->diag_15m_rx_path_.raw_drain_attempted == 0)
           ? 0
@@ -905,9 +949,19 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   const char *hint_en = "looks good";
   const char *hint_pl = "wygląda dobrze";
   if (total == 0) {
-    hint_code = "NO_DATA";
-    hint_en = "no packets in this window";
-    hint_pl = "brak ramek w tym oknie";
+    // Split by irq_fired: the receiver either never triggered at all, or it
+    // triggered and nothing survived to the listen_mode filter. Those are two
+    // completely different faults and used to look identical here. The count
+    // itself is on the summary line above as irq=.
+    if (this->diag_15m_rx_path_.irq_fired == 0) {
+      hint_code = "NO_DATA";
+      hint_en = "no packets and the receiver never triggered; check antenna, frequency and wiring";
+      hint_pl = "brak ramek, a odbiornik ani razu się nie wyzwolił; sprawdź antenę, częstotliwość i połączenia";
+    } else {
+      hint_code = "RX_NO_MATCH";
+      hint_en = "receiver triggered but nothing passed the filter - something IS transmitting; check listen_mode, min_preamble_bits and the meter's mode";
+      hint_pl = "odbiornik się wyzwalał, ale nic nie przeszło filtru - coś NADAJE; sprawdź listen_mode, min_preamble_bits i tryb licznika";
+    }
   } else {
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
@@ -1006,6 +1060,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            "\"interval_s\":%u,"
            "\"uptime_ms\":%lu,"
            "\"listen_mode\":\"%s\","
+           "\"irq_fired\":%u,"
            "\"total\":%u,"
            "\"ok\":%u,"
            "\"truncated\":%u,"
@@ -1062,6 +1117,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
              "\"other\":%u"
            "},"
            "\"rx_path\":{"
+             "\"irq_fired\":%u,"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -1089,6 +1145,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            (unsigned) interval_s,
            (unsigned long) now_ms,
            listen_mode,
+           (unsigned) this->diag_15m_rx_path_.irq_fired,
            (unsigned) total,
            (unsigned) this->diag_15m_ok_,
            (unsigned) this->diag_15m_truncated_,
@@ -1155,6 +1212,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_15m_dropped_by_stage_[SB_DLL_CRC_B2],
            (unsigned) this->diag_15m_dropped_by_stage_[SB_LINK_MODE],
            (unsigned) this->diag_15m_dropped_by_stage_[SB_OTHER],
+           (unsigned) this->diag_15m_rx_path_.irq_fired,
            (unsigned) this->diag_15m_rx_path_.irq_timeout,
            (unsigned) this->diag_15m_rx_path_.preamble_read_failed,
            (unsigned) this->diag_15m_rx_path_.preamble_retry_recovered,
@@ -1195,9 +1253,10 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_15min_topic_();
-  mqtt->publish(summary_topic, payload);
-  ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
+  ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
+           (unsigned) this->diag_15m_rx_path_.irq_fired,
            (unsigned) total, (unsigned) this->diag_15m_ok_,
            (unsigned) this->diag_15m_truncated_, (unsigned) this->diag_15m_dropped_, (unsigned) crc_failed);
 
@@ -1319,10 +1378,24 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   const bool is_sx1276 = (this->radio != nullptr && strcmp(this->radio->get_name(), "SX1276") == 0);
   const int32_t ok_vs_drop_rssi_gap =
       (this->diag_60min_rssi_ok_n_ == 0 || this->diag_60min_rssi_drop_n_ == 0) ? 0 : (avg_ok_rssi - avg_drop_rssi);
+  // payload_size_unknown and raw_drain_skipped_weak fire on the SAME event on
+  // the SX126x path - the drain is skipped precisely because no length could be
+  // derived and the signal was weak - so adding them counted every false start
+  // twice. Measured 2026-09-02/03 on ten consecutive summaries from four boards:
+  // the two were equal to the unit every time and the total was exactly double.
+  // That matters because the hint below triggers at >= 40, i.e. it was really
+  // firing at 20.
+  //
+  // max() rather than dropping one of them: on the SX1276 path they are NOT the
+  // same event (raw_drain_skipped_weak stays 0 while probe_start_aborted carries
+  // the count), and that case was already correct - 2905 = 522 + 76 + 69 + 2238.
+  // Taking the larger of the pair keeps both drivers right and survives another
+  // counter later overlapping the same way.
+  const uint32_t diag_60min_rx_path_no_length = std::max(this->diag_60min_rx_path_.payload_size_unknown,
+                                          this->diag_60min_rx_path_.raw_drain_skipped_weak);
   const uint32_t rx_false_start_like =
-      this->diag_60min_rx_path_.preamble_read_failed + this->diag_60min_rx_path_.payload_size_unknown +
-      this->diag_60min_rx_path_.weak_start_aborted + this->diag_60min_rx_path_.probe_start_aborted +
-      this->diag_60min_rx_path_.raw_drain_skipped_weak;
+      this->diag_60min_rx_path_.preamble_read_failed + diag_60min_rx_path_no_length +
+      this->diag_60min_rx_path_.weak_start_aborted + this->diag_60min_rx_path_.probe_start_aborted;
   const uint32_t raw_drain_recovery_pct =
       (this->diag_60min_rx_path_.raw_drain_attempted == 0)
           ? 0
@@ -1342,9 +1415,19 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   const char *hint_en = "looks good";
   const char *hint_pl = "wygląda dobrze";
   if (total == 0) {
-    hint_code = "NO_DATA";
-    hint_en = "no packets in this window";
-    hint_pl = "brak ramek w tym oknie";
+    // Split by irq_fired: the receiver either never triggered at all, or it
+    // triggered and nothing survived to the listen_mode filter. Those are two
+    // completely different faults and used to look identical here. The count
+    // itself is on the summary line above as irq=.
+    if (this->diag_60min_rx_path_.irq_fired == 0) {
+      hint_code = "NO_DATA";
+      hint_en = "no packets and the receiver never triggered; check antenna, frequency and wiring";
+      hint_pl = "brak ramek, a odbiornik ani razu się nie wyzwolił; sprawdź antenę, częstotliwość i połączenia";
+    } else {
+      hint_code = "RX_NO_MATCH";
+      hint_en = "receiver triggered but nothing passed the filter - something IS transmitting; check listen_mode, min_preamble_bits and the meter's mode";
+      hint_pl = "odbiornik się wyzwalał, ale nic nie przeszło filtru - coś NADAJE; sprawdź listen_mode, min_preamble_bits i tryb licznika";
+    }
   } else {
     if (c1_total > 0 && c1_ok == 0 && c1_crc == c1_total) {
       if (c1_avg_drop_rssi <= -95) {
@@ -1443,6 +1526,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            "\"interval_s\":%u,"
            "\"uptime_ms\":%lu,"
            "\"listen_mode\":\"%s\","
+           "\"irq_fired\":%u,"
            "\"total\":%u,"
            "\"ok\":%u,"
            "\"truncated\":%u,"
@@ -1499,6 +1583,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
              "\"other\":%u"
            "},"
            "\"rx_path\":{"
+             "\"irq_fired\":%u,"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -1526,6 +1611,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            (unsigned) interval_s,
            (unsigned long) now_ms,
            listen_mode,
+           (unsigned) this->diag_60min_rx_path_.irq_fired,
            (unsigned) total,
            (unsigned) this->diag_60min_ok_,
            (unsigned) this->diag_60min_truncated_,
@@ -1592,6 +1678,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_60min_dropped_by_stage_[SB_DLL_CRC_B2],
            (unsigned) this->diag_60min_dropped_by_stage_[SB_LINK_MODE],
            (unsigned) this->diag_60min_dropped_by_stage_[SB_OTHER],
+           (unsigned) this->diag_60min_rx_path_.irq_fired,
            (unsigned) this->diag_60min_rx_path_.irq_timeout,
            (unsigned) this->diag_60min_rx_path_.preamble_read_failed,
            (unsigned) this->diag_60min_rx_path_.preamble_retry_recovered,
@@ -1632,9 +1719,10 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   }
 
   const std::string summary_topic = this->diag_summary_60min_topic_();
-  mqtt->publish(summary_topic, payload);
-  ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
+  ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
+           (unsigned) this->diag_60min_rx_path_.irq_fired,
            (unsigned) total, (unsigned) this->diag_60min_ok_,
            (unsigned) this->diag_60min_truncated_, (unsigned) this->diag_60min_dropped_, (unsigned) crc_failed);
 

@@ -142,7 +142,18 @@ wmbus_radio:
   publish_dev_err_after_clear: true  # default: false
   dio2_rf_switch: false
   # rx_gain: boosted  # default: boosted
-  long_gfsk_packets: true
+  # How many preamble bits the radio must see before it starts a reception.
+  # 8 is what upstream uses and costs about 16% of the meters heard here; 16 is
+  # the default and the maximum for listen_mode t1 and both, because the T1
+  # preamble is shorter than 24 bits and 24 decodes nothing at all.
+  # min_preamble_bits: 16  # default: 16
+  # false is the right default. true switches the receive path to streaming and
+  # costs about 7 dB in weak signal - measured off/on/off on one board, with
+  # three untouched controls holding their RSSI percentile to the decibel.
+  # Turn it on only if a meter here actually sends more than about 150 decoded
+  # bytes: a three-phase electricity meter does, a water or heat meter does not.
+  # Check your longest decoded frame before enabling it prophylactically.
+  # long_gfsk_packets: false  # default: false
 
   # EN: Receive mode. Available values: t1, c1, both, s1.
   #     both means T1/C1 only. S1 is separate and cannot be combined with T1/C1.

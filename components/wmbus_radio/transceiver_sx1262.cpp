@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_sx1262.h"
+#include "decode3of6.h"
 
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
@@ -52,6 +53,7 @@ static constexpr uint8_t PACKET_TYPE_GFSK = 0x00;
 // ---------------------------------------------------------------------------
 // GFSK modulation / packet parameter constants
 // ---------------------------------------------------------------------------
+static constexpr uint8_t GFSK_PULSE_SHAPE_NONE  = 0x00;  // no filter — upstream (Szczepan) and the LR1121 driver both use this
 static constexpr uint8_t GFSK_PULSE_SHAPE_BT_0_5 = 0x09;
 static constexpr uint8_t GFSK_RX_BW_312_0 = 0x19;
 static constexpr uint8_t GFSK_RX_BW_234_3 = 0x0A;  // 234.3 kHz RX bandwidth (C1)
@@ -135,6 +137,20 @@ static constexpr uint16_t REG_AGC_GAIN_TUNE_9_10 = 0x08F9;
 static constexpr uint16_t REG_AGC_GAIN_TUNE_11_12 = 0x08FA;
 static constexpr uint16_t REG_AGC_GAIN_TUNE_13 = 0x08FB;
 static constexpr uint16_t REG_AGC_FIRST_POWER_THRESHOLD = 0x08B9;
+
+// GFSK baseline registers - NOT in the SX1261/2 datasheet at all. Source:
+// RadioLib's SX126x::fixGFSK() (modules/SX126x/SX126x.cpp), whose own comment
+// says these come from "Semtech repositories", not the public datasheet.
+// RadioLib applies one set of values for 600/1200 bps and a different
+// "reset" set for every other bitrate - T1 (100 kbps) and S1 (32768 bps)
+// both fall in the second group, so both use the same four values below.
+// 0x08B8 sits one address below the AGC FirstPow register above; same
+// undocumented calibration neighbourhood, but these four are copied
+// verbatim from a working reference implementation, not guessed.
+static constexpr uint16_t REG_GFSK_FIX_1 = 0x06D1;
+static constexpr uint16_t REG_GFSK_FIX_3 = 0x08B8;
+static constexpr uint16_t REG_GFSK_FIX_4 = 0x06AC;
+static constexpr uint16_t REG_RSSI_AVG_WINDOW = 0x089B;
 
 // Semtech AN1200.53 long-packet reception registers:
 //   REG_RX_ADDR_PTR      - current HW write pointer into the 256-byte circular buffer
@@ -513,6 +529,70 @@ static size_t s1_expected_raw_len_(const std::vector<uint8_t> &raw) {
 }
 
 // ---------------------------------------------------------------------------
+// t1_expected_raw_len_: how many raw (3-of-6 coded) bytes this T-mode frame
+// occupies, derived from its own L field. The T counterpart of
+// s1_expected_raw_len_() above, and it exists for the same reason: with no
+// length the stream capture does not know where the frame ends, so it runs on
+// to its byte cap collecting post-frame noise.
+//
+// That was not a corner case in T mode, it was every single capture, because
+// both of the loop's early exits are unreachable in this configuration:
+//
+//   * `end_irq` waits for RX_DONE or TIMEOUT. RX_DONE cannot fire - the loop
+//     pushes REG_RXTX_PAYLOAD_LEN ahead of the write pointer on every poll,
+//     which is exactly what AN1200.53 asks for - and RX is armed continuous,
+//     so there is no TIMEOUT either.
+//   * `silence` waits 30 ms without new bytes. In continuous RX the
+//     demodulator keeps producing bits out of noise once the frame has ended,
+//     so bytes keep arriving, last_change_ms keeps being refreshed, and the
+//     silence never happens. (The S-mode branch does reach this exit, which is
+//     why the note there reads the other way round - a different packet
+//     configuration, and not a claim that holds for T mode.)
+//
+// So every capture ran to `buffer_cap`: 512 bytes, 125 ms of deafness, and a
+// short frame buried under repeated reads of a 256-byte circular buffer. That
+// is where `long_gfsk_packets: true` spent its 7.5 dB - not in sensitivity,
+// which is why no register ever explained it. Confirmed by the field data: the
+// exit reason recorded in the RSSI diagnostics was `buffer_cap` every time,
+// and 512 copied bytes means 512 bytes really did arrive.
+//
+// Two differences from the S-mode helper, both making this one simpler:
+//
+//   * No polarity search. Manchester has two, so s1_expected_raw_len_() tries
+//     both and needs the C field to reject the complement. 3-of-6 has no
+//     polarity ambiguity, so the C field buys nothing here and is not read -
+//     one less byte that has to survive at the sensitivity threshold.
+//   * A decoded byte is exactly 1.5 raw bytes, so encoded_size() from the
+//     3-of-6 decoder answers directly instead of the S-mode x2.
+//
+// Returns 0 when no length can be derived; the caller then keeps its cap.
+// ---------------------------------------------------------------------------
+static size_t t1_expected_raw_len_(const std::vector<uint8_t> &raw) {
+  // Two raw bytes carry the two 6-bit symbols that make up the L field (with
+  // four bits to spare). That is the entire input this needs.
+  if (raw.size() < 2)
+    return 0;
+
+  const std::vector<uint8_t> head(raw.begin(), raw.begin() + 2);
+  const auto decoded = decode3of6(head);
+  if (!decoded.has_value() || decoded->empty())
+    return 0;
+
+  const uint8_t l_field = (*decoded)[0];
+  const size_t frame_len = (size_t) l_field + 1U;
+  // Same bounds as the S-mode helper: under 12 there is no room for a DLL
+  // header, over 260 no wM-Bus frame exists.
+  if (frame_len < 12U || frame_len > 260U)
+    return 0;
+
+  // Format A block layout, identical in both modes: block 1 carries 10 bytes,
+  // every further block 16, each followed by a 2-byte CRC.
+  const size_t blocks = (l_field < 26U) ? 2U : (size_t) ((l_field - 26U) / 16U + 3U);
+  const size_t decoded_with_crc = frame_len + 2U * blocks;
+  return encoded_size(decoded_with_crc);
+}
+
+// ---------------------------------------------------------------------------
 // wait_while_busy_: poll BUSY pin until low (command accepted).
 // Bail out after 200 ms to avoid hanging on a broken SPI bus.
 // ---------------------------------------------------------------------------
@@ -595,6 +675,56 @@ uint8_t SX1262::read_register8_(uint16_t addr) {
   this->delegate_->end_transaction();
   this->wait_while_busy_();
   return v;
+}
+
+// TEST INSTRUMENTATION: capture the register neighbourhoods that contain the
+// undocumented GFSK baseline fields and the documented RSSI/AGC calibration
+// table. The POR snapshot is retained until log_reg_status(), because setup()
+// runs early enough that its INFO output may not reach an attached log client.
+void SX1262::capture_candidate_registers_(
+    std::array<uint8_t, CANDIDATE_REGISTER_COUNT> &snapshot) {
+  struct RegisterRange {
+    uint16_t first;
+    uint16_t last;
+  };
+  static constexpr RegisterRange ranges[] = {
+      {0x06A0, 0x06DF},  // packet/GFSK area: includes 0x06AC and 0x06D1
+      {0x0880, 0x08BF},  // RSSI/AGC area: includes 0x089B..0x089D, 0x08B8/0x08B9
+      {0x08E0, 0x08FF},  // AGC gain table: includes 0x08F5..0x08FB
+  };
+
+  size_t index = 0;
+  for (const auto &range : ranges) {
+    for (uint16_t address = range.first; address <= range.last; address++) {
+      snapshot[index++] = this->read_register8_(address);
+    }
+  }
+}
+
+// Print a captured snapshot as sixteen bytes per line. This routine is
+// read-only; it does not touch the radio and therefore cannot perturb RX.
+void SX1262::log_candidate_registers_(
+    const char *stage, const std::array<uint8_t, CANDIDATE_REGISTER_COUNT> &snapshot) {
+  static constexpr uint16_t range_starts[] = {0x06A0, 0x0880, 0x08E0};
+  static constexpr uint8_t range_lengths[] = {64, 64, 32};
+  size_t index = 0;
+
+  ESP_LOGI(TAG, "SX1262 REGISTER DUMP BEGIN stage=%s", stage != nullptr ? stage : "?");
+  for (size_t range = 0; range < 3; range++) {
+    for (uint8_t range_offset = 0; range_offset < range_lengths[range]; range_offset += 16) {
+      const uint16_t base = (uint16_t) (range_starts[range] + range_offset);
+      char line[96];
+      int used = snprintf(line, sizeof(line), "%04X:", (unsigned) base);
+      for (uint8_t offset = 0; offset < 16; offset++) {
+        const uint8_t value = snapshot[index++];
+        if (used > 0 && (size_t) used < sizeof(line)) {
+          used += snprintf(line + used, sizeof(line) - (size_t) used, " %02X", value);
+        }
+      }
+      ESP_LOGI(TAG, "SX1262 REG [%s] %s", stage != nullptr ? stage : "?", line);
+    }
+  }
+  ESP_LOGI(TAG, "SX1262 REGISTER DUMP END stage=%s", stage != nullptr ? stage : "?");
 }
 
 
@@ -906,6 +1036,7 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
   size_t copied = 0;
   uint8_t state_index = 0;  // last read index (wraps 0..255)
   size_t s1_expected_raw_len = 0;
+  size_t t1_expected_raw_len = 0;
 
   // Instrumentation for the capture itself, not for its contents.
   //
@@ -1009,6 +1140,42 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
           this->rx_buffer_.resize(s1_expected_raw_len);
           copied = s1_expected_raw_len;
           exit_reason = "s1_length";
+          break;
+        }
+      } else if (this->listen_mode_ == LISTEN_MODE_T1) {
+        if (t1_expected_raw_len == 0) {
+          t1_expected_raw_len = t1_expected_raw_len_(this->rx_buffer_);
+          // Same argument as the S-mode branch: the helper only ever reads raw
+          // bytes 0..1, so once those have arrived and yielded nothing they
+          // will keep yielding nothing. Without an L field nothing downstream
+          // can find the block boundaries either, so the frame is already lost.
+          //
+          // Where this differs from S-mode: stop NOW rather than gathering a
+          // shorter window. Every further byte is time spent deaf over a frame
+          // that will be discarded anyway, and this is the one path that fires
+          // more often the weaker the signal - so continuing costs exactly the
+          // frames that were hardest to catch in the first place. That feedback
+          // is a candidate for the ~7 dB this mode still loses in weak signal
+          // (measured 2026-09-02/03, off -> on -> off on one board).
+          //
+          // Verbose keeps the old 256-byte window: telling a genuine weak frame
+          // from a noise trigger needs to see what the stream looked like, and
+          // that is worth 63 ms when somebody is deliberately watching.
+          if (t1_expected_raw_len == 0 && this->rx_buffer_.size() >= 2) {
+            if (this->diag_verbose_) {
+              capture_cap = 256;
+            } else {
+              exit_reason = "t1_no_length";
+              break;
+            }
+          }
+        }
+        if (t1_expected_raw_len != 0 && copied >= t1_expected_raw_len) {
+          // Trim the noise the radio wrote after the frame ended. Everything
+          // past this point is post-frame demodulation, never frame content.
+          this->rx_buffer_.resize(t1_expected_raw_len);
+          copied = t1_expected_raw_len;
+          exit_reason = "t1_length";
           break;
         }
       }
@@ -1194,11 +1361,44 @@ void SX1262::setup() {
   this->reset();
   delay(10);
 
+  // TEST INSTRUMENTATION: retain the POR baseline before this driver changes
+  // RX gain, applies the RadioLib GFSK fix, or runs calibration/configuration.
+  this->capture_candidate_registers_(this->reset_register_snapshot_);
+  this->reset_register_snapshot_valid_ = true;
+
   // Apply RX gain (datasheet values)
   const uint8_t gain =
       (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? RX_GAIN_POWER_SAVING : RX_GAIN_BOOSTED;
   this->write_register_(REG_RX_GAIN, {gain});
   ESP_LOGI(TAG, "RX gain / wzmocnienie RX: %s", (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? "POWER_SAVING" : "BOOSTED");
+
+  // GFSK baseline fix, ported from RadioLib's fixGFSK() "reset" branch (see
+  // REG_GFSK_FIX_1/3/4 and REG_RSSI_AVG_WINDOW comments above). This driver
+  // has never written any of these four registers, so every SX1262 board in
+  // this project has been running on whatever value survived chip reset -
+  // never verified against what Semtech's own reference code sets. Each
+  // write below is read-modify-write over the stated bit field only; every
+  // other bit in the byte is left exactly as the chip had it.
+  {
+    uint8_t v;
+    v = this->read_register8_(REG_GFSK_FIX_1);
+    v = (uint8_t) ((v & ~0x18) | 0x08);  // bits[4:3] = 01
+    this->write_register_(REG_GFSK_FIX_1, {v});
+
+    v = this->read_register8_(REG_RSSI_AVG_WINDOW);
+    v = (uint8_t) (v & ~0x1C);  // bits[4:2] = 000
+    this->write_register_(REG_RSSI_AVG_WINDOW, {v});
+
+    v = this->read_register8_(REG_GFSK_FIX_3);
+    v = (uint8_t) (v | 0x10);  // bit[4] = 1
+    this->write_register_(REG_GFSK_FIX_3, {v});
+
+    v = this->read_register8_(REG_GFSK_FIX_4);
+    v = (uint8_t) (v & ~0x70);  // bits[6:4] = 000
+    this->write_register_(REG_GFSK_FIX_4, {v});
+
+    ESP_LOGI(TAG, "GFSK baseline fix applied (RadioLib fixGFSK reset branch, undocumented in datasheet)");
+  }
 
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
 
@@ -1357,7 +1557,7 @@ void SX1262::setup() {
   // Always FIX_LEN for WMBus.
   const uint8_t pkt_len_mode = GFSK_PACKET_FIX_LEN;
   this->cmd_write_(CMD_SET_PACKET_PARAMS,
-                   {preamble_msb, preamble_lsb, GFSK_PREAMBLE_DETECT_8,
+                   {preamble_msb, preamble_lsb, (uint8_t) this->preamble_detector_,
                     S1_SYNC_WORD_BITS_OR_DEFAULT(this->listen_mode_),
                     GFSK_ADDRESS_FILT_OFF, pkt_len_mode,
                     0xFF,  // max payload
@@ -1481,6 +1681,16 @@ void SX1262::dump_debug_status(const char *reason) {
 }
 
 void SX1262::log_reg_status() {
+  // TEST INSTRUMENTATION: print both snapshots here, when ESPHome emits the
+  // normal visible component report. Capture the live state immediately before
+  // printing it; logging itself performs no further SPI transactions.
+  if (this->reset_register_snapshot_valid_) {
+    this->log_candidate_registers_("after_reset", this->reset_register_snapshot_);
+  }
+  std::array<uint8_t, CANDIDATE_REGISTER_COUNT> configured_snapshot{};
+  this->capture_candidate_registers_(configured_snapshot);
+  this->log_candidate_registers_("rx_configured", configured_snapshot);
+
   // SX1262 uses 16-bit register addresses; reading via CMD_READ_REGISTER.
   const uint8_t reg_rx_gain  = this->read_register8_(REG_RX_GAIN);
   const uint8_t reg_sync0    = this->read_register8_(REG_SYNC_WORD_0);

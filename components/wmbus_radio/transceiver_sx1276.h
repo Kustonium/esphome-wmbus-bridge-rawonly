@@ -22,6 +22,10 @@ class SX1276 : public RadioTransceiver {
     this->configured_frequency_hz_ = (uint32_t) (frequency_mhz * 1000000.0f + 0.5f);
   }
   void set_tcxo_pin(InternalGPIOPin *pin) { this->tcxo_pin_ = pin; }
+  // Minimum preamble bits before reception starts (RegPreambleDetect 0x1F).
+  // 0 disables the detector; 8/16/24 map to the 1/2/3-byte sizes. 32 does not
+  // exist on this chip - the field is two bits wide.
+  void set_min_preamble_bits(uint8_t bits) { this->min_preamble_bits_ = bits; }
   void setup() override;
   optional<uint8_t> read() override;
   void restart_rx() override;
@@ -39,6 +43,7 @@ class SX1276 : public RadioTransceiver {
  protected:
   uint32_t configured_frequency_hz_{868950000UL};
   InternalGPIOPin *tcxo_pin_{nullptr};
+  uint8_t min_preamble_bits_{16};
   uint8_t sync_cycle_{0};
 
   // Burst chunk buffered in ESP32 RAM and served byte-by-byte to upper layer.

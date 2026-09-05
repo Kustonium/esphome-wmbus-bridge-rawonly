@@ -15,11 +15,18 @@ That run also produced 1401 frames at -105 dBm or below. The datasheet-derived
 estimate for this bitrate was -106..-109 dBm, so the front end is doing slightly
 better than predicted, not worse.
 
-Still young, though. It has not run for weeks, C-mode Format B has never been
-seen here, and nobody has compared its yield against an SX1262 in the same
-position - which is the only comparison that would separate the chip from where
-it happens to stand. Treat it as a working starting point, not as a supported
-configuration.
+The missing comparison has since been made, and it is worth knowing before you
+build around this board. Running for weeks beside four other receivers in one
+flat, it heard 48 meters over 12 hours where a T-Beam SX1262 on an identical
+10 cm antenna heard 113. On an attenuator bench with a shared input it was the
+first to fall silent. Swapping antennas between the two ruled the antenna out.
+
+Not a fault, and the counters say why: it converts 80% of its receiver triggers
+into frames - the best of the five - while triggering least often. Conservative
+receivers waste less and hear less.
+
+C-mode Format B has still never been seen here. Treat this as a working starting
+point, not as a supported configuration.
 
 **PL.** Sterownik powstał wyłącznie z dokumentacji, bez płytki na biurku. Od
 2026-08-19 odbiera prawdziwe telegramy na tym sprzęcie: liczniki BMT i NES,
@@ -33,9 +40,19 @@ i odczytane z eksportu `/api/esp-rx`, a nie z ekranu logu. W tym samym biegu by�
 1401 ramek na poziomie −105 dBm i niżej — czyli lepiej niż oszacowanie
 −106…−109 dBm z datasheetu.
 
-Ale to wciąż młode: nie chodziło tygodniami, formatu B C-mode tu nie widziano,
-nikt nie porównał uzysku z SX1262 w tym samym miejscu — a tylko takie porównanie
-oddziela układ od miejsca, w którym stoi.
+Brakujące porównanie zostało w międzyczasie zrobione i warto je znać, zanim
+zbudujesz coś wokół tej płytki. Chodząc tygodniami obok czterech innych
+odbiorników w jednym mieszkaniu, usłyszała przez 12 godzin 48 liczników tam,
+gdzie T-Beam na SX1262 przy identycznej antenie 10 cm usłyszał 113. Na stanowisku
+tłumikowym ze wspólnym wejściem jako pierwsza zamilkła. Zamiana anten między nimi
+wykluczyła antenę.
+
+To nie usterka, a liczniki mówią dlaczego: zamienia 80% wyzwoleń odbiornika
+w ramki — najlepiej z piątki — wyzwalając się przy tym najrzadziej. Ostrożne
+odbiorniki mniej marnują i mniej słyszą.
+
+Formatu B C-mode nadal tu nie widziano. Traktuj to jako działający punkt wyjścia,
+a nie konfigurację wspieraną.
 
 ## Board
 
