@@ -128,7 +128,7 @@ Jeżeli poprawny telegram S1 zostanie odebrany, zostanie przekazany do MQTT tak 
 
 Przeczytaj:
 
-- [`docs/CONFIG_REFERENCE_MINIMAL.md`](CONFIG_REFERENCE_MINIMAL.md)
+- [`docs/CONFIG_REFERENCE_MINIMAL_PL.md`](CONFIG_REFERENCE_MINIMAL_PL.md)
 
 Zalecana konfiguracja:
 
@@ -177,7 +177,7 @@ Nie debuguj kluczy AES, driverów liczników ani encji Home Assistant, dopóki n
 Przeczytaj:
 
 - [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md)
-- [`docs/DIAGNOSTICS_QUICK_REFERENCE.md`](DIAGNOSTICS_QUICK_REFERENCE.md)
+- [`docs/DIAGNOSTICS_QUICK_REFERENCE_PL.md`](DIAGNOSTICS_QUICK_REFERENCE_PL.md)
 
 Dla normalnego użytkownika:
 
@@ -235,12 +235,12 @@ Używaj tych plików zależnie od pytania:
 | Jak działa diagnostyka? | [`DIAGNOSTIC_PL.md`](DIAGNOSTIC_PL.md) |
 | Co znaczą dropy/CRC/interwały? | [`TROUBLESHOOTING_PL.md`](TROUBLESHOOTING_PL.md) |
 | Jak wewnętrznie działa RX pipeline? | [`docs/RX_PIPELINE_PL.md`](RX_PIPELINE_PL.md) |
-| Jakie są minimalne opcje YAML? | [`docs/CONFIG_REFERENCE_MINIMAL.md`](CONFIG_REFERENCE_MINIMAL.md) |
-| Jakie są opcje radiowe? | [`docs/RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) |
+| Jakie są minimalne opcje YAML? | [`docs/CONFIG_REFERENCE_MINIMAL_PL.md`](CONFIG_REFERENCE_MINIMAL_PL.md) |
+| Jakie są opcje radiowe? | [`docs/RADIO_OPTIONS_MINIMAL_PL.md`](RADIO_OPTIONS_MINIMAL_PL.md) |
 | Co zmieniło się w release? | [GitHub Releases](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases) |
 | Jak SX1262 wypada względem SX1276? | [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md) |
 | Które radio kupić i które do S1? | [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md) |
-| Jaki jest zakres projektu/supportu? | [`SUPPORT.md`](../SUPPORT.md) |
+| Jaki jest zakres projektu/supportu? | [`SUPPORT_PL.md`](../SUPPORT_PL.md) |
 
 ## 10. Gdzie pytać
 

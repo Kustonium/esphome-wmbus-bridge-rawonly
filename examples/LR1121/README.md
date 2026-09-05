@@ -1,6 +1,8 @@
 # LR1121 — receiving since 2026-08-19
 
-**EN.** The driver (`components/wmbus_radio/transceiver_lr1121.{h,cpp}`) was
+[Polska wersja](README_PL.md)
+
+The driver (`components/wmbus_radio/transceiver_lr1121.{h,cpp}`) was
 written entirely from documentation, with no board on the desk. It has since
 decoded real telegrams on this exact hardware: BMT and NES meters, 17 good
 frames per minute, RSSI -57..-96 dBm, no truncations, `RF link looks stable`.
@@ -27,32 +29,6 @@ receivers waste less and hear less.
 
 C-mode Format B has still never been seen here. Treat this as a working starting
 point, not as a supported configuration.
-
-**PL.** Sterownik powstał wyłącznie z dokumentacji, bez płytki na biurku. Od
-2026-08-19 odbiera prawdziwe telegramy na tym sprzęcie: liczniki BMT i NES,
-17 poprawnych ramek na minutę, RSSI -57..-96 dBm, bez obcięć.
-
-C1 też działa — jedna ramka C1 A od Techema obok ruchu T1. S1 również odbiera,
-sprawdzone 2026-08-19 na nadajniku warsztatowym.
-
-Najsłabszy udany odbiór: **−114 dBm**, zmierzone w biegu 14,1 h dnia 2026-08-21
-i odczytane z eksportu `/api/esp-rx`, a nie z ekranu logu. W tym samym biegu było
-1401 ramek na poziomie −105 dBm i niżej — czyli lepiej niż oszacowanie
-−106…−109 dBm z datasheetu.
-
-Brakujące porównanie zostało w międzyczasie zrobione i warto je znać, zanim
-zbudujesz coś wokół tej płytki. Chodząc tygodniami obok czterech innych
-odbiorników w jednym mieszkaniu, usłyszała przez 12 godzin 48 liczników tam,
-gdzie T-Beam na SX1262 przy identycznej antenie 10 cm usłyszał 113. Na stanowisku
-tłumikowym ze wspólnym wejściem jako pierwsza zamilkła. Zamiana anten między nimi
-wykluczyła antenę.
-
-To nie usterka, a liczniki mówią dlaczego: zamienia 80% wyzwoleń odbiornika
-w ramki — najlepiej z piątki — wyzwalając się przy tym najrzadziej. Ostrożne
-odbiorniki mniej marnują i mniej słyszą.
-
-Formatu B C-mode nadal tu nie widziano. Traktuj to jako działający punkt wyjścia,
-a nie konfigurację wspieraną.
 
 ## Board
 
@@ -127,8 +103,7 @@ Nothing in the driver is a guess, but "documented" is not "verified":
 
 ## Not implemented
 
-Spectrum scanning. The LR1121's most interesting property for this project is
-not that it is another wM-Bus receiver — it is barely better than an SX1262 at
-that — but that it can sweep 150–960 MHz with a fast RSSI read. That belongs in
-a separate mode, not in a receiver, because scanning and receiving are mutually
-exclusive: the radio either measures the band or listens to it.
+Spectrum scanning. The LR1121 can sweep 150–960 MHz with a fast RSSI read.
+This is a separate use from wM-Bus reception and requires a separate mode:
+scanning and receiving are mutually exclusive — the radio either measures
+the band or listens to it.

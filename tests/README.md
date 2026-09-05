@@ -1,5 +1,7 @@
 # Tests
 
+[Polska wersja](README_PL.md)
+
 This directory contains development-time checks for the component. They are not
 included in ESPHome firmware and are only run by CI or a local host compiler.
 

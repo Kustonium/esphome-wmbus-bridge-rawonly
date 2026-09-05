@@ -1,5 +1,7 @@
 # RX pipeline and frame qualification
 
+[Polska wersja](RX_PIPELINE_PL.md)
+
 This project is a **RAW-only bridge**, but `RAW` here does not mean “every byte blob from the radio”.
 
 The component publishes only telegrams that passed the internal wM-Bus frame checks. Failed candidates can still be counted and reported by diagnostics, but they are not forwarded on `telegram_topic`.

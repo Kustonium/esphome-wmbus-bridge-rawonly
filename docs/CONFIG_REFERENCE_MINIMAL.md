@@ -1,37 +1,39 @@
-# wmbus_radio minimal configuration reference / minimalna referencja konfiguracji
+# wmbus_radio minimal configuration reference
 
-## Core / podstawowe
+[Polska wersja](CONFIG_REFERENCE_MINIMAL_PL.md)
 
-| Opcja | Domyślnie | Status | Opis PL / EN |
+## Core
+
+| Option | Default | Status | Description |
 |---|---:|---|---|
-| `radio_type` | wymagane | public | `SX1262`, `SX1276`, `CC1101`, `LR1121` |
-| `topic_name` | `esphome.name` | public | nazwa bazowa topiców: `wmbus/<topic_name>/...`; bez `/`, spacji, `+`, `#` |
-| `listen_mode` | `both` | public | `t1`, `c1`, `both` = T1/C1 only, `s1` = experimental S1 only |
-| `frequency` | mode default | public | optional override; T1/C1/both default `868.950 MHz`, S1 default `868.300 MHz` |
+| `radio_type` | required | public | `SX1262`, `SX1276`, `CC1101`, `LR1121` |
+| `topic_name` | `esphome.name` | public | topic base name: `wmbus/<topic_name>/...`; no `/`, spaces, `+` or `#` |
+| `listen_mode` | `both` | public | `t1`, `c1`, `both` = T1/C1 only; `s1` = experimental S1 only |
+| `frequency` | mode default | public | optional override; T1/C1/both default to `868.950 MHz`, S1 to `868.300 MHz` |
 | `diagnostic_mode` | `off` | public | `off`, `low`, `normal`, `debug`, `dev` |
-| `highlight_meters` | puste | public | ID liczników do wyróżnienia i statystyk w `normal/debug`; **nie filtruje MQTT** |
-| `forward_meters` | puste | public | whitelista ID publikowanych na `wmbus/<topic_name>/telegram`; lista ID albo `true` = użyj `highlight_meters`; puste = wysyłaj wszystko |
-| `publish_rssi` | `false` | public | publikuj RSSI ostatniej ramki każdego licznika na `wmbus/<topic_name>/rssi/<meter_id>`; patrz sekcja niżej |
-| `receiver_task_stack_size` | `3072` | advanced | stos osobnego taska RX, zakres `2048..16384` |
-| `listen_mode_filter_after_parse` | `false` | experimental | agresywniejsze filtrowanie po parserze; testować po licznikach, nie po samym globalnym drop% |
-| `use_noise_floor_threshold` | `false` | experimental | próg przerywania słabych startów liczony od ZMIERZONEJ podłogi szumu zamiast od średniej udanych odbiorów; pomiar (`noise_floor_dbm`) działa zawsze, ta opcja tylko go używa |
-| `noise_floor_margin_db` | `6` | experimental | ile dB nad podłogą szumu musi być start, żeby próbować (0–30); działa tylko przy `use_noise_floor_threshold: true` |
-| `highlight_ansi` | `false` | public | kolorowanie ANSI wyróżnionych liczników w logu |
-| `highlight_tag` | `wmbus_user` | public | tag logu dla wyróżnionych liczników |
-| `highlight_prefix` | `"★ "` | public | prefiks linii logu wyróżnionego licznika |
-| `allow_untested_framework` | `false` | safety gate | wymagane do zbudowania na frameworku `arduino`; domyślnie kompilacja jest przerywana |
-| `mark_as_handled` | `false` | public | opcja wewnątrz `on_frame:`; oznacza ramkę jako obsłużoną |
+| `highlight_meters` | empty | public | meter IDs for highlighting and statistics in `normal/debug`; **does not filter MQTT** |
+| `forward_meters` | empty | public | whitelist of IDs published on `wmbus/<topic_name>/telegram`; a list or `true` to use `highlight_meters`; empty forwards everything |
+| `publish_rssi` | `false` | public | publish each meter's latest frame RSSI on `wmbus/<topic_name>/rssi/<meter_id>`; see below |
+| `receiver_task_stack_size` | `3072` | advanced | separate RX task stack size; range `2048..16384` |
+| `listen_mode_filter_after_parse` | `false` | experimental | more aggressive filtering after parsing; evaluate per meter, not just by the global drop percentage |
+| `use_noise_floor_threshold` | `false` | experimental | derive the weak-start abort threshold from the MEASURED noise floor instead of the average of successful receptions; `noise_floor_dbm` is always measured, this option only uses it |
+| `noise_floor_margin_db` | `6` | experimental | required start level above the noise floor in dB (0–30); only applies with `use_noise_floor_threshold: true` |
+| `highlight_ansi` | `false` | public | ANSI colours for highlighted meters in the log |
+| `highlight_tag` | `wmbus_user` | public | log tag for highlighted meters |
+| `highlight_prefix` | `"★ "` | public | prefix of a highlighted meter's log line |
+| `allow_untested_framework` | `false` | safety gate | required to build with the `arduino` framework; compilation otherwise stops |
+| `mark_as_handled` | `false` | public | option inside `on_frame:`; marks the frame as handled |
 
-## Listen modes and frequency / tryby nasłuchu i częstotliwość
+## Listen modes and frequency
 
-| Tryb | Znaczenie | Domyślna częstotliwość | Uwagi |
+| Mode | Meaning | Default frequency | Notes |
 |---|---|---:|---|
-| `t1` | T1 only / tylko T1 | `868.950 MHz` | standardowy tryb dla wielu liczników |
-| `c1` | C1 only / tylko C1 | `868.950 MHz` | osobny odbiór C1 |
-| `both` | T1/C1 only / tylko T1/C1 | `868.950 MHz` | nie obejmuje S1 |
-| `s1` | S1 only / tylko S1 | `868.300 MHz` | eksperymentalny tryb diagnostyczny/kompatybilności |
+| `t1` | T1 only | `868.950 MHz` | standard mode for many meters |
+| `c1` | C1 only | `868.950 MHz` | separate C1 reception |
+| `both` | T1/C1 only | `868.950 MHz` | does not include S1 |
+| `s1` | S1 only | `868.300 MHz` | experimental diagnostic/compatibility mode |
 
-`frequency:` jest opcjonalnym override. Jeśli go nie podasz, komponent wybiera default na podstawie trybu. Przykład override dla testów S1:
+`frequency:` is an optional override. If omitted, the component selects the default for the mode. An override for S1 testing:
 
 ```yaml
 wmbus_radio:
@@ -39,134 +41,100 @@ wmbus_radio:
   frequency: 868.36
 ```
 
-Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo jak poprawne telegramy T1/C1. To nie oznacza dekodowania wartości licznika na ESP; tym nadal zajmuje się backend, np. `wmbusmeters`.
+A valid S1 telegram is published on `wmbus/<topic_name>/telegram` just like valid T1/C1 telegrams. This does not mean the ESP decodes meter values; the backend, such as `wmbusmeters`, still does that.
 
-## Radio-specific options / opcje zależne od radia
+## Radio-specific options
 
-| Opcja | Radio | Domyślnie | Status | Opis |
+| Option | Radio | Default | Status | Description |
 |---|---|---:|---|---|
-| `has_tcxo` | `SX1262` | `false` | public | włącz dla płytek SX1262 z TCXO; brak może dawać objaw „Radio active, ale brak ramek” |
-| `dio2_rf_switch` | `SX1262` | `true` | public | sterowanie przełącznikiem RF przez DIO2 |
-| `rx_gain` | `SX1262` | `boosted` | public | `boosted` albo `power_saving` |
-| `long_gfsk_packets` | `SX1262` | `false` | public | zalecane dla długich ramek T1; brak może powodować ucinanie/dropy |
-| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | public | `312khz` (domyślne, odziedziczone, niezmierzone dla T1), `234khz`, `156khz`. Działa dla `listen_mode: t1` **i `both`**; `c1` oraz `s1` ignorują — ich 234,3 kHz jest zmierzone i przypięte |
-| `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | brak | board-specific | piny zewnętrznego front-endu RF, np. Heltec V4 |
-| `rf_sw_pin` | `SX1262` | brak | board-specific | bramka wewnętrznego przełącznika RF modułu; wymagane na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), inaczej czułość niższa o ~30 dB |
-| `sx1276_busy_ether_mode` | `SX1276` | `normal` | public | `normal`, `aggressive`, `adaptive`; podnosić dopiero przy **zmierzonym** przeciążeniu (`fifo_overrun`/`truncated` > 0) — `adaptive` przerywa słabe starty i kosztuje ok. 12 dB czułości |
-| `tcxo_pin` | `SX1276` | brak | board-specific | opcjonalny pin TCXO enable; ustawiany HIGH przed inicjalizacją SX1276 |
-| `busy_pin` | `SX1262`, `LR1121` | wymagane | public | linia BUSY; bez niej sterownik nie odróżni „jeszcze nie gotowy" od „odpowiedział" |
-| `rf_switch` | `SX1262` | brak | board-specific | wymuszenie stanu przełącznika RF; ustawiaj tylko gdy dokumentacja płytki tego wymaga |
-| `clear_device_errors_on_boot` | `SX1262` | `false` | advanced | kasuj rejestr błędów układu przy starcie; **zalecane na płytkach z TCXO** — bez tego `XOSC_START_ERR` jest tam zapalone zawsze i nic nie znaczy |
-| `publish_dev_err_after_clear` | `SX1262` | `false` | advanced | opublikuj ponownie odczytany stan błędów po skasowaniu; jedyny sposób, by zobaczyć go na węźle, który nic nie odbiera |
-| `cc1101_allow_experimental` | `CC1101` | `false` | safety gate | wymagane do uruchomienia CC1101 |
-| `gdo0_pin`, `gdo2_pin` | `CC1101` | wymagane | public | dual IRQ; single-IRQ CC1101 nie jest wspierany |
-| `spi_data_rate` | wszystkie | `2000000` (2 MHz) | advanced | zegar SPI **tego urządzenia**, nie całej magistrali. Obniż, zanim zaczniesz podejrzewać układ: moduł na przewodach dupont potrafi gubić bity przy 2 MHz nawet na zdrowych 3,3 V, a objaw jest cichy — rejestry odczytują się jako wartości domyślne i radio zachowuje się jak źle skonfigurowane. Sprawdź `reg_write_retries` w linii `CC1101 debug status`: wartość > 0 to dowód, że magistrala przekłamuje |
-| `lr1121_allow_experimental` | `LR1121` | `false` | safety gate | wymagane do uruchomienia LR1121 |
-| `tcxo_voltage` | `LR1121`, `SX1262` | `3.0v` | public | napięcie TCXO modułu; DIO3 w SX1262 to wyjście regulowane z chipu, więc złe napięcie to realne ryzyko dla TCXO, nie kosmetyka |
-| `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | czas rozruchu TCXO w taktach 32,768 kHz (~91,6 ms) |
-| `rx_bandwidth` | `LR1121` | `234300` | advanced | szerokość pasma RX w Hz |
-| `min_preamble_bits` | `SX1262`, `SX1276`, `LR1121` | `16` | advanced | ile bitów preambuły radio musi zobaczyć, zanim zacznie odbiór. **Dla `listen_mode: t1` i `both` maksimum to 16** — preambuła T1 jest krótsza niż 24 bity, więc `24` i `32` dają zero odebranych ramek (zmierzone: 184 wyzwolenia, 0 ramek) i są odrzucane przy walidacji. `8` działa, ale kosztuje ok. 16% słyszanych liczników. Na `SX1276` nie ma wartości `32`. Nie mylić z długością preambuły nadawanej — to osobne pole `SetPacketParams`, nieustawiane z YAML-a |
-| `payload_length` | `LR1121` | `255` | advanced | długość stałego przechwycenia T1; host przycina telegram według zdekodowanego L-field |
-| `rx_boosted` | `LR1121` | `true` | advanced | +2 dB czułości kosztem ok. 2 mA |
-| `bitrate` | `LR1121` | `100000` | advanced | bitrate GFSK |
-| `deviation` | `LR1121` | `50000` | advanced | dewiacja GFSK |
+| `has_tcxo` | `SX1262` | `false` | public | enable on SX1262 boards with a TCXO; omitting it may leave the radio active but receiving no frames |
+| `dio2_rf_switch` | `SX1262` | `true` | public | control the RF switch through DIO2 |
+| `rx_gain` | `SX1262` | `boosted` | public | `boosted` or `power_saving` |
+| `long_gfsk_packets` | `SX1262` | `false` | public | for long T1 frames; disabling it may truncate/drop them |
+| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | public | `312khz` (inherited default, unmeasured for T1), `234khz`, `156khz`. Applies to `listen_mode: t1` **and `both`**; ignored by `c1` and `s1`, whose measured 234.3 kHz setting is fixed |
+| `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | none | board-specific | external RF front-end pins, e.g. Heltec V4 |
+| `rf_sw_pin` | `SX1262` | none | board-specific | module RF-switch gate; required on XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), otherwise sensitivity is about 30 dB lower |
+| `sx1276_busy_ether_mode` | `SX1276` | `normal` | public | `normal`, `aggressive`, `adaptive`; increase only for **measured** overload (`fifo_overrun`/`truncated` > 0); `adaptive` aborts weak starts and costs about 12 dB of sensitivity |
+| `tcxo_pin` | `SX1276` | none | board-specific | optional TCXO-enable pin, driven HIGH before SX1276 initialization |
+| `busy_pin` | `SX1262`, `LR1121` | required | public | BUSY line; without it the driver cannot distinguish “not ready yet” from a response |
+| `rf_switch` | `SX1262` | none | board-specific | force RF-switch state; use only when required by the board documentation |
+| `clear_device_errors_on_boot` | `SX1262` | `false` | advanced | clear device errors at startup; **recommended on TCXO boards**, where `XOSC_START_ERR` otherwise stays set and conveys no useful information |
+| `publish_dev_err_after_clear` | `SX1262` | `false` | advanced | publish errors read back after clearing; the only way to see them on a node receiving no frames |
+| `cc1101_allow_experimental` | `CC1101` | `false` | safety gate | required to start CC1101 |
+| `gdo0_pin`, `gdo2_pin` | `CC1101` | required | public | dual IRQ; single-IRQ CC1101 is unsupported |
+| `spi_data_rate` | all | `2000000` (2 MHz) | advanced | SPI clock for **this device**, not the whole bus. Lower it before suspecting the chip: a module on jumper wires can lose bits at 2 MHz even with a healthy 3.3 V supply. Registers may read as defaults and the radio may appear misconfigured. Check `reg_write_retries` in `CC1101 debug status`: a value above zero shows failed write-back verification |
+| `lr1121_allow_experimental` | `LR1121` | `false` | safety gate | required to start LR1121 |
+| `tcxo_voltage` | `LR1121`, `SX1262` | `3.0v` | public | module TCXO voltage; SX1262 DIO3 is a regulated output, so the wrong voltage is a real TCXO risk |
+| `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | TCXO startup delay in 32.768 kHz ticks (~91.6 ms) |
+| `rx_bandwidth` | `LR1121` | `234300` | advanced | RX bandwidth in Hz |
+| `min_preamble_bits` | `SX1262`, `SX1276`, `LR1121` | `16` | advanced | preamble bits required before reception starts. **Maximum 16 for `listen_mode: t1` and `both`**: the T1 preamble is shorter than 24 bits, so `24`/`32` decode no frames (measured: 184 triggers, 0 frames) and fail validation. `8` works but costs about 16% of meters heard. SX1276 has no `32` setting. This is not the transmitted preamble length, a separate `SetPacketParams` field not exposed in YAML |
+| `payload_length` | `LR1121` | `255` | advanced | fixed T1 capture length; the host trims the telegram using the decoded L-field |
+| `rx_boosted` | `LR1121` | `true` | advanced | +2 dB sensitivity at a cost of about 2 mA |
+| `bitrate` | `LR1121` | `100000` | advanced | GFSK bitrate |
+| `deviation` | `LR1121` | `50000` | advanced | GFSK deviation |
 
-`tcxo_pin` dotyczy tylko SX1276. Dla SX1262 używaj `has_tcxo`.
+`tcxo_pin` is SX1276-only. Use `has_tcxo` for SX1262.
 
-`rf_sw_pin` to nie to samo co `dio2_rf_switch`. DIO2 wybiera kierunek TX/RX wewnątrz układu; `rf_sw_pin` otwiera bramkę przełącznika RF w module i decyduje, czy tor antenowy w ogóle przewodzi. Na płytkach, które tego wymagają, potrzebne są obie opcje.
+`rf_sw_pin` and `dio2_rf_switch` serve different purposes. DIO2 selects the TX/RX direction inside the chip; `rf_sw_pin` opens the module's RF-switch gate, allowing the antenna path to conduct. Boards that require it need both options.
 
-`wmbus_radio` nie zgaduje okablowania płytki. Opcje takie jak TCXO, RF switch i FEM muszą wynikać ze schematu płytki albo dokumentacji producenta.
+`wmbus_radio` does not guess board wiring. TCXO, RF-switch and FEM options must follow the board schematic or manufacturer documentation.
 
-## MQTT topics / topiki MQTT
+## MQTT topics
 
-Preferuj `topic_name`.
+Prefer `topic_name`.
 
-| Topik | Skąd się bierze | Uwagi |
+| Topic | Source | Notes |
 |---|---|---|
-| `wmbus/<topic_name>/telegram` | każda poprawna ramka (lub tylko `forward_meters`) | główny output dla bridge/wmbusmeters |
-| `wmbus/<topic_name>/rx` | ta sama poprawna ramka co na `telegram` | strukturalne metadane odbioru; QoS 1, bez retain |
-| `wmbus/<topic_name>/rx` | ta sama poprawna ramka co na `telegram` | strukturalne metadane odbioru; QoS 1, bez retain |
-| `wmbus/<topic_name>/diag` | drop/rx_path eventy + kopia boot event | root diag, bez retain |
-| `wmbus/<topic_name>/diag/summary` | co `diagnostic_summary_interval` | globalne summary |
-| `wmbus/<topic_name>/diag/summary_15min` | co 15 min | `normal`+ |
-| `wmbus/<topic_name>/diag/summary_60min` | co 60 min | tylko `dev`, chyba że wymusisz stare flagi |
-| `wmbus/<topic_name>/diag/meter_snapshot` | snapshot liczników | `normal`+ z `highlight_meters`; w `dev` wszystkie |
-| `wmbus/<topic_name>/diag/boot` | raz po starcie | `retain=true`; boot idzie też jako kopia do root `diag` bez retain |
-| `wmbus/<topic_name>/diag/config` | raz po starcie | `retain=true`; snapshot efektywnej konfiguracji (`{radio, lines[]}`) - konsumowany przez panel diagnostyczny dodatku |
-| `wmbus/<topic_name>/diag/suggestion` | wykryta anomalia RF | sugestie diagnostyczne |
-| `wmbus/<topic_name>/diag/busy_ether_changed` | zmiana stanu busy-ether | SX1276 + `adaptive` |
-| `wmbus/<topic_name>/rssi/<meter_id>` | ramka z realnym pomiarem RSSI | tylko przy `publish_rssi: true`; `retain=true` |
+| `wmbus/<topic_name>/telegram` | every valid frame (or only `forward_meters`) | main output for the bridge/wmbusmeters |
+| `wmbus/<topic_name>/rx` | the same valid frame as `telegram` | structured reception metadata; default QoS 1, no retain |
+| `wmbus/<topic_name>/diag` | drop/rx_path events and a copy of the boot event | diagnostic root, no retain |
+| `wmbus/<topic_name>/diag/summary` | every `diagnostic_summary_interval` | global summary |
+| `wmbus/<topic_name>/diag/summary_15min` | every 15 minutes | `normal` and above |
+| `wmbus/<topic_name>/diag/summary_60min` | every 60 minutes | `dev` only, unless legacy flags override it |
+| `wmbus/<topic_name>/diag/meter_snapshot` | meter snapshot | `normal` and above with `highlight_meters`; all meters in `dev` |
+| `wmbus/<topic_name>/diag/boot` | once after startup | `retain=true`; also copied to root `diag` without retain |
+| `wmbus/<topic_name>/diag/config` | once after startup | `retain=true`; effective configuration snapshot (`{radio, lines[]}`), used by the add-on diagnostic panel |
+| `wmbus/<topic_name>/diag/suggestion` | detected RF anomaly | diagnostic suggestions |
+| `wmbus/<topic_name>/diag/busy_ether_changed` | busy-ether state transition | SX1276 with `adaptive` |
+| `wmbus/<topic_name>/rssi/<meter_id>` | frame with a real RSSI measurement | only with `publish_rssi: true`; `retain=true` |
 
-### Structured RX metadata / strukturalne metadane RX
+### Structured RX metadata
 
-Każdemu telegramowi dopuszczonemu przez `forward_meters` towarzyszy komunikat
-JSON na `wmbus/<topic_name>/rx`. Nie zastępuje on HEX-a na `telegram` i nie
-zawiera zdekodowanej wartości licznika. ESP nadal wyłącznie odbiera i
-kwalifikuje ramkę RF; zapis do bazy pozostaje zadaniem backendu.
+Every telegram admitted by `forward_meters` has a companion JSON message on
+`wmbus/<topic_name>/rx`. It does not replace the HEX on `telegram` or contain
+decoded meter values. The ESP still only receives and validates RF frames;
+database storage belongs to the backend.
 
-Payload schematu 1 zawiera:
+Schema 1 contains:
 
-- `boot_id` — identyfikator bieżącego uruchomienia ESP;
-- `seq` — wspólny dla źródła, rosnący numer poprawnej ramki;
-- `rx_task_wakeup_us` — czas `esp_timer` od uruchomienia, pobrany gdy task RX
-  obudził się po IRQ; nie jest to znacznik początku transmisji ani dokładnego
-  zdarzenia `RX_DONE`;
-- `meter_id`, `mode` (`T1`, `C1` albo `S1`) i `rssi_dbm` (`null`, gdy sterownik
-  nie dostarczył rzeczywistego pomiaru);
-- `received_at` — czas ODBIORU ramki w ISO-8601 UTC z milisekundami; pole
-  nieobecne, dopóki zegar płytki nie jest ustawiony (po restarcie, zanim
-  odpowie SNTP)
-- `frame_crc32` — IEEE CRC32 końcowych, znormalizowanych bajtów ramki, które są
-  publikowane jako HEX;
-- `frame_length` — liczba tych bajtów.
+- `boot_id` — identifier of the current ESP boot;
+- `seq` — an increasing valid-frame sequence number shared by the source;
+- `rx_task_wakeup_us` — `esp_timer` uptime sampled when the RX task wakes after
+  the IRQ; not the transmission start or the precise `RX_DONE` instant;
+- `meter_id`, `mode` (`T1`, `C1` or `S1`) and `rssi_dbm` (`null` if the
+  driver provided no real measurement);
+- `received_at` — RECEPTION time in ISO-8601 UTC with milliseconds; absent
+  until the board clock is set, such as after reboot before SNTP responds;
+- `frame_crc32` — IEEE CRC32 of the final normalized frame bytes published as HEX;
+- `frame_length` — the number of those bytes.
 
-`/rx` jest publikowany z QoS 1 i `retain=false`. `seq` zwiększa się także dla
-poprawnych ramek odebranych podczas braku połączenia MQTT, więc następny
-opublikowany komunikat może ujawnić lukę. Luka wskazuje brak zdarzeń na
-ścieżce ESP→broker→subskrybent, ale sama nie rozstrzyga, na którym odcinku
-powstała. Zmiana `boot_id` rozpoczyna nową domenę numeracji.
+`/rx` defaults to QoS 1 (`rx_qos`) and uses `retain=false`. `seq` also increases
+for valid frames received while MQTT is disconnected, so the next published
+message may reveal a gap. A gap indicates missing events along the
+ESP→broker→subscriber path, but alone does not identify which segment lost them.
+A new `boot_id` starts a new sequence domain.
 
-### Structured RX metadata / strukturalne metadane RX
+Legacy/manual overrides:
 
-Każdemu telegramowi dopuszczonemu przez `forward_meters` towarzyszy komunikat
-JSON na `wmbus/<topic_name>/rx`. Nie zastępuje on HEX-a na `telegram` i nie
-zawiera zdekodowanej wartości licznika. ESP nadal wyłącznie odbiera i
-kwalifikuje ramkę RF; zapis do bazy pozostaje zadaniem backendu.
-
-Payload schematu 1 zawiera:
-
-- `boot_id` — identyfikator bieżącego uruchomienia ESP;
-- `seq` — wspólny dla źródła, rosnący numer poprawnej ramki;
-- `rx_task_wakeup_us` — czas `esp_timer` od uruchomienia, pobrany gdy task RX
-  obudził się po IRQ; nie jest to znacznik początku transmisji ani dokładnego
-  zdarzenia `RX_DONE`;
-- `meter_id`, `mode` (`T1`, `C1` albo `S1`) i `rssi_dbm` (`null`, gdy sterownik
-  nie dostarczył rzeczywistego pomiaru);
-- `received_at` — czas ODBIORU ramki w ISO-8601 UTC z milisekundami; pole
-  nieobecne, dopóki zegar płytki nie jest ustawiony (po restarcie, zanim
-  odpowie SNTP)
-- `frame_crc32` — IEEE CRC32 końcowych, znormalizowanych bajtów ramki, które są
-  publikowane jako HEX;
-- `frame_length` — liczba tych bajtów.
-
-`/rx` jest publikowany z QoS 1 i `retain=false`. `seq` zwiększa się także dla
-poprawnych ramek odebranych podczas braku połączenia MQTT, więc następny
-opublikowany komunikat może ujawnić lukę. Luka wskazuje brak zdarzeń na
-ścieżce ESP→broker→subskrybent, ale sama nie rozstrzyga, na którym odcinku
-powstała. Zmiana `boot_id` rozpoczyna nową domenę numeracji.
-
-Legacy/manual override:
-
-| Opcja | Status | Uwagi |
+| Option | Status | Notes |
 |---|---|---|
-| `telegram_topic` | legacy | ręczny override, preferuj `topic_name` |
-| `diagnostic_topic` | legacy | ręczny override, preferuj `topic_name` |
+| `telegram_topic` | legacy | manual override; prefer `topic_name` |
+| `diagnostic_topic` | legacy | manual override; prefer `topic_name` |
 
-## Forwarding whitelist / whitelista przekazywania
+## Forwarding whitelist
 
-`forward_meters` ogranicza to, co trafia na `wmbus/<topic_name>/telegram`. Typowe
-zastosowanie: w eterze słychać dziesiątki liczników sąsiadów, a na brokera mają iść
-tylko własne.
+`forward_meters` restricts what reaches `wmbus/<topic_name>/telegram`. A common
+use is hearing dozens of neighbours' meters but forwarding only your own.
 
 ```yaml
 wmbus_radio:
@@ -175,8 +143,7 @@ wmbus_radio:
     - 77665544
 ```
 
-Jeżeli te same liczniki masz już w `highlight_meters`, nie przepisuj ich drugi raz —
-`true` bierze listę stamtąd:
+If those meters are already in `highlight_meters`, use `true` to reuse the list:
 
 ```yaml
 wmbus_radio:
@@ -186,34 +153,30 @@ wmbus_radio:
   forward_meters: true
 ```
 
-- Puste (domyślnie) albo `false` = zachowanie jak wcześniej, publikowane jest wszystko.
-- `forward_meters: true` przy pustym `highlight_meters` **nie** wycisza strumienia:
-  filtr się nie włącza, a w logu startowym pojawia się ostrzeżenie.
-- Wpisuj ID dokładnie tak, jak pokazuje log — to ten sam zapis, którego używa
-  `highlight_meters`:
-  - `id:44332211` → `- 44332211` (licznik BCD, zapis dziesiętny),
-  - `id:417F0666` → `- "0x417F0666"` (licznik nie-BCD, np. Diehl/IZAR).
-- **Wpisy szesnastkowe ujmuj w cudzysłów.** Bez niego YAML sam zamieni `0x417F0666` na
-  liczbę `1098843750` i wpis trafiłby na listę dziesiętną, gdzie nigdy z niczym nie
-  zrówna. Taki przypadek jest wykrywany przy kompilacji i kończy się błędem
-  z podpowiedzią, nie cichym pominięciem.
-- Rozróżnienie jest jednoznaczne i nie wymaga wiedzy, który licznik jest który: A-field
-  spoza BCD zawsze zawiera cyfrę A–F, a ID w BCD nigdy. Wpis czysto cyfrowy znaczy więc
-  „dziesiętne", wpis z literami — „surowe".
-- Formy `0x` można użyć również dla licznika BCD (`"0x00088888"` = `88888`), bo surowa
-  postać istnieje dla każdego licznika.
-- Po starcie log pokazuje sparsowane ID i to, czy przyszły z `highlight_meters`; stan
-  filtra jest też w `dump_config()` jako `Forward whitelist:`.
-- Filtr działa **po** dekodowaniu i sprawdzeniu DLL CRC, więc dopasowuje ID, które
-  parser już zweryfikował.
-- Diagnostyka liczy dalej **cały** eter: summary i statystyki RSSI powstają przed
-  publikacją, więc widoczność sąsiedztwa zostaje. Obcinany jest sam strumień RAW.
-- `target_meter_id` ma własny topic i **nie** podlega whiteliście.
+- Empty (default) or `false` preserves the previous behaviour: forward everything.
+- `forward_meters: true` with empty `highlight_meters` **does not** silence the
+  stream: the filter stays disabled and a startup warning is logged.
+- Enter IDs exactly as the log shows them, using the same notation as `highlight_meters`:
+  - `id:44332211` → `- 44332211` (BCD meter, decimal notation),
+  - `id:417F0666` → `- "0x417F0666"` (non-BCD meter, e.g. Diehl/IZAR).
+- **Quote hexadecimal entries.** Otherwise YAML converts `0x417F0666` to
+  `1098843750`, which would enter the decimal list and never match. Validation
+  detects this and reports an error with guidance instead of silently ignoring it.
+- No knowledge of the meter type is needed: a non-BCD A-field always contains
+  A–F, whereas a BCD ID never does. Digits alone mean decimal; letters mean raw.
+- The `0x` form also works for BCD meters (`"0x00088888"` = `88888`), because
+  every meter has a raw representation.
+- At startup the log shows parsed IDs and whether they came from
+  `highlight_meters`; `dump_config()` also shows `Forward whitelist:`.
+- Filtering runs **after** decoding and DLL CRC verification, using parser-validated IDs.
+- Diagnostics still count **all** RF traffic: summaries and RSSI statistics are
+  updated before publishing. Only the forwarded RAW stream is restricted.
+- `target_meter_id` has its own topic and is **not** subject to this whitelist.
 
-## RSSI per licznik / per-meter RSSI
+## Per-meter RSSI
 
-`publish_rssi` (domyślnie `false`) publikuje siłę sygnału **ostatniej ramki danego
-licznika**, osobno dla każdej płytki:
+`publish_rssi` (default `false`) publishes the signal strength of **each meter's
+latest frame**, separately for each board:
 
 ```yaml
 wmbus_radio:
@@ -224,38 +187,38 @@ wmbus_radio:
 wmbus/<topic_name>/rssi/<meter_id>    payload: -52
 ```
 
-- Payload to sama liczba całkowita w dBm, bez JSON-a; `retain=true`.
-- Publikowane są wyłącznie ramki z **rzeczywistym pomiarem**. Gdy sterownik nie
-  zatrzasnął RSSI dla danej ramki, nie wysyłamy nic — żadnych sentineli w rodzaju
-  `0`, `1` czy `-127`, bo odbiorca nie ma jak odróżnić ich od odczytu.
-- Wartość pochodzi z pomiaru zrobionego przy odbiorze tej ramki (SX1276 przy
-  pierwszym bajcie, SX1262/LR1121 na sync-word, CC1101 przy odczycie) — nie jest
-  to średnia z okna ani pomiar szumu po odbiorze.
-- Whitelista `forward_meters` obowiązuje tak samo jak dla telegramów: co nie idzie
-  na `telegram`, nie ma też publikowanego RSSI.
-- Po stronie dodatku **wMBus MQTT Bridge** każda płytka daje własną encję
-  `signal_strength` dla tego samego licznika, więc dwa odbiorniki da się porównać.
+- The payload is an integer in dBm, without JSON; `retain=true`.
+- Only frames with a **real measurement** are published. If the driver did not
+  latch RSSI for that frame, nothing is sent: no `0`, `1` or `-127` sentinel
+  that a consumer could mistake for a reading.
+- The value is measured during reception (SX1276 at the first byte,
+  SX1262/LR1121 at the sync word, CC1101 during readout), not a window average
+  or noise measurement after reception.
+- The `forward_meters` whitelist applies just as it does to telegrams:
+  a frame excluded from `telegram` also has no RSSI publication.
+- In the **wMBus MQTT Bridge** add-on, each board provides its own
+  `signal_strength` entity for a meter, allowing receiver comparisons.
 
-**Czego RSSI nie mówi.** Opisuje wyłącznie ramki, które **dotarły i się
-zdekodowały**. Licznik na granicy zasięgu, z którego przechodzi co dziesiąta
-ramka, pokaże „lepsze" RSSI niż stabilny sąsiad, bo do statystyki trafiają tylko
-jego najlepsze próby. Do pytania „czy ten licznik dochodzi" właściwym wskaźnikiem
-jest statystyka odbioru 15/60 min, nie RSSI.
+**What RSSI cannot tell you.** It describes only frames that **arrived and
+decoded**. A marginal meter with one frame in ten getting through can appear
+to have better RSSI than a stable neighbour: only its best attempts enter the
+statistics. Use 15/60-minute reception statistics to judge whether a meter
+is getting through, rather than RSSI alone.
 
-## Advanced/dev-only
+## Advanced/development-only
 
-| Opcja | Domyślnie | Status | Opis |
+| Option | Default | Status | Description |
 |---|---:|---|---|
-| `target_meter_id` | `""` | advanced | osobne przekierowanie jednego licznika |
-| `target_topic` | `""` | advanced | topic dla `target_meter_id` |
-| `target_log` | `true` | advanced | logowanie trafień target meter |
-| `publish_radio_raw` | `false` | dev-only | surowy tap radiowy na stałym topicu `wmbus_bridge/raw`; nie mylić z normalnym telegramem |
-| `diagnostic_publish_suggestion` | z presetu `diagnostic_mode` | advanced | publikuj zdarzenia `suggestion` (podpowiedzi diagnostyczne), dławione do jednej na godzinę na kod; jawne `true`/`false` nadpisuje preset |
+| `target_meter_id` | `""` | advanced | separate forwarding of one meter |
+| `target_topic` | `""` | advanced | topic for `target_meter_id` |
+| `target_log` | `true` | advanced | log target-meter matches |
+| `publish_radio_raw` | `false` | dev-only | raw radio tap on the fixed `wmbus_bridge/raw` topic; different from a normal telegram |
+| `diagnostic_publish_suggestion` | from `diagnostic_mode` preset | advanced | publish `suggestion` events, throttled to one per hour per code; explicit `true`/`false` overrides the preset |
 
-## Deprecated diagnostic aliases / stare aliasy
+## Deprecated diagnostic aliases
 
 `medium` → `normal`
 
 `full` / `raw` → `dev`
 
-Stare flagi `diagnostic_publish_*` zostają tylko dla kompatybilności i wyjątkowych testów.
+Legacy `diagnostic_publish_*` flags remain for compatibility and exceptional tests.

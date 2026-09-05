@@ -1,5 +1,7 @@
 # Migration note
 
+[Polska wersja](MIGRATION_PL.md)
+
 If you previously used one of these old external component lists:
 
 ```yaml

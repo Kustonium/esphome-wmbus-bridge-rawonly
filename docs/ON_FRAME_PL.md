@@ -1,5 +1,7 @@
 # Automatyzacja on_frame
 
+[English version](ON_FRAME.md)
+
 `on_frame` to opcjonalny trigger automatyzacji ESPHome, który odpala się za każdym razem
 gdy radio odbierze poprawną, przeszłą CRC ramkę wMBus. Daje bezpośredni dostęp do
 surowych bajtów ramki wewnątrz bloku `lambda:` — przed (lub zamiast) wbudowanym

@@ -1,63 +1,55 @@
-# Support / Wsparcie
+# Support
 
-This project is maintained in spare time and is not a general support desk.  
-Ten projekt jest rozwijany po godzinach i nie jest ogólnym helpdeskiem.
+[Polska wersja](SUPPORT_PL.md)
 
-## Before opening an issue / Zanim otworzysz issue
+This project is maintained in spare time and is not a general support desk.
 
-Read / Przeczytaj:
+## Before opening an issue
 
-- [`README.md`](README.md)
-- [`docs/START_HERE.md`](docs/START_HERE.md) / [`docs/START_HERE_PL.md`](docs/START_HERE_PL.md)
-- [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) / [`docs/TROUBLESHOOTING_PL.md`](docs/TROUBLESHOOTING_PL.md)
-- [`docs/DIAGNOSTIC.md`](docs/DIAGNOSTIC.md) / [`docs/DIAGNOSTIC_PL.md`](docs/DIAGNOSTIC_PL.md)
-- [`docs/RADIO_OPTIONS_MINIMAL.md`](docs/RADIO_OPTIONS_MINIMAL.md)
-- [`docs/CHIP_SELECTION.md`](docs/CHIP_SELECTION.md) / [`docs/CHIP_SELECTION_PL.md`](docs/CHIP_SELECTION_PL.md)
-- [`examples/README.md`](examples/README.md) / [`examples/README_PL.md`](examples/README_PL.md)
+Read:
 
-## Open an issue for / Otwórz issue dla
+- [README](README.md)
+- [Start here](docs/START_HERE.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Diagnostics](docs/DIAGNOSTIC.md)
+- [Radio options](docs/RADIO_OPTIONS_MINIMAL.md)
+- [Chip selection](docs/CHIP_SELECTION.md)
+- [Examples](examples/README.md)
 
-- reproducible bugs in `wmbus_radio`  
-  powtarzalnych błędów w `wmbus_radio`
-- regressions between versions  
-  regresji między wersjami
-- broken examples from this repository  
-  zepsutych przykładów z tego repo
-- documentation mistakes  
-  błędów w dokumentacji
+## Open an issue for
 
-## Do not open an issue for / Nie otwieraj issue dla
+- reproducible bugs in `wmbus_radio`,
+- regressions between versions,
+- broken examples from this repository,
+- documentation mistakes.
 
-- general ESPHome help  
-  ogólnej pomocy z ESPHome
-- general Home Assistant help  
-  ogólnej pomocy z Home Assistant
-- MQTT basics, TLS setup or remote broker configuration  
-  podstaw MQTT, konfiguracji TLS albo zdalnego brokera
-- random YAML from forums  
-  przypadkowych YAML-i z forów
-- “it does not work” without logs and versions  
-  zgłoszeń typu „nie działa” bez logów i wersji
+## Do not open an issue for
 
-## If you report a bug, include / Jeśli zgłaszasz błąd, dodaj
+- general ESPHome help,
+- general Home Assistant help,
+- MQTT basics, TLS setup or remote broker configuration,
+- random YAML from forums,
+- “it does not work” without logs and versions.
 
-- board / hardware
-- radio type (`SX1262`, `SX1276` or `CC1101`)
-- ESPHome version
-- project version / release / commit
-- relevant YAML
-- startup log including the radio sanity report
-- `Have data / odebrano dane` lines if RX works locally
-- MQTT errors if publishing fails
-- diagnostic output if relevant
-- for RX problems: `summary` plus at least one `dropped` / `truncated` event if available
-- expected behavior
-- actual behavior
+## If you report a bug, include
 
-## Scope reminder / Przypomnienie zakresu
+- board / hardware,
+- radio type (`SX1262`, `SX1276`, `CC1101` or `LR1121`),
+- ESPHome version,
+- project version / release / commit,
+- relevant YAML,
+- startup log including the radio sanity report,
+- `Have data / odebrano dane` lines if RX works locally,
+- MQTT errors if publishing fails,
+- diagnostic output if relevant,
+- for RX problems: `summary` plus at least one `dropped` / `truncated` event if available,
+- expected behaviour,
+- actual behaviour.
 
-This project is intentionally **RAW-only** and does not aim to replace `wmbusmeters` on the ESP.  
-Ten projekt jest celowo **RAW-only** i nie ma zastępować `wmbusmeters` na ESP.
+## Scope reminder
 
-MQTT connection details, including TLS certificates and remote brokers, belong to ESPHome's standard `mqtt:` component. `wmbus_radio` only publishes when the MQTT client is connected and keeps radio reception running when MQTT is unavailable.  
-Szczegóły połączenia MQTT, w tym certyfikaty TLS i zdalne brokery, należą do standardowego komponentu `mqtt:` ESPHome. `wmbus_radio` tylko publikuje, gdy klient MQTT jest połączony, i utrzymuje odbiór radiowy, gdy MQTT jest niedostępne.
+This project is intentionally **RAW-only** and does not aim to replace `wmbusmeters` on the ESP.
+
+MQTT connection details, including TLS certificates and remote brokers, belong
+to ESPHome's standard `mqtt:` component. `wmbus_radio` only publishes when the
+MQTT client is connected and keeps radio reception running when MQTT is unavailable.

@@ -1,165 +1,61 @@
-# Nowe funkcje w komponencie `wmbus_radio` — lista przed uruchomieniem
+# Bufor MQTT w RAM, QoS per temat i znacznik czasu odbioru
 
-Migracja z `SzczepanLeon/esphome-components@version_4` na
-`Kustonium/esphome-wmbus-bridge-rawonly`, plus zmiany dodane na Twoją
-prośbę. Wszystkie poniższe funkcje są **wyłączone lub ustawione na
-zachowanie identyczne ze stanem sprzed zmian**, jeśli nic nie wpiszesz w
-YAML — nic nie zaskoczy Cię "domyślnie włączone".
+[English version](BUFFER_QOS_TIMESTAMP.md)
 
----
+Ten dokument opisuje trzy elementy przygotowane przy migracji odbiornika
+z `SzczepanLeon/esphome-components@version_4` do mostu RAW-only:
 
-## 1. Bufor RAM na wypadek rozłączenia MQTT (`mqtt_buffer_size`)
+1. bufor RAM przechowujący wiadomości podczas rozłączenia MQTT i wysyłający je po powrocie połączenia,
+2. QoS MQTT (0/1/2) konfigurowalny w YAML dla poszczególnych grup tematów,
+3. potwierdzenie, że znacznik czasu odbioru już towarzyszy RSSI — nowe pole nie było potrzebne.
 
-**Problem, który rozwiązuje:** wcześniej, gdy lokalny broker był
-niedostępny, odbiór RF trwał dalej, ale każda publikacja MQTT była po
-prostu pomijana — telegram ginął bezpowrotnie, a nie był opóźniony.
+## 1. Bufor RAM (`mqtt_buffer_size`)
 
-**Co robi:** buforuje w RAM (pierścień FIFO) publikację surowego telegramu
-(`.../telegram`) oraz towarzyszący jej JSON (`.../rx`, RSSI + timestamp —
-patrz punkt 3) na czas rozłączenia. Po powrocie MQTT wysyła zaległe w
-kolejności, po kilka wiadomości na cykl `loop()`, żeby nie zagłodzić
-odbioru radiowego.
+Przed tą zmianą odbiór RF trwał podczas niedostępności lokalnego brokera,
+ale publikacje MQTT były pomijane. Telegram ginął, zamiast zostać opóźniony.
 
-**Celowo NIE buforowane:** retained RSSI per licznik, puls health/meters,
-podsumowania/sugestie diagnostyczne, topic docelowego licznika (debug),
-surowy tap deweloperski. To sygnały typu "ostatnia wartość" albo "to okno
-czasowe" — zbuforowana nieświeża wartość byłaby błędem, nie korzyścią.
+`mqtt_buffer_size` (**domyślnie `0` — funkcja jest wyłączona, dopóki jej nie
+ustawisz**, zakres `0`–`8192` albo `auto`) ustawia kolejkę FIFO w RAM.
 
-**Gdy bufor się zapełni:** usuwana jest najstarsza wiadomość, żeby zrobić
-miejsce dla najnowszej.
+**Jednostką są wiadomości MQTT, nie telegramy.** Jeden odebrany telegram
+tworzy dwie wiadomości: surową ramkę na `.../telegram` i metadane na
+`.../rx`, publikowane dla każdej przekazywanej ramki. Dlatego
+`mqtt_buffer_size: 64` przechowuje około **32 telegramów**. Sensory
+`buffer_depth` / `buffer_dropped_*` i przydziały `buffer_priority` również
+liczą wiadomości. Usuwanie działa na pojedynczych wiadomościach: pełny bufor
+może usunąć telegram, pozostawiając jego metadane, których backend nie
+połączy wtedy z ramką.
 
-```yaml
-wmbus_radio:
-  mqtt_buffer_size: 64   # DOMYSLNIE 0 = wylaczone; funkcja wlacza sie dopiero tym wpisem
-                         # jednostka to WIADOMOSCI MQTT, nie telegramy: jeden telegram
-                         # zajmuje dwa miejsca (/telegram + /rx), wiec 64 to ok. 32 odczyty
-                         # zakres 0-8192, albo "auto" (patrz punkt 4)
-```
+Domyślne `0` zachowuje dotychczasowe działanie. Bufor zmienia sposób
+dostarczania danych: po ponownym połączeniu odtwarza serię telegramów
+z `received_at` sprzed kilku minut. Na płytkach bez PSRAM zużywa też pamięć
+wewnętrzną. Włączenie go jest więc jawną decyzją w YAML.
 
----
+Podczas rozłączenia MQTT surowy telegram i jego metadane `/rx` trafiają do
+kolejki. Po powrocie połączenia są wysyłane od najstarszej wiadomości, po
+kilka na cykl `loop()`, aby zaległości nie zagłodziły odbioru radiowego.
+Pełny bufor usuwa najstarszą wiadomość, robiąc miejsce dla nowszej — długa
+awaria zachowuje najświeższe odczyty, a nie tylko pierwsze otrzymane.
 
-## 2. QoS per topic, konfigurowalny w YAML
-
-Wcześniej każda publikacja miała QoS zaszyty na sztywno (0 wszędzie poza
-`/rx`, które miało 1). Teraz pięć osobnych opcji, **każda domyślnie równa
-dawnej wartości sztywnej** — istniejący YAML bez tych opcji publikuje
-dokładnie tak jak wcześniej:
-
-```yaml
-wmbus_radio:
-  telegram_qos: 0      # wmbus/<topic>/telegram
-  rssi_qos: 0           # wmbus/<topic>/rssi/<meter_id>
-  health_qos: 0         # wmbus/<topic>/health i /meters
-  diagnostic_qos: 0     # wszystkie wmbus/<topic>/diag/...
-  rx_qos: 1              # wmbus/<topic>/rx (rssi_dbm + received_at)
-```
-
-QoS jest zapisywany razem z wiadomością w momencie wejścia do bufora i
-stosowany bez zmian przy faktycznej wysyłce — buforowanie nigdy nie
-nadpisuje QoS na 0.
-
----
-
-## 3. Pole timestamp odbioru — już istniało, nic nie trzeba było dodawać
-
-Za każdym razem, gdy telegram trafia na `.../telegram`, komponent od dawna
-publikuje też towarzyszący JSON na `.../rx`, który niesie **razem**
-`rssi_dbm` i `received_at`:
-
-```json
-{"schema":1,"boot_id":"...","seq":1,"meter_id":"...","mode":"T1",
- "rssi_dbm":-78,"frame_crc32":"...","frame_length":32,
- "received_at":"2026-08-28T10:15:02.421Z"}
-```
-
-`received_at` to chwila **odbioru**, nie publikacji — zostaje dokładna
-nawet jeśli wiadomość czeka w buforze RAM. Pole jest nieobecne (nie `null`,
-nie `1970`), dopóki ESP nie zsynchronizuje zegara po starcie (SNTP).
-
----
-
-## 4. Automatyczny dobór wielkości bufora z wolnego RAM (`mqtt_buffer_size: auto`)
-
-Zamiast sztywnej liczby, ESP sam wylicza bezpieczną wielkość bufora na
-podstawie realnie wolnego heapu:
+Celowo **nie są buforowane**: zachowywane przez broker RSSI per licznik
+(`wmbus/<topic>/rssi/<meter_id>`), komunikaty health/meters,
+podsumowania i sugestie diagnostyczne, temat debugowania wskazanego
+licznika oraz surowy strumień deweloperski. Są to ostatnie wartości,
+dane bieżącego okna albo pomocnicza diagnostyka; późniejsze odtworzenie
+nieaktualnych wartości mogłoby wprowadzać odbiorcę w błąd.
 
 ```yaml
 wmbus_radio:
-  mqtt_buffer_size: auto
+  # ...
+  mqtt_buffer_size: 64   # 0 wyłącza buforowanie: wiadomości giną podczas rozłączenia
 ```
 
-- Rezerwuje ostatnie **40 KB** heapu wewnętrznego nietykalne (próg, poniżej
-  którego zaczynają zawodzić alokacje WiFi/TLS).
-- Z tego, co zostaje wolne ponad rezerwę, budżetuje maks. **25%** na bufor.
-- Dzieli budżet przez ~400 B na wiadomość (szacunek), wynik przycięty do
-  zakresu **4-512** ramek.
-- Liczy się raz przy starcie i **przelicza ponownie co ~30 s**, więc
-  dostosowuje się, gdy wolny RAM się zmieni (włączona diagnostyka, bufory
-  TLS, fragmentacja heapu).
-- **PSRAM jest tylko odczytywany i logowany dla informacji — bufor go NIE
-  wykorzystuje** (string na ESP-IDF zawsze alokuje z heapu wewnętrznego,
-  niezależnie od obecności PSRAM). Wasze płytki (Olimex ESP32-POE) nie mają
-  PSRAM, więc to nie dotyczy Waszej migracji, ale warto wiedzieć.
+### Sterowanie podczas pracy bez ponownego wgrywania firmware
 
-**Zawór bezpieczeństwa (działa zawsze, niezależnie od trybu):** jeśli wolny
-heap wewnętrzny spadnie poniżej rezerwy 40 KB, bufor **odmawia przyjęcia
-nowej wiadomości** — nawet gdyby nominalna pojemność na to pozwalała.
-Zdarzenie logowane maks. raz na minutę.
-
-**Fragmentacja sprawdzana osobno od sumy wolnego heapu:** rezerwa to suma, a
-suma nic nie mówi o tym, czy został jeszcze jeden **ciągły** blok — a WiFi,
-lwIP i esp-tls potrzebują ciągłych buforów wewnętrznych (sam bufor rekordu
-TLS to rząd 16 KB). Długa awaria zapełnia bufor setkami małych alokacji o
-różnej wielkości, więc na płytce bez PSRAM suma wolnego heapu potrafi stać
-spokojnie ponad rezerwą 40 KB, podczas gdy największy pozostały blok spadł
-poniżej tego, czego potrzebuje rekonnekt. Dlatego zawór odmawia również, gdy
-`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)` zejdzie poniżej
-16 KB — log: `MQTT outbox: internal heap too fragmented, refusing to buffer`.
-Obie wielkości są próbkowane na tym samym takcie 1 Hz co odczyty wolnego
-heapu, z tego samego powodu: ten odczyt zajmuje lock sterty, którego
-potrzebuje task `radio_recv`. Sprawdzenie działa też na ścieżce PSRAM, gdzie
-wewnętrzne są tylko ~40-bajtowe węzły kolejki i praktycznie nie ma prawa się
-odpalić — uzasadnienie nie zależy od tego, gdzie leżą bajty payloadu.
-
-**Co się dzieje, gdy przeliczenie co 30 s zmniejsza bufor, a jest on
-zapełniony:** przycina natychmiast (nie czeka, aż się sam opróżni) —
-usuwa najstarsze wiadomości, ile trzeba, żeby zmieścić się w nowej,
-mniejszej pojemności. Zdarzenie jest logowane z liczbą odrzuconych ramek.
-
----
-
-## 5. Priorytet bufora per licznik (`buffer_priority`) — tylko z whitelistą
-
-**Wymaga ustawionej `forward_meters`** (bez niej nie ma czego
-priorytetyzować — dostaniesz ostrzeżenie w logu, jeśli mimo to ustawisz
-`buffer_priority`).
-
-Bez whitelisty: jeden wspólny bufor FIFO dla wszystkich (jak dotychczas).
-Z whitelistą: bufor dzieli się na osobną, stałą część (quotę) dla każdego
-licznika — licznik nadający często nigdy nie wypycha z bufora licznika
-nadającego rzadko.
-
-```yaml
-wmbus_radio:
-  forward_meters: [12345678, 87654321, "0x417F0666"]
-  buffer_priority:
-    "12345678": 3   # 3x większa część bufora niż licznik domyślny
-    "87654321": 1   # tak samo, jakby go nie wpisać (domyślna waga = 1)
-    # "0x417F0666" pominięty -> też dostaje wagę 1
-```
-
-Wagi to zwykłe dodatnie liczby całkowite (nie procenty) — nie ma sumy, do
-której trzeba trafić. Podział liczony metodą "największej reszty"
-(Hamilton), więc quoty **zawsze** sumują się dokładnie do bieżącej
-pojemności bufora. Wyliczone quoty logowane raz przy starcie
-(`MQTT outbox per-meter quotas (id:weight->slots)`).
-
----
-
-## 6. Zmiany w czasie działania bez przeszywania — lekki portal www
-
-Wymaga zadeklarowania wbudowanego w ESPHome `web_server:` z `auth:` (nie
-dodano żadnego własnego serwera HTTP/logowania do tego komponentu):
+`mqtt_buffer_size` ustala skonfigurowany limit. Aby obserwować i zmieniać
+pojemność podczas pracy, zadeklaruj opcjonalne platformy
+`sensor:`/`number:` oraz wbudowany `web_server:` ESPHome z uwierzytelnianiem.
+Komponent nie dodaje własnego serwera HTTP ani obsługi logowania.
 
 ```yaml
 web_server:
@@ -167,25 +63,17 @@ web_server:
   auth:
     username: !secret web_username
     password: !secret web_password
-```
 
-### 6a. Podgląd bufora (`sensor:`)
-
-```yaml
 sensor:
   - platform: wmbus_radio
-    wmbus_radio_id: radio_id_here
+    wmbus_radio_id: radio_id_here     # id: Twojego bloku wmbus_radio:
     buffer_depth:
-      name: "WMBus Buffer Depth"              # ile wiadomości aktualnie w kolejce
+      name: "WMBus Buffer Depth"
     buffer_dropped_total:
-      name: "WMBus Buffer Dropped"             # licznik odrzuconych (lifetime)
+      name: "WMBus Buffer Dropped"
     buffer_oldest_pending_age:
-      name: "WMBus Buffer Oldest Pending Age"  # wiek najstarszej oczekującej [s]
-```
+      name: "WMBus Buffer Oldest Pending Age"
 
-### 6b. Ręczna zmiana pojemności bufora (`number:`)
-
-```yaml
 number:
   - platform: wmbus_radio
     wmbus_radio_id: radio_id_here
@@ -193,43 +81,205 @@ number:
       name: "WMBus Buffer Capacity"
 ```
 
-Można tylko **zmniejszyć** efektywną pojemność, nigdy podnieść ponad
-`mqtt_buffer_size` skompilowane w YAML. Zmniejszenie poniżej tego, co
-aktualnie w kolejce, przycina natychmiast (z logiem o liczbie odrzuconych).
+`buffer_depth` pokazuje liczbę oczekujących wiadomości,
+`buffer_dropped_total` liczy odrzucone od startu, a
+`buffer_oldest_pending_age` podaje wiek najstarszej oczekującej w sekundach.
 
-### 6c. Ręczna zmiana QoS (`select:`) — NOWE, na Twoją prośbę
+Encja `number` może zmniejszyć efektywną pojemność, ale nie przekroczy
+skonfigurowanego limitu (w trybie `auto`: bieżącego wyliczonego limitu).
+Kod C++ przycina wartość i publikuje ją ponownie, więc portal pokazuje
+rzeczywistą dopuszczalną pojemność.
+
+### Jeden wspólny bufor czy osobny dla każdego licznika?
+
+Wybór zależy od listy `forward_meters`:
+
+- **Bez listy dozwolonych liczników** (domyślnie pusta): wspólna kolejka FIFO.
+  Gdy jest pełna, usuwa najstarszą wiadomość niezależnie od licznika.
+- **Z listą dozwolonych liczników:** każdy licznik ma ważony przydział,
+  egzekwowany dopiero po zapełnieniu całej kolejki. Licznik może korzystać
+  z niewykorzystanego miejsca innych. Aby zrobić miejsce, kolejka usuwa
+  najstarszą wiadomość licznika najbardziej przekraczającego swój przydział;
+  jeśli żaden go nie przekracza, usuwa globalnie najstarszą wiadomość.
+
+### Priorytet per licznik (`buffer_priority`)
+
+Domyślnie każdy licznik z listy ma równy udział. `buffer_priority` pozwala
+przyznać większy udział wybranym licznikom, np. słabo słyszalnemu licznikowi
+na klatce schodowej w porównaniu z licznikiem przy antenie.
 
 ```yaml
+wmbus_radio:
+  # ...
+  forward_meters: [12345678, 87654321, "0x417F0666"]
+  buffer_priority:
+    "12345678": 3   # udział 3 razy większy niż przy domyślnej wadze
+    "87654321": 1   # tak samo jak pominięcie wpisu
+    # pominięty "0x417F0666" także otrzymuje wagę 1
+```
+
+**Wagi zamiast procentów.** Wagi są dodatnimi liczbami całkowitymi i nie
+muszą sumować się do 100. Dokładny udział to
+`capacity * weight / sum(all weights)`. Kod zaokrągla udziały w dół,
+a pozostałe miejsca rozdziela po jednym według największych reszt
+ułamkowych. To metoda największej reszty (Hamiltona), dzięki której
+przydziały sumują się **dokładnie** do bieżącej pojemności. Pominięty
+licznik ma wagę 1; nie traci przez to udziału.
+
+Przydziały są przeliczane po zmianie pojemności: przy automatycznych
+kontrolach co około 60 sekund albo po zmianie `buffer_capacity`.
+Samo przekroczenie nowego przydziału nie usuwa pożyczonych miejsc —
+usuwane są dopiero wiadomości ponad nową globalną pojemność. Przydziały
+są logowane przy starcie jako
+`MQTT outbox per-meter quotas (id:weight->slots)`.
+
+Bez listy `forward_meters` nie ma stałego zbioru liczników, między które
+można podzielić pojemność. Ustawione wtedy `buffer_priority` jest
+ignorowane z ostrzeżeniem przy starcie.
+
+### Dobór pojemności z wolnego RAM (`mqtt_buffer_size: auto`)
+
+Wcześniejszy limit 256 ramek był okrągłą liczbą, a nie wynikiem pomiaru
+wolnej pamięci. Zwykły ESP32 bez PSRAM, np. Olimex ESP32-POE, ma zaledwie
+kilkaset KB pamięci współdzielonej z WiFi/Ethernet/MQTT/TLS.
+
+`mqtt_buffer_size: auto` zastępuje stałą liczbę wynikiem obliczanym na płytce:
+
+```yaml
+wmbus_radio:
+  # ...
+  mqtt_buffer_size: auto
+```
+
+Obliczenia wykonuje `Radio::suggested_mqtt_outbox_capacity_()`
+w `mqtt_outbox.cpp`:
+
+- **Bez PSRAM:** rezerwa 40 KB pamięci wewnętrznej, budżet 25% wolnej
+  pamięci ponad rezerwę, szacunkowo 400 B na wiadomość, wynik ograniczony
+  do 4–512 wiadomości.
+- **Z PSRAM:** rezerwa 256 KB PSRAM i 24 KB pamięci wewnętrznej.
+  Budżet 50% wolnego PSRAM ponad rezerwę przy 400 B na wiadomość,
+  dodatkowo ograniczony wolną pamięcią wewnętrzną przy około 40 B na wpis
+  kolejki. Mniejszy wynik jest ograniczany do 4–4096 wiadomości.
+  Temat i zawartość wiadomości korzystają z `RAMAllocator<char>`:
+  najpierw PSRAM, z możliwością użycia pamięci wewnętrznej w razie
+  niepowodzenia. Struktura kolejki nadal używa pamięci wewnętrznej.
+
+Są to szacunki, nie gwarancja zmieszczenia danej liczby wiadomości.
+Pierwsze obliczenie odbywa się przy starcie, kolejne kontrole co około
+60 sekund. Zmiany do 15% są pomijane, chyba że proponowany limit jest
+mniejszy od bieżącej długości kolejki. Automatyczna zmiana aktualizuje
+zarówno limit, jak i efektywną pojemność, więc może zastąpić ręczne
+ustawienie pojemności podczas pracy.
+
+**Zmniejszenie pełnego bufora:** wiadomości ponad nową globalną pojemność
+są usuwane od razu, od najstarszej bez listy liczników albo według
+opisanych wyżej przydziałów z listą. Samo przekroczenie indywidualnego
+przydziału nie usuwa danych. Automatyczne zmniejszenie loguje liczbę
+usuniętych wiadomości (`MQTT outbox auto-size shrink dropped ...`).
+Ręczne zmniejszenie `buffer_capacity` poniżej długości kolejki także
+przycina ją natychmiast.
+
+**Zabezpieczenie pamięci działa przy stałym limicie i w trybie automatycznym.**
+Odmawia powiększenia kolejki, jeśli wolna pamięć wewnętrzna spadnie poniżej
+40 KB na płytce bez PSRAM, albo wolny PSRAM spadnie poniżej 256 KB lub
+pamięć wewnętrzna poniżej 24 KB na płytce z PSRAM. Ostrzeżenie jest logowane
+najwyżej raz na minutę. Minimalny nominalny limit czterech wiadomości nie
+omija tej ochrony — bufor może nadal odmówić przyjęcia wiadomości.
+
+**Fragmentacja jest sprawdzana osobno od sumy wolnej pamięci.** WiFi, lwIP
+i esp-tls potrzebują ciągłych bloków (sam rekord TLS to około 16 KB).
+Setki małych alokacji podczas długiej awarii mogą pozostawić dużo wolnej
+pamięci, ale zbyt mały największy blok do ponownego połączenia.
+Zabezpieczenie odmawia buforowania również wtedy, gdy
+`heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)` spadnie poniżej
+16 KB. Log: `MQTT outbox: internal heap too fragmented, refusing to buffer`.
+Odczyty odbywają się na tym samym takcie 1 Hz co pomiar wolnej pamięci,
+aby ograniczyć zajmowanie blokady sterty potrzebnej zadaniu `radio_recv`.
+Kontrola obejmuje też ścieżkę PSRAM, gdzie w pamięci wewnętrznej pozostają
+głównie około 40-bajtowe wpisy kolejki — wymóg ciągłego bloku nadal obowiązuje.
+
+## 2. QoS per temat
+
+Wcześniej komponent używał QoS 0 dla wszystkich publikacji poza `/rx`,
+które miało QoS 1. Pięć opcji konfiguruje teraz QoS grup tematów,
+domyślnie zachowując wcześniejsze wartości:
+
+```yaml
+wmbus_radio:
+  # ...
+  telegram_qos: 0       # wmbus/<topic>/telegram
+  rssi_qos: 0           # wmbus/<topic>/rssi/<meter_id>
+  health_qos: 0         # wmbus/<topic>/health i /meters
+  diagnostic_qos: 0     # wszystkie tematy wmbus/<topic>/diag/...:
+                       # boot, config, podsumowania, sugestie, okna liczników,
+                       # drop/truncated, busy_ether_changed
+  rx_qos: 1             # wmbus/<topic>/rx (rssi_dbm + received_at)
+```
+
+Tabela QoS ze specyfikacji migracji (rozdział 17, tabela 26) zaleca QoS 1
+tam, gdzie potrzebne jest dostarczenie co najmniej raz, a odbiorca
+potrafi usuwać duplikaty po `raw_hash`/numerze dostępu. QoS 2 nie jest
+wymagane w tym systemie. Po włączeniu bufora rozsądnym punktem startowym
+jest `telegram_qos: 1`, zgodne z domyślnym `rx_qos`. Pozostałe wartości
+zostaw na 0, chyba że konkretny odbiorca wymaga więcej.
+
+### Czy QoS działa również przy przejściu przez bufor RAM?
+
+Tak. `enqueue_or_publish_()` zapisuje rozstrzygnięte
+`telegram_qos`/`rx_qos` w samej wiadomości (`OutboxMsg::qos`).
+Publikacja natychmiastowa albo po ponownym połączeniu używa tej zapisanej
+wartości. Buforowanie zmienia czas dostarczenia, a nie QoS.
+Wynika to z przechowywania pełnego zestawu temat/zawartość/QoS/retain
+dla każdej wiadomości, bez wymuszania wspólnego QoS kolejki.
+
+### QoS podczas pracy (`select:` `telegram_qos` / `rx_qos`)
+
+Opcje YAML określają wartości początkowe. Aby zmieniać QoS dwóch
+buforowanych tematów między `0`, `1` i `2` bez ponownego wgrywania
+firmware, zadeklaruj opcjonalną platformę `select:` i ten sam
+uwierzytelniany `web_server:`, którego używa `buffer_capacity`:
+
+```yaml
+web_server:
+  version: 3
+  auth:
+    username: !secret web_username
+    password: !secret web_password
+
 select:
   - platform: wmbus_radio
-    wmbus_radio_id: radio_id_here
+    wmbus_radio_id: radio_id_here     # id: Twojego bloku wmbus_radio:
     telegram_qos:
       name: "WMBus Telegram QoS"
     rx_qos:
       name: "WMBus RX QoS"
 ```
 
-Lista rozwijana `0`/`1`/`2` dla każdego z dwóch buforowanych topiców.
-Startuje od wartości skompilowanej (`telegram_qos`/`rx_qos` z YAML), zmiana
-działa identycznie jak przeszycie z inną wartością — tylko bez
-przeszywania. Dotyczy nowych publikacji od tego momentu; wiadomość już w
-buforze zachowuje QoS, z jakim trafiła do kolejki.
+Każda encja jest listą rozwijaną `0`/`1`/`2`, startuje od wartości YAML
+i wywołuje te same settery `set_telegram_qos()`/`set_rx_qos()`.
+Zmiana działa jak nowa wartość YAML bez ponownego wgrania firmware.
+Dotyczy wyłącznie **nowych** publikacji: wiadomości już oczekujące
+zachowują QoS zapisane podczas dodawania do kolejki.
 
----
+## 3. Znacznik czasu odbioru: już istnieje obok RSSI
 
-## Co jest w pełni wsteczne kompatybilne
+Nie było potrzeby zmiany kodu. Każdemu telegramowi przekazywanemu na
+`wmbus/<topic>/telegram` już towarzyszy JSON na `wmbus/<topic>/rx`
+(z QoS określanym przez `rx_qos`), zawierający oba pola:
 
-Jeśli nie dotkniesz żadnej z powyższych opcji, zachowanie jest identyczne z
-tym sprzed zmian — jedyna różnica to `mqtt_buffer_size: 64` domyślnie
-włączone (wcześniej telegram po prostu ginął przy rozłączeniu; teraz jest
-buforowane maks. 64 ramki). Jeśli wolisz stary sposób "drop przy
-rozłączeniu", ustaw `mqtt_buffer_size: 0`.
+```json
+{"schema":1,"boot_id":"...","seq":1,"rx_task_wakeup_us":...,
+ "meter_id":"...","mode":"T1","rssi_dbm":-78,"frame_crc32":"...",
+ "frame_length":32,"received_at":"2026-08-28T10:15:02.421Z"}
+```
 
-## Czego NIE sprawdziłem
+`received_at` określa chwilę **odbioru**, nie publikacji — przy buforowaniu
+to różne momenty. Jest wyliczane z czasu monotonicznego podczas odbioru.
+Pojawia się po synchronizacji SNTP; wcześniej klucz jest nieobecny,
+zamiast zawierać rok 1970 albo czas działania udający datę. Odbiorca
+powinien rozumieć brak klucza jako brak wiarygodnego znacznika czasu.
 
-Nie mam w tym środowisku dostępu do `esphome compile` (brak PyPI w
-sandboxie) — kod zweryfikowałem ręcznie (bilans nawiasów, sygnatury
-funkcji względem źródeł ESPHome, `py_compile` na plikach Python), ale
-**przed wgraniem na BR-3/BR-1 uruchom `esphome compile` na swojej
-maszynie** i sprawdź log startowy (sekcja `[output]` pokaże efektywne
-wartości wszystkich opcji z tej listy).
+Zawartość wiadomości powstaje przy odbiorze, przed publikacją albo dodaniem
+do kolejki, więc `received_at` zachowuje rzeczywistą chwilę odbioru także
+po oczekiwaniu w RAM.

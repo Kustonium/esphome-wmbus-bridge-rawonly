@@ -1,24 +1,26 @@
-# Radio options / opcje radiowe
+# Radio options
 
-## Common / wspólne
+[Polska wersja](RADIO_OPTIONS_MINIMAL_PL.md)
 
-| Radio | Wymagane piny | Opcjonalne | Uwagi |
+## Common
+
+| Radio | Required pins | Optional settings | Notes |
 |---|---|---|---|
-| `SX1262` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, TCXO, FEM, bramka RF switch, `long_gfsk_packets` | zalecany dla trudnego RF i długich ramek |
-| `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | dobry dla spokojniejszych instalacji; ma mechanizm busy-ether; `tcxo_pin` tylko dla płytek z osobnym TCXO enable |
-| `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | eksperymentalny; wymaga `cc1101_allow_experimental: true`; single-IRQ nie jest wspierany |
-| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | eksperymentalny; wymaga `lr1121_allow_experimental: true`; odbiera T1/C1/S1 na sprzęcie Waveshare HF |
+| `SX1262` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, TCXO, FEM, RF-switch gate, `long_gfsk_packets` | recommended for difficult RF conditions and long frames |
+| `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | suitable for quieter installations; has busy-ether handling; `tcxo_pin` only for boards with a separate TCXO-enable pin |
+| `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | experimental; requires `cc1101_allow_experimental: true`; single IRQ is unsupported |
+| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | experimental; requires `lr1121_allow_experimental: true`; receives T1/C1/S1 on Waveshare HF hardware |
 
-## Listen mode frequency defaults / domyślne częstotliwości trybów
+## Listen mode frequency defaults
 
-| `listen_mode` | Domyślna częstotliwość | Uwagi |
+| `listen_mode` | Default frequency | Notes |
 |---|---:|---|
 | `t1` | `868.950 MHz` | T1 only |
 | `c1` | `868.950 MHz` | C1 only |
-| `both` | `868.950 MHz` | T1/C1 only; nie obejmuje S1 |
+| `both` | `868.950 MHz` | T1/C1 only; does not include S1 |
 | `s1` | `868.300 MHz` | experimental S1 only |
 
-`frequency:` można podać przy każdym radiu jako jawne nadpisanie domyślnej częstotliwości trybu. Typowy przykład diagnostyczny S1:
+`frequency:` explicitly overrides the mode's default frequency on any radio. A typical S1 diagnostic example:
 
 ```yaml
 wmbus_radio:
@@ -27,29 +29,32 @@ wmbus_radio:
   frequency: 868.36
 ```
 
-S1 używa innego profilu RF niż T1/C1, dlatego nie jest łączony z `both`.
+S1 uses a different RF profile from T1/C1 and is therefore not included in `both`.
 
 ## SX1262
 
-| Opcja | Domyślnie | Opis |
+| Option | Default | Description |
 |---|---:|---|
-| `has_tcxo` | `false` | włącz dla modułów z TCXO, np. część Heltec |
-| `dio2_rf_switch` / `rf_switch` | `true` | sterowanie RF switch przez DIO2 |
-| `rx_gain` | `boosted` | `boosted` albo `power_saving` |
-| `long_gfsk_packets` | `false` | tryb długich pakietów GFSK; **kosztuje ok. 7 dB przy słabym sygnale** — włączać tylko, gdy realnie odbierasz ramki powyżej ~150 bajtów zdekodowanych |
-| `min_preamble_bits` | `16` | próg detektora preambuły; dla T1 **16 to maksimum**, `8` kosztuje ok. 16% liczników (patrz `CONFIG_REFERENCE_MINIMAL.md`) |
-| `clear_device_errors_on_boot` | `false` | czyści latched device errors po starcie |
-| `publish_dev_err_after_clear` | `false` | publikuje wynik czyszczenia błędów |
-| `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | brak | piny FEM, np. Heltec V4 |
-| `rf_sw_pin` | brak | bramka wewnętrznego przełącznika RF modułu; wymagane na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`) |
+| `has_tcxo` | `false` | enable for TCXO modules, including some Heltec boards |
+| `dio2_rf_switch` / `rf_switch` | `true` | RF-switch control through DIO2 |
+| `rx_gain` | `boosted` | `boosted` or `power_saving` |
+| `long_gfsk_packets` | `false` | long GFSK packet mode; **costs about 7 dB with weak signals** — enable only when receiving frames above ~150 decoded bytes |
+| `min_preamble_bits` | `16` | preamble detector threshold; **16 is the maximum for T1**; `8` costs about 16% of meters heard (see `CONFIG_REFERENCE_MINIMAL.md`) |
+| `clear_device_errors_on_boot` | `false` | clear latched device errors after startup |
+| `publish_dev_err_after_clear` | `false` | publish the error-clear result |
+| `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | none | FEM pins, e.g. Heltec V4 |
+| `rf_sw_pin` | none | module RF-switch gate; required on XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`) |
 
-### `rf_sw_pin` a `dio2_rf_switch`
+### `rf_sw_pin` and `dio2_rf_switch`
 
-To dwie różne rzeczy i na płytkach, które tego wymagają, potrzebne są obie.
+These serve different purposes; boards that require the gate need both.
 
-`dio2_rf_switch` odnosi się do wyprowadzenia DIO2 samego układu SX1262 i wybiera **kierunek** TX/RX. `rf_sw_pin` to zewnętrzne wyprowadzenie GPIO hosta, które otwiera **bramkę** przełącznika RF w module — decyduje, czy przełącznik w ogóle przewodzi.
+`dio2_rf_switch` refers to the SX1262 chip's DIO2 output and selects the TX/RX
+**direction**. `rf_sw_pin` is a host GPIO that opens the module RF-switch
+**gate**, determining whether it conducts at all.
 
-Moduł Seeed Wio-SX1262 wyprowadza tę bramkę na pinie 1 (`RF_SW`); w zestawie z XIAO ESP32-S3 sygnał trafia na `GPIO38`:
+The Seeed Wio-SX1262 module exposes this gate on pin 1 (`RF_SW`); in the
+XIAO ESP32-S3 kit it is connected to `GPIO38`:
 
 ```yaml
 wmbus_radio:
@@ -57,26 +62,33 @@ wmbus_radio:
   rf_sw_pin: GPIO38
 ```
 
-Bez tej opcji odbiornik pracuje z czułością niższą o około 30 dB. Objawem nie jest cisza: ramki nadal się dekodują i `DIAG hint` raportuje `GOOD`, ale jest ich kilka razy mniej, a wszystkie wartości RSSI leżą w wąskim paśmie tuż nad progiem czułości.
+Without this option, sensitivity is about 30 dB lower. The symptom is not
+silence: frames still decode and `DIAG hint` reports `GOOD`, but there are
+several times fewer frames and RSSI values cluster just above the sensitivity threshold.
 
-Nie steruj tym wyprowadzeniem akcją `on_boot` na wyjściu `gpio` — patrz TROUBLESHOOTING, sekcja o odbiorniku słyszącym mało liczników.
+Do not control this pin with an `on_boot` action on a `gpio` output; see
+[Troubleshooting](TROUBLESHOOTING.md), the section about receivers hearing few meters.
 
-Płytki Heltec V3 / V4 / V4-R8 tej opcji nie wymagają; korzystają z wyprowadzeń `fem_*`.
+Heltec V3 / V4 / V4-R8 boards do not require this option; see their board
+examples for any `fem_*` settings.
 
 ## SX1276
 
-| Opcja | Domyślnie | Opis |
+| Option | Default | Description |
 |---|---:|---|
-| `sx1276_busy_ether_mode` | `adaptive` | `normal`, `aggressive`, `adaptive` |
-| `tcxo_pin` | brak | opcjonalny pin TCXO enable; tylko dla SX1276 |
+| `sx1276_busy_ether_mode` | `normal` | `normal`, `aggressive`, `adaptive` |
+| `tcxo_pin` | none | optional TCXO-enable pin; SX1276 only |
 
-`busy_ether_state` w summary jest raportem mechanizmu busy-ether i ma sens tylko dla SX1276.
+`busy_ether_state` in the summary reports the busy-ether mechanism and is meaningful only on SX1276.
 
-`sx1276_busy_ether_mode` jest akceptowane przez schemat YAML także przy innych radiach, ale dla SX1262/CC1101/LR1121 jest ignorowane bez błędu; w summary będzie `n/a`.
+The YAML schema also accepts `sx1276_busy_ether_mode` for other radios, but
+SX1262/CC1101/LR1121 ignore it without error and report `n/a` in the summary.
 
-`tcxo_pin` jest opcją jawną dla płytek SX1276 z osobnym pinem TCXO enable. Jeśli jest ustawiony, komponent ustawia ten pin w stan HIGH przed inicjalizacją radia. Zwykłe płytki SX1276 nie wymagają tej opcji.
+`tcxo_pin` is an explicit option for SX1276 boards with a separate TCXO-enable
+pin. If set, the component drives it HIGH before radio initialization.
+Ordinary SX1276 boards do not need this option.
 
-Przykład dla LILYGO T3 V3.0 TCXO OLED LoRa32:
+Example for LILYGO T3 V3.0 TCXO OLED LoRa32:
 
 ```yaml
 wmbus_radio:
@@ -84,11 +96,12 @@ wmbus_radio:
   tcxo_pin: GPIO12
 ```
 
-Komponent nie wykrywa automatycznie modelu płytki ani okablowania TCXO. Sprawdź schemat płytki albo dokumentację producenta.
+The component does not automatically detect the board model or TCXO wiring.
+Check the schematic or manufacturer documentation.
 
 ## CC1101
 
-Minimalny schemat:
+Minimal configuration:
 
 ```yaml
 wmbus_radio:
@@ -100,11 +113,12 @@ wmbus_radio:
     frequency: 868.95
 ```
 
-Nie kopiować konfiguracji CC1101 z projektów single-IRQ. Ten komponent wymaga osobno GDO0 i GDO2.
+Do not copy CC1101 wiring from single-IRQ projects. This component requires
+separate GDO0 and GDO2 connections.
 
 ## LR1121
 
-Minimalny schemat (Waveshare ESP32-S3-LR1121-HF, SKU 34011):
+Minimal configuration (Waveshare ESP32-S3-LR1121-HF, SKU 34011):
 
 ```yaml
 wmbus_radio:
@@ -118,20 +132,19 @@ wmbus_radio:
     payload_length: 255
 ```
 
-Trzy rzeczy, bez których ta płytka wygląda na martwą, choć działa:
+Three things that can make a functioning board appear dead:
 
-- **`tcxo_voltage: 3.0v`** — zmierzone. Przy `1.8v` układ zgłasza `HF_XOSC_START`
-  i nie dochodzi do odbioru. Pakiet producenta podaje obie wartości dla tej samej
-  płytki; obowiązuje ta zweryfikowana na sprzęcie.
-- **`payload_length: 255`** — ramki NES mają 245 bajtów surowych. Niższa wartość
-  je utnie.
-- **Gniazdo antenowe.** Płytka ma więcej niż jedno gniazdo u.FL: WiFi ESP32,
-  port 2,4 GHz LR1121 i dopiero jedno z nich jest torem sub-GHz przez przełącznik
-  RF. Złe gniazdo daje idealną ciszę bez żadnego błędu.
+- **`tcxo_voltage: 3.0v`** — measured. At `1.8v`, the chip reports
+  `HF_XOSC_START` and never reaches reception. The vendor package gives both
+  values for this board; use the one verified on hardware.
+- **`payload_length: 255`** — NES frames contain 245 raw bytes. A lower value truncates them.
+- **Antenna socket.** The board has multiple u.FL sockets: ESP32 WiFi, the
+  LR1121 2.4 GHz port, and the sub-GHz path through the RF switch. The wrong
+  socket produces complete silence without an error.
 
-Ta płytka nie ma mostka USB-UART — konsola idzie przez natywne USB ESP32-S3, więc
-`logger:` wymaga `hardware_uart: USB_SERIAL_JTAG`, inaczej log nie pojawi się nigdzie.
+This board has no USB-UART bridge. The console uses the ESP32-S3 native USB,
+so `logger:` needs `hardware_uart: USB_SERIAL_JTAG` or no log will appear.
 
-Komunikat `HF_XOSC_START` przy starcie **jest normalny i nie jest usterką** —
-zapala się przy wejściu w `STDBY_XOSC`, a obie kalibracje po nim wracają czyste.
-Sterownik tłumaczy to w logu.
+The startup `HF_XOSC_START` message **is normal and is not a fault**: it
+latches on entering `STDBY_XOSC`, and both subsequent calibrations complete
+without errors. The driver explains this in the log.

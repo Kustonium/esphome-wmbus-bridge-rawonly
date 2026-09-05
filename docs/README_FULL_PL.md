@@ -7,7 +7,7 @@ Most radiowy wireless M-Bus RAW-only dla ESPHome.
 ESP odbiera i waliduje telegramy wM-Bus, a następnie publikuje zweryfikowany RAW HEX do MQTT. Dekodowanie liczników zostaje poza ESP, na przykład w Home Assistant / Linux / `wmbusmeters`.
 
 ```text
-licznik -> SX1262/SX1276 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
+licznik -> SX1262/SX1276/CC1101/LR1121 -> ESPHome wmbus_radio -> MQTT HEX -> wmbusmeters / Home Assistant
 ```
 
 ## Zacznij tutaj
@@ -246,6 +246,17 @@ diagnostic_meter_stats: all
 
 `all` stosuj tylko do developmentu albo kontrolowanych testów w gęstym eterze.
 
+## Opcje zaawansowane i deweloperskie
+
+Kilka opcji służy do zaawansowanych zastosowań lub prac deweloperskich.
+Nie są potrzebne w zwykłym użytkowaniu. Pełną tabelę zawiera
+[referencja konfiguracji](CONFIG_REFERENCE_MINIMAL_PL.md).
+
+- `target_meter_id` — przekierowuje ramki wskazanego licznika do osobnej ścieżki; używane razem z `target_topic` / `target_log`.
+- `target_topic` — alternatywny temat MQTT dla licznika wskazanego przez `target_meter_id`.
+- `target_log` — przy `true` trafienia wskazanego licznika są logowane na urządzeniu.
+- `publish_radio_raw` — deweloperski strumień surowych danych radiowych na stałym temacie `wmbus_bridge/raw`. Nie jest zwykłym strumieniem zweryfikowanych telegramów i nie powinien być włączany w instalacji produkcyjnej.
+
 ## `listen_mode_filter_after_parse`
 
 Domyślnie:
@@ -293,7 +304,7 @@ Obsługa LR1121 też jest eksperymentalna. Wymaga `lr1121_allow_experimental: tr
 linii `busy_pin`, a na płytce Waveshare HF dodatkowo `tcxo_voltage: 3.0v` oraz
 `payload_length: 255`. Na tej płytce zdekodował T1, C1 i S1. Gdzie stoi wobec
 pozostałych radiów — [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md); okablowanie —
-[`RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md).
+[`RADIO_OPTIONS_MINIMAL_PL.md`](RADIO_OPTIONS_MINIMAL_PL.md).
 
 ## Dokumentacja
 

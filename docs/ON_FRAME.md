@@ -1,5 +1,7 @@
 # on_frame automation
 
+[Polska wersja](ON_FRAME_PL.md)
+
 `on_frame` is an optional ESPHome automation trigger that fires every time the radio
 receives a valid, CRC-correct wMBus frame. It gives you direct access to the raw frame
 bytes inside a `lambda:` block before (or instead of) the built-in MQTT publish.

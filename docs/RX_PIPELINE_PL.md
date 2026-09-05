@@ -1,5 +1,7 @@
 # Tor RX i kwalifikacja ramek
 
+[English version](RX_PIPELINE.md)
+
 Ten projekt jest mostkiem **RAW-only**, ale `RAW` nie znaczy tutaj „każdy blob bajtów z radia”.
 
 Komponent publikuje tylko telegramy, które przeszły wewnętrzną walidację ramki wM-Bus. Nieudane kandydaty mogą być liczone i raportowane w diagnostyce, ale nie trafiają na `telegram_topic`.

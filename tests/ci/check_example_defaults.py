@@ -174,29 +174,30 @@ def is_prose(raw: str) -> bool:
 
 
 # Cells that describe a default in words rather than stating one.
-PROSE_CELLS = {"wymagane", "brak", "puste", "mode default", "esphome.name", ""}
+PROSE_CELLS = {"wymagane", "brak", "puste", "zależnie od trybu",
+               "required", "none", "empty", "mode default", "esphome.name", ""}
 
 
-def check_reference(defaults: dict[str, object]) -> list[str]:
-    """The reference tables carry a `Domyślnie` column — hold it to the schema.
+def check_reference(defaults: dict[str, object], path: pathlib.Path) -> list[str]:
+    """Check the English `Default` or Polish `Domyślnie` column against the schema.
 
     This is where drift is least visible: nobody rereads a table of sixty rows,
     and a default that changed in the schema goes on reading as true here.
     """
-    path = ROOT / "docs" / "CONFIG_REFERENCE_MINIMAL.md"
     if not path.exists():
         return [f"{path.name} is missing"]
 
     problems: list[str] = []
     default_col: int | None = None
+    checked = 0
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.startswith("|"):
             default_col = None
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if any(c.lower().startswith("domyśln") for c in cells):
+        if any(c.lower().startswith(("domyśln", "default")) for c in cells):
             default_col = next(i for i, c in enumerate(cells)
-                               if c.lower().startswith("domyśln"))
+                               if c.lower().startswith(("domyśln", "default")))
             continue
         if default_col is None or default_col >= len(cells):
             continue
@@ -209,10 +210,13 @@ def check_reference(defaults: dict[str, object]) -> list[str]:
         cell = cells[default_col].strip().strip("`")
         if cell.lower() in PROSE_CELLS:
             continue
+        checked += 1
         if not matches(cell, defaults[option]):
             problems.append(
                 f"docs/{path.name}:{lineno}: {option} is documented as "
                 f"'{cell}' but the schema default is {defaults[option]!r}")
+    if checked == 0:
+        problems.append(f"docs/{path.name}: no schema defaults checked; verify the table headers")
     return problems
 
 
@@ -282,7 +286,8 @@ def main() -> int:
                         f"({defaults[option]!r}) - comment it out, or add "
                         f"'# pinned: <reason>' if it is deliberate")
 
-    problems.extend(check_reference(defaults))
+    for name in ("CONFIG_REFERENCE_MINIMAL.md", "CONFIG_REFERENCE_MINIMAL_PL.md"):
+        problems.extend(check_reference(defaults, ROOT / "docs" / name))
 
     for problem in problems:
         print(f"FAIL: {problem}", file=sys.stderr)
