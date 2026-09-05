@@ -1,3 +1,86 @@
+# Feature: MQTT store-and-forward outbox with QoS and buffer controls
+
+## EN
+
+- **New option `mqtt_buffer_size` (default `0`, off).** When the broker goes away, decoded messages are held in RAM and published on reconnect instead of being dropped. Companion controls for QoS and per-meter priority ship with it, plus a runtime capacity number and a QoS select.
+- **Use `auto` rather than a fixed number, and not only for sizing.** With `auto` the ceiling tracks free heap, so reaching it coincides with real memory pressure and the priority eviction logic is what defends the node. With a fixed capacity larger than the heap can back, the buffer never considers itself full, eviction never runs, and the only defence left is the RAM valve - which knows nothing about `buffer_priority`. `auto` therefore turns blind loss into chosen loss.
+- **Verified on hardware by someone other than the author**, across both memory paths - PSRAM and internal heap - over more than three hours of induced broker outages: no watchdog, no reboot, no RX FIFO overflow, exact accounting in every run, and nothing that entered the buffer was lost.
+- **Known behaviour, not a defect:** on a board without PSRAM the largest free heap block does not fully recover after a drain, although total free heap does. Observed floors stayed at roughly twice the fragmentation threshold across two outage cycles, so the valve refused on total free heap every time and never on fragmentation. Worth watching on boards with a smaller starting heap.
+- Off by default, so this changes nothing until you ask for it.
+
+## PL
+
+- **Nowa opcja `mqtt_buffer_size` (domyślnie `0`, wyłączona).** Gdy broker znika, zdekodowane wiadomości czekają w RAM i idą przy ponownym połączeniu, zamiast przepaść. Razem z nią sterowanie QoS i priorytetem per licznik, plus regulacja pojemności i wybór QoS w czasie pracy.
+- **Używać `auto`, nie sztywnej liczby — i nie tylko ze względu na rozmiar.** Przy `auto` sufit śledzi wolny heap, więc dojście do niego pokrywa się z prawdziwym brakiem pamięci i broni logika priorytetu. Przy sztywnej pojemności większej, niż heap udźwignie, bufor nigdy nie czuje się pełny, eksmisja nigdy się nie włącza, a jedyną obroną zostaje zawór RAM-owy, który o `buffer_priority` nie wie nic. `auto` zamienia więc stratę ślepą na wybraną.
+- **Zweryfikowane na sprzęcie przez kogoś innego niż autor**, na obu ścieżkach pamięci — PSRAM i heap wewnętrzny — przez ponad trzy godziny wymuszonych awarii brokera: bez watchdoga, bez restartu, bez przepełnienia RX FIFO, z dokładnym rachunkiem w każdym przebiegu i bez utraty czegokolwiek, co weszło do bufora.
+- **Zachowanie znane, nie usterka:** na płytce bez PSRAM największy wolny blok heapu nie wraca w pełni po opróżnieniu bufora, choć całkowity wolny heap wraca. Zaobserwowane poziomy trzymały się mniej więcej dwukrotności progu fragmentacji przez dwa cykle, więc zawór odmawiał zawsze na podstawie całkowitego wolnego heapu, nigdy fragmentacji. Warte obserwacji na płytkach z mniejszym heapem startowym.
+- Domyślnie wyłączone, więc nic się nie zmienia, dopóki tego nie włączysz.
+
+
+# Feature: `min_preamble_bits` - one preamble gate for SX1262, SX1276 and LR1121
+
+## EN
+
+- **New option, and one rename.** `min_preamble_bits` exposes the gate on SX1262 and SX1276, where it was not configurable before. On LR1121 it replaces `preamble_detector`, which did the same thing under a chip-specific name - if you set that key, rename it. LR1121 is behind `lr1121_allow_experimental`, so few configurations are affected. Rejected on CC1101 with a reason: that chip has the same gate as PQT, but counted in quality steps rather than preamble bits.
+- **This is not the transmit preamble length.** That is a separate `SetPacketParams` field and is not configurable from YAML. The old name invited the confusion.
+- **For `listen_mode: t1` and `both`, 16 is the maximum and the validator now refuses more.** Measured on hardware: an SX1262 at 24 bits took 184 receiver triggers in two minutes and decoded zero frames. The detector waits for 24 bits of continuous preamble, the T1 preamble is shorter, so detection never completes and every frame flies past. 16 works, so the usable preamble is 16-23 bits, consistent with the 19 usually quoted for T-mode. A board configured that way is silently deaf while looking healthy, which is why it is refused at validation rather than discovered on a roof.
+- `8` still works and is what upstream uses, but it costs about **16% of the meters heard** - reproduced on two antenna-matched board pairs and again day-over-day on two boards. **All of that is one location**: five boards in one block of flats. The direction has held under every method tried there; the size of the effect is a property of that RF environment and should not be read as a constant.
+- C1 and S1 are left alone. Their preambles were not measured here, and guessing in the direction that silently disables a receiver is the wrong way to be wrong.
+
+## PL
+
+- **Nowa opcja i jedna zmiana nazwy.** `min_preamble_bits` udostępnia tę bramkę na SX1262 i SX1276, gdzie wcześniej nie była konfigurowalna. Na LR1121 zastępuje `preamble_detector`, który robił to samo pod nazwą związaną z układem - jeśli masz ten klucz w YAML-u, zmień nazwę. LR1121 jest za bramką `lr1121_allow_experimental`, więc dotyczy to niewielu konfiguracji. Na CC1101 odrzucany z uzasadnieniem: ten układ ma tę samą bramkę co PQT, ale liczoną w stopniach jakości, nie w bitach preambuły.
+- **To nie jest długość preambuły nadawanej.** Tamto to osobne pole `SetPacketParams`, nieustawiane z YAML-a. Stara nazwa zachęcała do pomyłki.
+- **Dla `listen_mode: t1` i `both` maksimum to 16, a walidator odrzuca teraz więcej.** Zmierzone na sprzęcie: SX1262 przy 24 bitach zebrał 184 wyzwolenia odbiornika w dwie minuty i zdekodował zero ramek. Detektor czeka na 24 bity ciągłej preambuły, preambuła T1 jest krótsza, więc detekcja nigdy się nie kończy i każda ramka przelatuje. 16 działa, więc użyteczna preambuła mieści się w 16-23 bitach, zgodnie z powszechnie podawaną wartością 19 dla T-mode. Tak skonfigurowana płytka jest po cichu głucha, wyglądając na zdrową — dlatego odrzucamy to przy walidacji, a nie zostawiamy do odkrycia na dachu.
+- `8` nadal działa i tego używa upstream, ale kosztuje około **16% słyszanych liczników** - powtórzone na dwóch parach płytek z dobranymi antenami i jeszcze raz dzień do dnia na dwóch płytkach. **To wszystko jedna lokalizacja**: pięć płytek w jednym bloku. Kierunek utrzymał się przy każdej wypróbowanej tam metodzie; wielkość efektu jest właściwością tamtego środowiska RF i nie należy jej czytać jako stałej.
+- C1 i S1 zostają nietknięte. Ich preambuł tutaj nie mierzono, a zgadywanie w stronę, która po cichu wyłącza odbiornik, to zły kierunek na pomyłkę.
+
+
+# Feature: receiver-trigger counter, and "no frames" split into two diagnoses
+
+## EN
+
+- **New counter `irq_fired`** in the diagnostic summary and in the log line. It counts the data interrupt itself, before any parsing, which makes it the only counter that separates "never heard anything" from "heard it and lost it downstream".
+- **Read it next to `dropped`, never `drop_pct` alone.** `drop_pct` improves as reception gets worse: a frame the radio never attempted is not counted as dropped. Measured across five boards in one window, the board with the lowest `drop_pct` (8%) delivered half of what the board with the highest (21%) did, and the board with the worst conversion (`total / irq_fired` = 11%) heard the most meters of all.
+- **`NO_DATA` now splits in two.** No triggers at all still means antenna, frequency or wiring. Triggers without frames is a different fault and now says so: something IS transmitting, but nothing passes the filter - check `listen_mode`, `min_preamble_bits` and the meter's own mode. That split diagnosed a deaf board in one minute during testing.
+
+## PL
+
+- **Nowy licznik `irq_fired`** w podsumowaniu diagnostycznym i w linii logu. Liczy samo przerwanie danych, przed jakimkolwiek parsowaniem, przez co jest jedynym licznikiem rozdzielającym „nic nie usłyszałem" od „usłyszałem i zgubiłem dalej".
+- **Czytać obok `dropped`, nigdy samego `drop_pct`.** `drop_pct` poprawia się, gdy odbiór się psuje: ramka, której radio nigdy nie podjęło, nie liczy się jako odrzucona. Zmierzone na pięciu płytkach w jednym oknie: płytka z najniższym `drop_pct` (8%) dowoziła połowę tego co płytka z najwyższym (21%), a płytka z najgorszą konwersją (`total / irq_fired` = 11%) słyszała najwięcej liczników ze wszystkich.
+- **`NO_DATA` rozdziela się na dwa stany.** Zero wyzwoleń nadal znaczy antena, częstotliwość albo połączenia. Wyzwolenia bez ramek to inna usterka i teraz tak jest opisana: coś NADAJE, ale nic nie przechodzi filtru - sprawdź `listen_mode`, `min_preamble_bits` i tryb samego licznika. To rozróżnienie zdiagnozowało głuchą płytkę w minutę podczas testów.
+
+
+# Fix: the long-frame capture ran past the end of the frame, every time
+
+## EN
+
+- **`long_gfsk_packets` streaming now ends where the frame ends.** The T-mode capture had no way to learn a frame's length, so it ran to its 512-byte cap collecting post-frame noise - not occasionally, but on every capture, because both of the loop's early exits are unreachable in continuous RX: `RX_DONE` cannot fire while the code pushes the payload-end register ahead of the write pointer, and the silence check never trips because the demodulator keeps producing bytes out of noise. Verified on hardware: `captured=134 exit=t1_length`, where it used to be `captured=512 exit=buffer_cap`.
+- The length comes from the frame's own L field, decoded from the first two raw bytes. When it cannot be decoded the capture now stops immediately instead of gathering a shorter window - without an L field nothing downstream can find the block boundaries, so every further byte is time spent deaf over a frame that will be discarded anyway. `diagnostic_mode: verbose` keeps the old window for people who are deliberately watching.
+- **Still true, and now stated in the docs: `long_gfsk_packets` costs about 7 dB in weak signal.** Measured off/on/off on one board over three windows, with three untouched controls holding their RSSI percentile to the decibel. The capture ending in the right place did not remove that penalty, so the option remains a trade, not a free win. Check your longest decoded frame before enabling it prophylactically - below roughly 150 decoded bytes it buys nothing.
+
+## PL
+
+- **Strumień `long_gfsk_packets` kończy się teraz tam, gdzie kończy się ramka.** Przechwytywanie w trybie T nie miało jak poznać długości ramki, więc szło do swojego limitu 512 bajtów, zbierając szum po ramce — nie od czasu do czasu, tylko za każdym razem, bo oba wcześniejsze wyjścia z pętli są w odbiorze ciągłym nieosiągalne: `RX_DONE` nie może zaskoczyć, dopóki kod dopycha rejestr końca ładunku przed wskaźnik zapisu, a warunek ciszy nigdy nie dojrzewa, bo demodulator wciąż produkuje bajty z szumu. Zweryfikowane na sprzęcie: `captured=134 exit=t1_length` zamiast `captured=512 exit=buffer_cap`.
+- Długość bierze się z pola L samej ramki, dekodowanego z dwóch pierwszych bajtów surowych. Gdy się nie dekoduje, przechwytywanie przerywa natychmiast, zamiast zbierać krótsze okno — bez pola L nikt niżej nie znajdzie granic bloków, więc każdy kolejny bajt to czas spędzony w głuchocie nad ramką, która i tak zostanie odrzucona. `diagnostic_mode: verbose` zachowuje stare okno dla tych, którzy celowo patrzą.
+- **Nadal aktualne i teraz zapisane w dokumentacji: `long_gfsk_packets` kosztuje około 7 dB przy słabym sygnale.** Zmierzone wyłączona/włączona/wyłączona na jednej płytce w trzech oknach, przy trzech nietkniętych kontrolach trzymających swój percentyl RSSI co do decybela. Zakończenie przechwytywania we właściwym miejscu tej kary nie usunęło, więc opcja pozostaje wymianą, nie darmowym zyskiem. Sprawdź swoją najdłuższą zdekodowaną ramkę, zanim włączysz ją profilaktycznie — poniżej mniej więcej 150 bajtów zdekodowanych nie daje nic.
+
+
+# Fix: `false_start_like` counted every false start twice on SX126x
+
+## EN
+
+- `payload_size_unknown` and `raw_drain_skipped_weak` fire on the same event on that path - the drain is skipped precisely because no length could be derived and the signal was weak - and the aggregate added both. Ten consecutive summaries from four boards had the two equal to the unit and the total exactly double.
+- **Not cosmetic:** the diagnostic hint downstream triggers at 40 or more, so it was really firing at 20.
+- Fixed by taking the larger of the pair rather than dropping one of them. On the SX1276 path they are not the same event - `raw_drain_skipped_weak` stays at zero while `probe_start_aborted` carries the count - and that case was already correct.
+
+## PL
+
+- `payload_size_unknown` i `raw_drain_skipped_weak` odpalają się na tej ścieżce przy tym samym zdarzeniu — drain jest pomijany właśnie dlatego, że długości nie dało się wyprowadzić, a sygnał był słaby — a suma dodawała oba. Dziesięć kolejnych podsumowań z czterech płytek miało te dwie wartości równe co do jedności, a sumę dokładnie dwukrotną.
+- **To nie kosmetyka:** podpowiedź diagnostyczna niżej odpala się przy 40 i więcej, więc realnie wyzwalała się przy 20.
+- Naprawione przez wzięcie większej z pary, a nie przez usunięcie jednego składnika. Na ścieżce SX1276 to nie jest to samo zdarzenie — `raw_drain_skipped_weak` stoi na zerze, a licznik niesie `probe_start_aborted` — i tamten przypadek był już poprawny.
+
+
 # Feature: CC1101 hints at a marginal SPI connection when a write needs a retry
 
 ## EN

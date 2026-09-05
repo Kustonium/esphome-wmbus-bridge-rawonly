@@ -65,7 +65,7 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `tcxo_voltage` | `LR1121`, `SX1262` | `3.0v` | public | napięcie TCXO modułu; DIO3 w SX1262 to wyjście regulowane z chipu, więc złe napięcie to realne ryzyko dla TCXO, nie kosmetyka |
 | `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | czas rozruchu TCXO w taktach 32,768 kHz (~91,6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | advanced | szerokość pasma RX w Hz |
-| `preamble_detector` | `LR1121` | `16` | advanced | długość detektora preambuły w bitach |
+| `min_preamble_bits` | `SX1262`, `SX1276`, `LR1121` | `16` | advanced | ile bitów preambuły radio musi zobaczyć, zanim zacznie odbiór. **Dla `listen_mode: t1` i `both` maksimum to 16** — preambuła T1 jest krótsza niż 24 bity, więc `24` i `32` dają zero odebranych ramek (zmierzone: 184 wyzwolenia, 0 ramek) i są odrzucane przy walidacji. `8` działa, ale kosztuje ok. 16% słyszanych liczników. Na `SX1276` nie ma wartości `32`. Nie mylić z długością preambuły nadawanej — to osobne pole `SetPacketParams`, nieustawiane z YAML-a |
 | `payload_length` | `LR1121` | `255` | advanced | długość stałego przechwycenia T1; host przycina telegram według zdekodowanego L-field |
 | `rx_boosted` | `LR1121` | `true` | advanced | +2 dB czułości kosztem ok. 2 mA |
 | `bitrate` | `LR1121` | `100000` | advanced | bitrate GFSK |

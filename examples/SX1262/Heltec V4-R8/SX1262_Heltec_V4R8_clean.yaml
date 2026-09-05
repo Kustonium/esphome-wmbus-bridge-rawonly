@@ -113,7 +113,13 @@ wmbus_radio:
   clear_device_errors_on_boot: true
   publish_dev_err_after_clear: true
   rx_gain: boosted
-  long_gfsk_packets: true
+  # false is the right default. true switches the receive path to streaming and
+  # costs about 7 dB in weak signal - measured off/on/off on one board, with
+  # three untouched controls holding their RSSI percentile to the decibel.
+  # Turn it on only if a meter here actually sends more than about 150 decoded
+  # bytes: a three-phase electricity meter does, a water or heat meter does not.
+  # Check your longest decoded frame before enabling it prophylactically.
+  long_gfsk_packets: false
   listen_mode: t1
   listen_mode_filter_after_parse: false
   diagnostic_mode: normal

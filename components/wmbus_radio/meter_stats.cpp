@@ -108,7 +108,7 @@ void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s,
   batch += "]}";
 
   const std::string snapshot_topic = this->diag_topic_ + "/meter_snapshot";
-  mqtt->publish(snapshot_topic, batch, static_cast<uint8_t>(0), false);
+  mqtt->publish(snapshot_topic, batch, this->diag_qos_, false);
   ESP_LOGI(TAG, "METER SNAPSHOT / snapshot licznikow: trigger=%s meters=%zu", trigger, this->highlight_meter_stats_.size());
 }
 
@@ -172,7 +172,7 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
 
   const std::string meter_window_topic = this->meter_window_topic_for_(id_str, trigger, mode_str);
   if (!meter_window_topic.empty()) {
-    mqtt->publish(meter_window_topic, payload);
+    mqtt->publish(meter_window_topic, std::string(payload), this->diag_qos_, false);
   }
   ESP_LOGI(TAG, "METER / LICZNIK [%s] uptime_ms=%lu listen_mode=%s id=%s mode=%s win=%us count_window=%u total=%u avg_interval=%us win_avg_interval=%us win_avg_rssi=%ddBm",
            trigger, (unsigned long) now_ms, listen_mode, id_str, mode_str,

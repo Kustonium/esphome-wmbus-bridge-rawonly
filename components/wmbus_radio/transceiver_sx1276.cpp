@@ -239,7 +239,20 @@ void SX1276::setup() {
   const uint16_t preamble_length = 32 / 8;
   this->spi_write(0x25, {BYTE(preamble_length, 1), BYTE(preamble_length, 0)});
 
-  this->spi_write(0x1F, (uint8_t) ((1 << 7) | (1 << 5) | 0x0A));
+  // RegPreambleDetect: bit7 on/off, bits 6:5 size in bytes, bits 4:0 tolerance.
+  // Size was pinned at 2 bytes (16 bits) until 2026-09-01; it is now the
+  // min_preamble_bits option, shared with SX1262 and LR1121.
+  {
+    const uint8_t tol = 0x0A;
+    uint8_t v = 0;
+    if (this->min_preamble_bits_ == 0) {
+      v = tol;  // detector off
+    } else {
+      const uint8_t size = (uint8_t) ((this->min_preamble_bits_ / 8) - 1);  // 8->0, 16->1, 24->2
+      v = (uint8_t) ((1 << 7) | (size << 5) | tol);
+    }
+    this->spi_write(0x1F, v);
+  }
 
   // RegLna: maximum gain (G1) with the high-frequency LNA boost on.
   //

@@ -175,9 +175,25 @@ Silicon revisions: modules reporting `VERSION=0x14` and `VERSION=0x04` are both 
 #### LR1121
 
 LR1121 support is experimental and requires explicit opt-in. It has decoded real
-T1, C1 and S1 traffic on the Waveshare ESP32-S3-LR1121-HF board (SKU 34011), but
-it has not run for weeks and has never been compared against another radio in the
-same position.
+T1, C1 and S1 traffic on the Waveshare ESP32-S3-LR1121-HF board (SKU 34011).
+
+It has now run for weeks beside four other receivers in one flat, and the
+comparison that used to be missing has been made. It is not flattering: over a
+12 h window it heard **48 meters against the T-Beam SX1262's 113**, on an
+identical 10 cm antenna, the same firmware and the same window. On an attenuator
+bench it was the first board to lose the signal entirely, where two SX1262 boards
+were still decoding 92.9% of frames. Swapping antennas between the two ruled out
+the antenna: the LR1121 lost while holding the better one.
+
+The mechanism is visible in the counters. It has the **highest conversion of any
+board here (80% of receiver triggers became frames)** and by far the fewest
+triggers. It is the most conservative receiver in the set - it rarely attempts a
+marginal start, and rarely wastes one. That is why it hears less: on this
+workload, willingness to attempt weak frames is what buys coverage.
+
+Still one board, one flat, one person, and none of it separates the chip from
+this driver. The opt-in stays for that reason, not because the driver is
+untested.
 
 ```yaml
 wmbus_radio:
@@ -367,9 +383,25 @@ Rewizje układu: akceptowane są moduły zgłaszające zarówno `VERSION=0x14`, 
 #### LR1121
 
 Obsługa LR1121 jest eksperymentalna i wymaga jawnego włączenia. Na płytce
-Waveshare ESP32-S3-LR1121-HF (SKU 34011) zdekodowała realny ruch T1, C1 i S1, ale
-nie chodziła tygodniami i nigdy nie była porównana z innym radiem w tym samym
-miejscu.
+Waveshare ESP32-S3-LR1121-HF (SKU 34011) zdekodowała realny ruch T1, C1 i S1.
+
+Chodziła już tygodniami obok czterech innych odbiorników w jednym mieszkaniu,
+więc brakujące porównanie zostało zrobione. Nie wypada dla niej korzystnie:
+w oknie 12 h usłyszała **48 liczników wobec 113 u T-Beama na SX1262**, przy
+identycznej antenie 10 cm, tym samym firmwarze i tym samym oknie. Na stanowisku
+tłumikowym była pierwszą płytką, która straciła sygnał całkowicie, podczas gdy
+dwie płytki SX1262 dekodowały jeszcze 92,9% ramek. Zamiana anten między nimi
+wykluczyła antenę: LR1121 przegrywał, mając tę lepszą.
+
+Mechanizm widać w licznikach. Ma **najwyższą konwersję z całej stawki (80%
+wyzwoleń odbiornika zamieniło się w ramki)** i zdecydowanie najmniej wyzwoleń.
+To najostrożniejszy odbiornik z zestawu - rzadko podejmuje próbę przy słabym
+starcie i rzadko ją marnuje. Dlatego słyszy mniej: przy tym obciążeniu to
+gotowość do próbowania kupuje zasięg.
+
+To nadal jedna płytka, jedno mieszkanie, jedna osoba, i nic z tego nie oddziela
+układu od tego sterownika. Jawne włączenie zostaje z tego powodu, a nie dlatego,
+że sterownik jest nieprzetestowany.
 
 ```yaml
 wmbus_radio:

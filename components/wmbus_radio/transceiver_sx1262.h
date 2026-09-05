@@ -4,6 +4,7 @@
 #include "transceiver.h"
 #include "esphome/core/hal.h"
 
+#include <array>
 #include <vector>
 
 namespace esphome {
@@ -25,6 +26,19 @@ enum SX1262RxGain : uint8_t {
 // mode, which costs about 1.2 dB of noise for nothing if the signal fits in
 // the narrower window. This enum exists to settle that on hardware rather
 // than by argument, with two SX1262 boards running side by side.
+// How many preamble bits the radio must see before it starts a reception.
+// Hardcoded to 8 upstream and here until 2026-09-01. Higher values reject
+// noise triggers but also refuse frames whose preamble is chewed up by it -
+// the trade sits exactly where the marginal meters live, so it is a YAML
+// option rather than a constant. Values are the SetPacketParams field.
+enum SX1262PreambleDetector : uint8_t {
+  PREAMBLE_DETECT_OFF = 0x00,  // detector disabled
+  PREAMBLE_DETECT_8  = 0x04,
+  PREAMBLE_DETECT_16 = 0x05,
+  PREAMBLE_DETECT_24 = 0x06,
+  PREAMBLE_DETECT_32 = 0x07,
+};
+
 enum SX1262T1RxBandwidth : uint8_t {
   T1_BW_312 = 0,  // inherited default, current behaviour
   T1_BW_234 = 1,  // matches C1/S1 and roughly the SX1276 window
@@ -60,6 +74,7 @@ class SX1262 : public RadioTransceiver {
 
   // T1 receiver bandwidth only; C1/S1 stay at their measured 234.3 kHz.
   void set_t1_rx_bandwidth(SX1262T1RxBandwidth bw) { this->t1_rx_bandwidth_ = bw; }
+  void set_preamble_detector(SX1262PreambleDetector d) { this->preamble_detector_ = d; }
 
   // SX1262 tuning / board helpers (set from YAML via __init__.py)
   void set_frequency_mhz(float frequency_mhz) {
@@ -113,6 +128,10 @@ class SX1262 : public RadioTransceiver {
 
   // Register helpers
   uint8_t read_register8_(uint16_t addr);
+  static constexpr size_t CANDIDATE_REGISTER_COUNT = 160;
+  void capture_candidate_registers_(std::array<uint8_t, CANDIDATE_REGISTER_COUNT> &snapshot);
+  void log_candidate_registers_(const char *stage,
+                                const std::array<uint8_t, CANDIDATE_REGISTER_COUNT> &snapshot);
   uint16_t get_irq_status_();
 
   // Raw SX126x status byte (GetStatus). Chip mode lives in bits 6:4 and is the
@@ -127,6 +146,9 @@ class SX1262 : public RadioTransceiver {
 
   // Raw RssiSync / RssiAvg from GetPacketStatus (0 = never latched).
   void read_packet_status_rssi_(uint8_t &raw_sync, uint8_t &raw_avg);
+
+  std::array<uint8_t, CANDIDATE_REGISTER_COUNT> reset_register_snapshot_{};
+  bool reset_register_snapshot_valid_{false};
 
   // Which of the two receive paths produced a frame. Doubles as the index into
   // rssi_diag_reported_, so the values must stay 0/1.
@@ -169,6 +191,7 @@ class SX1262 : public RadioTransceiver {
   bool has_tcxo_{false};
   SX1262RxGain rx_gain_{BOOSTED};
   SX1262T1RxBandwidth t1_rx_bandwidth_{T1_BW_312};
+  SX1262PreambleDetector preamble_detector_{PREAMBLE_DETECT_16};
   SX1262TcxoVoltage tcxo_voltage_{SX1262_TCXO_3_0V};
   bool long_gfsk_packets_{false};
   bool clear_device_errors_on_boot_{false};

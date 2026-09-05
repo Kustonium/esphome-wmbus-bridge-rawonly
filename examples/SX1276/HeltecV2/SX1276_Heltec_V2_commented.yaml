@@ -131,6 +131,13 @@ wmbus_radio:
   #   wmbus/<topic_name>/diag/...
   # topic_name: "${devicename}"
   # sx1276_busy_ether_mode: adaptive  # default: normal
+
+  # How many preamble bits the radio must see before it starts a reception.
+  # 8 is what upstream uses and costs about 16% of the meters heard here; 16 is
+  # the default and the maximum for listen_mode t1 and both, because the T1
+  # preamble is shorter than 24 bits and 24 decodes nothing at all. SX1276 sizes
+  # the detector in 1/2/3 bytes, so 32 does not exist on this chip.
+  # min_preamble_bits: 16  # default: 16
   # EN: raise only when overload is MEASURED (fifo_overrun/truncated > 0).
   #     adaptive aborts weak starts to keep up and costs ~12 dB of sensitivity.
   # PL: podnosic dopiero przy ZMIERZONYM przeciazeniu (fifo_overrun/truncated > 0).

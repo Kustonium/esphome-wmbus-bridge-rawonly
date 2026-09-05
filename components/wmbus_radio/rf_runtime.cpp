@@ -161,7 +161,7 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
                    "\"state\":\"adaptive_active\","
                    "\"fsl\":%" PRIu32 ",\"fsl_ext\":%" PRIu32 ",\"drop_pct\":%" PRIu32 "}",
                    chip, fsl_total, fsl, drop_pct);
-          mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), static_cast<uint8_t>(0), false);
+          mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), this->diag_qos_, false);
         }
       }
       this->busy_ether_was_active_ = true;
@@ -181,7 +181,7 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
                  "\"state\":\"adaptive_passive\","
                  "\"fsl\":%" PRIu32 ",\"fsl_ext\":%" PRIu32 ",\"drop_pct\":%" PRIu32 "}",
                  chip, fsl_total, fsl, drop_pct);
-        mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), static_cast<uint8_t>(0), false);
+        mqtt->publish(this->diag_topic_ + "/busy_ether_changed", std::string(ev), this->diag_qos_, false);
       }
     }
     this->busy_ether_was_active_ = false;

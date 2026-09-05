@@ -193,6 +193,26 @@ May help for distant meters, walls or partially lost frames. Usually increases:
 
 Judge it by `meter_snapshot`, not by summary alone.
 
+## Receiver triggers: `irq_fired`
+
+`irq_fired` counts the data interrupt itself, before any parsing. It is the
+only counter that separates "never heard anything" from "heard it and lost it
+downstream", and without it `drop_pct` is misleading: a frame the radio never
+attempted is not counted as dropped, so the ratio *improves* as reception gets
+worse.
+
+Measured across five boards in one window: the board with the worst conversion
+(`total / irq_fired` = 11%) heard the most meters, and the board with the
+lowest `drop_pct` (8%) delivered half of what the board with the highest (21%)
+did. **Read `irq_fired` next to `dropped`, never `drop_pct` alone.**
+
+It also splits the "no frames" hint in two:
+
+| hint | meaning |
+|---|---|
+| `NO_DATA` | no triggers at all - antenna, frequency or wiring |
+| `RX_NO_MATCH` | triggers but no frames - something IS transmitting; check `listen_mode`, `min_preamble_bits` and the meter's mode |
+
 ## Legacy detailed options
 
 These still compile for compatibility, but are deprecated/advanced:

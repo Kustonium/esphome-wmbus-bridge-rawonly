@@ -193,6 +193,25 @@ Może pomóc przy dalszych licznikach, ścianach albo częściowo traconych ramk
 
 Oceniaj po `meter_snapshot`, nie po samym summary.
 
+## Wyzwolenia odbiornika: `irq_fired`
+
+`irq_fired` liczy samo przerwanie danych, przed jakimkolwiek parsowaniem. To
+jedyny licznik, który rozdziela „nic nie usłyszałem" od „usłyszałem i zgubiłem
+dalej", a bez niego `drop_pct` myli: ramka, której radio nigdy nie podjęło, nie
+liczy się jako odrzucona, więc wskaźnik *poprawia się*, gdy odbiór się psuje.
+
+Zmierzone na pięciu płytkach w jednym oknie: płytka z najgorszą konwersją
+(`total / irq_fired` = 11%) słyszała najwięcej liczników, a płytka z najniższym
+`drop_pct` (8%) dowoziła połowę tego co płytka z najwyższym (21%).
+**Czytać `irq_fired` obok `dropped`, nigdy samego `drop_pct`.**
+
+Rozdziela też podpowiedź „brak ramek" na dwa stany:
+
+| podpowiedź | znaczenie |
+|---|---|
+| `NO_DATA` | zero wyzwoleń - antena, częstotliwość albo połączenia |
+| `RX_NO_MATCH` | wyzwolenia bez ramek - coś NADAJE; sprawdź `listen_mode`, `min_preamble_bits` i tryb licznika |
+
 ## Stare szczegółowe opcje
 
 Te opcje nadal się kompilują dla kompatybilności, ale są deprecated/advanced:
