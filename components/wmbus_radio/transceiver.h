@@ -56,6 +56,11 @@ public:
   // Default: keep the generic strict path.
   virtual bool supports_preamble_retry() const { return false; }
   virtual bool supports_unknown_size_raw_drain() const { return false; }
+  // Longest frame, in raw on-air bytes after the sync word, that the current
+  // configuration can capture. 0 means no fixed ceiling. Lets the component
+  // tell a meter that simply sends more than the receive path holds from a
+  // damaged frame.
+  virtual size_t fixed_capture_limit() const { return 0; }
 
   // Live RSSI of the channel right now, as opposed to get_rssi(), which every
   // driver caches from the last packet capture. The two are easy to confuse and

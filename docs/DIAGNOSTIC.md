@@ -213,6 +213,27 @@ It also splits the "no frames" hint in two:
 | `NO_DATA` | no triggers at all - antenna, frequency or wiring |
 | `RX_NO_MATCH` | triggers but no frames - something IS transmitting; check `listen_mode`, `min_preamble_bits` and the meter's mode |
 
+### What each trigger started on: `irq_start`
+
+`rx_path.irq_start` (and the bracket after `irq=` in the log line) splits
+`irq_fired` by the first bytes the radio delivered after the sync word, before
+any decoding. The six add up to `irq_fired`:
+
+| field | first bytes | meaning |
+|---|---|---|
+| `t1` | anything but `0x54` | read as a T1 (3-of-6) start |
+| `c1a` | `0x54 0xCD` | C-mode, frame format A |
+| `c1b` | `0x54 0x3D` | C-mode, frame format B |
+| `c_other` | `0x54`, then anything else | C-mode prefix with an unknown format byte |
+| `s1` | - | `listen_mode: s1` (Manchester, not classified early) |
+| `no_data` | - | interrupt, but too few bytes arrived to classify |
+
+The sync word alone cannot tell T1 from C1: both share `0x543D`. So a
+`listen_mode: c1` receiver whose triggers are all `t1` is catching T1 traffic
+(or noise), not C1 it fails to decode; one with `c1a`/`c1b` triggers and no
+frames is hearing C1 and losing it downstream. In `listen_mode: t1` the reverse
+holds: `c1a`/`c1b` triggers mean a C1 meter is in range.
+
 ## Legacy detailed options
 
 These still compile for compatibility, but are deprecated/advanced:

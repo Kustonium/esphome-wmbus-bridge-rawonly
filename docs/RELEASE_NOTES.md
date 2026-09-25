@@ -2,6 +2,16 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Diagnostics: what each receiver trigger started on, and a warning when a meter needs `long_gfsk_packets`
+
+- **`irq_fired` is now split by what the radio started on**, judged from the first bytes after the sync word: `t1`, `c1a`, `c1b`, `c_other`, `s1`, `no_data`. They add up to `irq_fired` and appear in brackets after `irq=` in the log and as `rx_path.irq_start` in all three summaries. T1 and C1 share the sync word `0x543D`, so until now a C1 receiver that fired but decoded nothing could not tell C1 it was losing from T1 traffic and noise. See `DIAGNOSTIC.md`.
+- **SX1262 now tells you when a meter needs `long_gfsk_packets: true`.** With it off, the receive path holds 255 raw bytes; a meter sending more used to show up only as `payload read short` / `Failed to read data` on every transmission. When the same over-long T1 frame arrives twice, the board logs a warning once per boot and raises the `ENABLE_LONG_GFSK_PACKETS` suggestion. The first Heltec V4-R8 in the field spent a day like that (`total_len=353` every minute) before anyone did the arithmetic.
+- **SX1262 in `listen_mode: c1` now follows `sx1262_rx_bandwidth` (default 312 kHz)** instead of a pinned 234.3 kHz, a value that was only ever measured for S1. Only S1 keeps its fixed 234.3 kHz. This removes a setting that was certainly wrong; it is not a cure for weak C1 on the SX1262 - see the next point.
+- **Measured, not changed: C1 on SX1262 and LR1121 hears only "clean" transmitters.** Against seven Techem C1 meters that an SX1276 decoded, both chips heard one; bandwidth up to 467 kHz, `min_preamble_bits` 16/8/0 and transmitter frequency offset (within ±4 kHz) made no difference. Setting `sx1276_preamble_tolerance: 0` made the SX1276 hear exactly that same single meter. The SX1276's advantage on C1 is its preamble error tolerance, which the SX1262 and LR1121 do not have. For C1, an SX1276 board remains the safe choice.
+- **Heltec V4-R8 example:** the status LED on GPIO46 is active-high (R8 schematic and Heltec's own factory test); the commented example drove it inverted.
+
+---
+
 ## Feature: `lr1121_auto_length` - the frame's own L-field sets the capture length
 
 - **New option, off by default, LR1121 only.** `payload_length` is a ceiling: the packet engine captures exactly that many bytes on every frame and the host trims. Anything longer is cut, which put a hard 255-byte limit on what the chip could receive. `lr1121_auto_length` reads each frame's L-field out of the first bytes as they arrive, computes how many raw bytes that frame really occupies, and writes it into the packet engine while the frame is still on air - so the capture ends where the frame does.

@@ -89,6 +89,8 @@ class SX1262 : public RadioTransceiver {
   // from the radio buffer while RX is still running (rxAddrPtr wrap + RxTxPldLen).
   // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
   void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
+  // FIFO path: SetPacketParams fixes the payload at 255 bytes.
+  size_t fixed_capture_limit() const override { return this->long_gfsk_packets_ ? 0 : 255; }
 
   // Optional: clear latched device errors on boot (and capture before/after).
   void set_clear_device_errors_on_boot(bool v) { this->clear_device_errors_on_boot_ = v; }

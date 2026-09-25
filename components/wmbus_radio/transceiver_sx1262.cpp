@@ -1379,12 +1379,20 @@ void SX1262::setup() {
   // 312.0 kHz here is inherited, not measured, and it is 25% wider than the
   // 250 kHz the SX1276 uses for T1, so it admits ~1.2 dB of noise the signal
   // does not need. `sx1262_rx_bandwidth` exists to settle that on hardware.
-  // Scope, exactly: `listen_mode: c1` and `listen_mode: s1` ignore this and
-  // keep their measured 234.3 kHz. `listen_mode: both` does NOT - it shares one
-  // receiver bandwidth with T1 and follows this setting, which is also what it
-  // did before the option existed (it took the 312 kHz T1 branch).
+  // Scope, exactly: only `listen_mode: s1` ignores this and keeps its measured
+  // 234.3 kHz. t1, both and c1 follow the setting.
+  //
+  // c1 used to be pinned to 234.3 kHz as well, on the strength of the S1 sweep
+  // above - which never covered C1 (100 kbps NRZ, 45 kHz deviation, a very
+  // different signal from S1's Manchester). Measured 2026-09-25 on the same
+  // Techem C1 meters an SX1276 decoded every ~245 s: two SX1262 boards (Heltec
+  // V4.2, XIAO) in `c1` at 234.3 kHz decoded none of them over several minutes,
+  // one CRC failure between them, while the Heltec in `both` at 312 kHz did
+  // decode C1. The SX1276 reaches C1 through AFC over 250 kHz; the SX1262 has
+  // no AFC in GFSK, so the filter alone has to absorb the meter's frequency
+  // offset on top of a ~190 kHz Carson bandwidth.
   uint8_t rx_bw = GFSK_RX_BW_234_3;
-  if (this->listen_mode_ != LISTEN_MODE_C1 && this->listen_mode_ != LISTEN_MODE_S1) {
+  if (this->listen_mode_ != LISTEN_MODE_S1) {
     switch (this->t1_rx_bandwidth_) {
       case T1_BW_234: rx_bw = GFSK_RX_BW_234_3; break;
       case T1_BW_156: rx_bw = GFSK_RX_BW_156_2; break;

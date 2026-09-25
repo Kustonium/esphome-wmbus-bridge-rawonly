@@ -50,8 +50,8 @@ A valid S1 telegram is published on `wmbus/<topic_name>/telegram` just like vali
 | `has_tcxo` | `SX1262` | `false` | public | enable on SX1262 boards with a TCXO; omitting it may leave the radio active but receiving no frames |
 | `dio2_rf_switch` | `SX1262` | `true` | public | control the RF switch through DIO2 |
 | `rx_gain` | `SX1262` | `boosted` | public | `boosted` or `power_saving` |
-| `long_gfsk_packets` | `SX1262` | `false` | public | for long T1 frames; disabling it may truncate/drop them |
-| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | public | `312khz` (inherited default, unmeasured for T1), `234khz`, `156khz`. Applies to `listen_mode: t1` **and `both`**; ignored by `c1` and `s1`, whose measured 234.3 kHz setting is fixed |
+| `long_gfsk_packets` | `SX1262` | `false` | public | for long T1 frames; disabling it may truncate/drop them. When a meter in range needs it, the board says so: a warning in the log and the `ENABLE_LONG_GFSK_PACKETS` suggestion, after the same over-long T1 frame has arrived twice |
+| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | public | `312khz` (inherited default, unmeasured for T1), `234khz`, `156khz`. Applies to `listen_mode: t1`, `both` **and `c1`**; ignored by `s1`, whose measured 234.3 kHz setting is fixed. `c1` was pinned to 234.3 kHz before 2026-09-25, a value only ever measured for S1 |
 | `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | none | board-specific | external RF front-end pins, e.g. Heltec V4 |
 | `rf_sw_pin` | `SX1262` | none | board-specific | module RF-switch gate; required on XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), otherwise sensitivity is about 30 dB lower |
 | `sx1276_busy_ether_mode` | `SX1276` | `normal` | public | `normal`, `aggressive`, `adaptive`; increase only for **measured** overload (`fifo_overrun`/`truncated` > 0); `adaptive` aborts weak starts and costs about 12 dB of sensitivity |

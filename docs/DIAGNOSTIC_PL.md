@@ -212,6 +212,27 @@ Rozdziela też podpowiedź „brak ramek" na dwa stany:
 | `NO_DATA` | zero wyzwoleń - antena, częstotliwość albo połączenia |
 | `RX_NO_MATCH` | wyzwolenia bez ramek - coś NADAJE; sprawdź `listen_mode`, `min_preamble_bits` i tryb licznika |
 
+### Na czym ruszyło każde wyzwolenie: `irq_start`
+
+`rx_path.irq_start` (oraz nawias po `irq=` w linii logu) dzieli `irq_fired`
+według pierwszych bajtów, które radio oddało po sync wordzie, przed
+jakimkolwiek dekodowaniem. Sześć pól sumuje się do `irq_fired`:
+
+| pole | pierwsze bajty | znaczenie |
+|---|---|---|
+| `t1` | cokolwiek poza `0x54` | czytane jako początek T1 (3-z-6) |
+| `c1a` | `0x54 0xCD` | tryb C, format ramki A |
+| `c1b` | `0x54 0x3D` | tryb C, format ramki B |
+| `c_other` | `0x54`, potem coś innego | prefiks trybu C z nieznanym bajtem formatu |
+| `s1` | - | `listen_mode: s1` (Manchester, bez wczesnej klasyfikacji) |
+| `no_data` | - | przerwanie, ale za mało bajtów, żeby sklasyfikować |
+
+Sam sync word nie odróżni T1 od C1: oba mają `0x543D`. Odbiornik w
+`listen_mode: c1`, którego wszystkie wyzwolenia to `t1`, łapie ruch T1 (albo
+szum), a nie C1, którego nie umie zdekodować. Taki, który ma wyzwolenia
+`c1a`/`c1b` i zero ramek, słyszy C1 i gubi je dalej. W `listen_mode: t1` jest
+odwrotnie: wyzwolenia `c1a`/`c1b` oznaczają licznik C1 w zasięgu.
+
 ## Stare szczegółowe opcje
 
 Te opcje nadal się kompilują dla kompatybilności, ale są deprecated/advanced:

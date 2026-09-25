@@ -10,6 +10,9 @@
 // Protocol constants (were defined at the top of component.cpp).
 #define WMBUS_PREAMBLE_SIZE (3)
 #define WMBUS_MODE_C_PREAMBLE (0x54)
+// Second C-mode indicator byte (same values as packet.cpp's BLOCK_A/B_PREAMBLE).
+#define WMBUS_MODE_C_FORMAT_A (0xCD)
+#define WMBUS_MODE_C_FORMAT_B (0x3D)
 #define WMBUS_T1_LEN_PROBE_BYTES (18)
 // Raw-stream drain cap, used by two paths: the SX1276 recovery path when a
 // length cannot be derived from the initial probe, and the S1 receive path,

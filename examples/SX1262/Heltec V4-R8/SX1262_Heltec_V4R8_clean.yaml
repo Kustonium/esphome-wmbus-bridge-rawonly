@@ -119,6 +119,9 @@ wmbus_radio:
   # Turn it on only if a meter here actually sends more than about 150 decoded
   # bytes: a three-phase electricity meter does, a water or heat meter does not.
   # Check your longest decoded frame before enabling it prophylactically.
+  # The sign that you need it: the same meter logs
+  #   payload read short ... total_len=<over 255>
+  # on every transmission of that meter (for example total_len=353).
   long_gfsk_packets: false
   listen_mode: t1
   listen_mode_filter_after_parse: false
