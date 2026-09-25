@@ -14,7 +14,26 @@ on:
 
 jobs:
   host-tests:
-    runs-on: ubuntu-latest
+    # `ubuntu-latest` migrates to Ubuntu 26.04 between 2026-10-19 and 2026-11-19
+    # (actions/runner-images#14748). This job is the only one whose result the
+    # image can actually change: it compiles tests/host/test_core.cpp with the
+    # runner's own g++, while firmware-build pins Python via setup-python and
+    # lets ESPHome bring its own toolchain. So the new image is tested here and
+    # not there - doubling eight firmware builds would cost a lot to learn
+    # nothing.
+    #
+    # continue-on-error on purpose, and only until the migration completes: a
+    # red badge would say the component is broken, when what it would mean is
+    # that an image nobody is on yet behaves differently. Drop both this and the
+    # matrix entry once `ubuntu-latest` is 26.04 - at that point the plain entry
+    # covers it.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, "ubuntu-26.04"]
+    name: host tests (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.runner == 'ubuntu-26.04' }}
 
     steps:
       - name: Check out repository
@@ -76,6 +95,15 @@ jobs:
           # entry only the default (empty) path is ever compiled.
           - name: forward_meters schema (SX1276 / esp32)
             config: tests/ci/forward_meters_ci.yaml
+          # The bench transmitter under tests/tools/. Same argument as the
+          # LR1121 entry: no other configuration selects wmbus_tx, so without
+          # this it is compiled nowhere. It lived outside version control until
+          # 2026-09-23 and collected two defects in the dark - a clock loop that
+          # could spin without feeding the watchdog, and a C1 mode that never
+          # emitted the mode-C indicator. This entry compiles both the
+          # diagnostics path and mode c1.
+          - name: wmbus_tx bench transmitter (SX1276 / esp32)
+            config: tests/tools/wmbus_tx/check.yaml
 
     name: build (${{ matrix.name }})
 
@@ -124,6 +152,11 @@ jobs:
           sed -i "s|github://Kustonium/esphome-wmbus-bridge-rawonly@main|{ type: local, path: ${GITHUB_WORKSPACE}/components }|" "$flat"
           # 'refresh' is only valid for a git source; drop it for the local override.
           sed -i "/refresh: 0s/d" "$flat"
+          # tests/tools/ configs point at their own component directory with a
+          # path relative to the config, which the copy above flattens. Absolute
+          # it. No-op elsewhere: the rewrite just done yields an absolute path,
+          # so this pattern cannot match it.
+          sed -i "s|path: components$|path: ${GITHUB_WORKSPACE}/tests/tools/wmbus_tx/components|" "$flat"
           echo "FLAT_CONFIG=$flat" >> "$GITHUB_ENV"
           echo "----- effective external_components -----"
           grep -n -A2 "external_components" "$flat"

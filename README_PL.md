@@ -239,3 +239,7 @@ Starszy szczegółowy opis README przeniesiono do [`docs/README_FULL_PL.md`](doc
 Ten projekt jest celowo RAW-only i nie jest ogólnym helpdeskiem ESPHome/Home Assistant.
 
 Przed otwarciem issue przeczytaj [`SUPPORT_PL.md`](SUPPORT_PL.md).
+
+## Wkład w projekt
+
+To repozytorium publikuje z osobnego drzewa deweloperskiego, więc zmiana nie wchodzi przez gałąź pull requesta — jest tam najpierw przenoszona i trafia tutaj jednym zgniecionym commitem sync. Oznacza to, że Twoje commity nie pojawią się w historii tego repozytorium, mimo że kod jest Twój. Autorstwo jest odnotowywane w dwóch innych miejscach: commit przenoszący w drzewie deweloperskim wymienia Twoje oryginalne commity, a komentarz zamykający pull requesta mówi wprost, że kod jest Twój.

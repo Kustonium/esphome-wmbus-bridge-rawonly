@@ -120,6 +120,7 @@ CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY = "diagnostic_publish_highlight_only"
 CONF_DIAG_METER_STATS = "diagnostic_meter_stats"
 CONF_DIAG_PUBLISH_SUGGESTION = "diagnostic_publish_suggestion"
 CONF_SX1276_BUSY_ETHER_MODE = "sx1276_busy_ether_mode"
+CONF_SX1276_PREAMBLE_TOLERANCE = "sx1276_preamble_tolerance"
 
 # SX1262 T1 receiver bandwidth. C1 and S1 are not affected - their 234.3 kHz
 # is a measured optimum (three-point sweep on S-mode, 2026-08-01) and is
@@ -167,6 +168,11 @@ CONF_FREQUENCY = "frequency"
 # written from datasheet + schematic + vendor package, never run against
 # hardware. Gated the same way CC1101 is.
 CONF_LR1121_ALLOW_EXPERIMENTAL = "lr1121_allow_experimental"
+CONF_LR1121_VERIFY_BUFFER = "lr1121_verify_buffer"
+CONF_LR1121_EXPECTED_LEN_OVERRIDE = "lr1121_expected_len_override"
+CONF_LR1121_SYNC_PROBE = "lr1121_sync_probe"
+CONF_LR1121_DRAIN = "lr1121_drain"
+CONF_LR1121_AUTO_LENGTH = "lr1121_auto_length"
 CONF_TCXO_VOLTAGE = "tcxo_voltage"
 # Second TCXO knob. HF_XOSC_START does not distinguish "wrong voltage" from
 # "did not settle in time", so both have to be reachable from YAML.
@@ -480,6 +486,28 @@ BASE_CONFIG_SCHEMA = (
             ),
             cv.Optional(CONF_PAYLOAD_LENGTH, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_PAYLOAD_LENGTH]): cv.int_range(min=16, max=255),
             cv.Optional(CONF_RX_BOOSTED, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_RX_BOOSTED]): cv.boolean,
+            cv.Optional(CONF_LR1121_VERIFY_BUFFER, default=False): cv.boolean,
+            # 0 = off. Any other value is written into the undocumented
+            # expected-packet-length register after each SetRx, overriding what
+            # SetPacketParams declared. Bench experiment only; see
+            # docs/LR1121-runtime-diagnostics.md.
+            cv.Optional(CONF_LR1121_EXPECTED_LEN_OVERRIDE, default=0): cv.int_range(min=0, max=4095),
+            # Early sync-word interrupt on T1/C1, so the live position counter can
+            # be sampled mid-frame. Diagnostic; inflates rx_preamble_failed.
+            cv.Optional(CONF_LR1121_SYNC_PROBE, default=False): cv.boolean,
+            # Read the frame out while it is still arriving.
+            # Needs lr1121_sync_probe: without the early wake there is no
+            # window in which to read anything.
+            cv.Optional(CONF_LR1121_DRAIN, default=False): cv.boolean,
+            # Derive each frame's real length from its L-field while it is still
+            # arriving and stop the packet engine there. Needs lr1121_sync_probe
+            # and lr1121_drain: without the early wake there is no window, and
+            # without the drain the header is not in hand to read.
+            #
+            # Off by default because it depends on the undocumented register
+            # 0x00F20368, verified against one radio firmware. Below 255 bytes
+            # nothing needs that register, which is exactly where this line sits.
+            cv.Optional(CONF_LR1121_AUTO_LENGTH, default=False): cv.boolean,
             cv.Optional(CONF_BITRATE, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_BITRATE]): cv.int_range(min=600, max=300000),
             cv.Optional(CONF_DEVIATION, default=BASE_CONFIG_DEFAULTS_LR1121[CONF_DEVIATION]): cv.int_range(min=1000, max=200000),
 
@@ -586,6 +614,18 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_SX1276_BUSY_ETHER_MODE, default="normal"): cv.one_of(
                 "normal", "aggressive", "adaptive", lower=True
             ),
+
+            # Chip errors tolerated inside the preamble pattern
+            # (RegPreambleDetect 0x1F, bits 4:0). SX1276 only - the SX126x and
+            # LR1121 have no equivalent field, their sync match is exact.
+            #
+            # Diagnostic knob. 0 makes the match exact here too, which is the
+            # direct test of whether this field is why the SX1276 is the only
+            # receiver in the benchmark that still decodes an off-rate
+            # transmitter (measured 2026-09-05: 8.4% at -6% chip rate, against
+            # exactly zero on two SX1262 boards and an LR1121).
+            cv.Optional(CONF_SX1276_PREAMBLE_TOLERANCE, default=10): cv.int_range(min=0, max=31),
+
             cv.Optional(CONF_SX1262_RX_BANDWIDTH, default="312khz"): cv.one_of(
                 *SX1262_T1_RX_BANDWIDTHS, lower=True
             ),
@@ -679,11 +719,14 @@ _REPORT_RADIO = {
                CONF_LONG_GFSK_PACKETS, CONF_CLEAR_DEVICE_ERRORS_ON_BOOT,
                CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH,
                CONF_MIN_PREAMBLE_BITS),
-    "SX1276": (CONF_SX1276_BUSY_ETHER_MODE, CONF_MIN_PREAMBLE_BITS),
+    "SX1276": (CONF_SX1276_BUSY_ETHER_MODE, CONF_MIN_PREAMBLE_BITS,
+               CONF_SX1276_PREAMBLE_TOLERANCE),
     "CC1101": (CONF_CC1101_ALLOW_EXPERIMENTAL,),
     "LR1121": (CONF_LR1121_ALLOW_EXPERIMENTAL, CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS,
                CONF_RX_BANDWIDTH, CONF_MIN_PREAMBLE_BITS, CONF_PAYLOAD_LENGTH,
-               CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION),
+               CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION,
+               CONF_LR1121_VERIFY_BUFFER, CONF_LR1121_EXPECTED_LEN_OVERRIDE,
+               CONF_LR1121_SYNC_PROBE, CONF_LR1121_DRAIN, CONF_LR1121_AUTO_LENGTH),
 }
 
 _REPORT_OUTPUT = (CONF_TOPIC_NAME, CONF_TELEGRAM_TOPIC, CONF_PUBLISH_RSSI,
@@ -880,7 +923,36 @@ def _validate_radio_pins(config):
     return config
 
 
-CONFIG_SCHEMA = cv.All(BASE_CONFIG_SCHEMA, _validate_radio_pins)
+def _validate_lr1121_auto_length(config):
+    """lr1121_auto_length without its two prerequisites does nothing at all.
+
+    The length is read out of bytes the drain has copied, and the drain only
+    runs inside the window the sync-word probe opens. Setting the option alone
+    would arm the packet engine with a ceiling and then never narrow it, so
+    every capture would run to that ceiling - worse than leaving it off, and
+    silent. Three options that only work together are worth one error message.
+    """
+    if not config.get(CONF_LR1121_AUTO_LENGTH):
+        return config
+    missing = [name for name, key in ((CONF_LR1121_SYNC_PROBE, CONF_LR1121_SYNC_PROBE),
+                                      (CONF_LR1121_DRAIN, CONF_LR1121_DRAIN))
+               if not config.get(key)]
+    if missing:
+        raise cv.Invalid(
+            f"{CONF_LR1121_AUTO_LENGTH} needs {' and '.join(missing)} as well: the length is read "
+            f"from bytes the drain copied, inside the window the sync probe opens / "
+            f"{CONF_LR1121_AUTO_LENGTH} wymaga takze {' i '.join(missing)}: dlugosc czytana jest "
+            f"z bajtow skopiowanych przez drenaz, w oknie otwartym przez sonde")
+    if config.get(CONF_LR1121_EXPECTED_LEN_OVERRIDE):
+        raise cv.Invalid(
+            f"{CONF_LR1121_AUTO_LENGTH} and {CONF_LR1121_EXPECTED_LEN_OVERRIDE} do the same job by "
+            f"opposite means; the override pins every capture to one length. Pick one / "
+            f"{CONF_LR1121_AUTO_LENGTH} i {CONF_LR1121_EXPECTED_LEN_OVERRIDE} robia to samo "
+            f"odwrotnymi sposobami; override przypina kazde przechwycenie do jednej dlugosci")
+    return config
+
+
+CONFIG_SCHEMA = cv.All(BASE_CONFIG_SCHEMA, _validate_radio_pins, _validate_lr1121_auto_length)
 
 
 def _validate_framework(config):
@@ -1002,11 +1074,17 @@ async def to_code(config):
         ))
         cg.add(radio_var.set_payload_length(config[CONF_PAYLOAD_LENGTH]))
         cg.add(radio_var.set_rx_boosted(config[CONF_RX_BOOSTED]))
+        cg.add(radio_var.set_verify_buffer(config[CONF_LR1121_VERIFY_BUFFER]))
+        cg.add(radio_var.set_expected_len_override(config[CONF_LR1121_EXPECTED_LEN_OVERRIDE]))
+        cg.add(radio_var.set_sync_probe(config[CONF_LR1121_SYNC_PROBE]))
+        cg.add(radio_var.set_drain(config[CONF_LR1121_DRAIN]))
+        cg.add(radio_var.set_auto_length(config[CONF_LR1121_AUTO_LENGTH]))
         cg.add(radio_var.set_bitrate(config[CONF_BITRATE]))
         cg.add(radio_var.set_deviation(config[CONF_DEVIATION]))
 
     if config[CONF_RADIO_TYPE] == "SX1276":
         cg.add(radio_var.set_min_preamble_bits(config[CONF_MIN_PREAMBLE_BITS]))
+        cg.add(radio_var.set_preamble_tolerance(config[CONF_SX1276_PREAMBLE_TOLERANCE]))
 
     if config[CONF_RADIO_TYPE] == "SX1276" and CONF_TCXO_PIN in config:
         tcxo_pin = await cg.gpio_pin_expression(config[CONF_TCXO_PIN])

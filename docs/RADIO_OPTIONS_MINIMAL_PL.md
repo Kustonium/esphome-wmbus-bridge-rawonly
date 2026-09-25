@@ -9,7 +9,7 @@
 | `SX1262` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, TCXO, FEM, bramka RF switch, `long_gfsk_packets` | zalecany dla trudnego RF i długich ramek |
 | `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | dobry dla spokojniejszych instalacji; ma mechanizm busy-ether; `tcxo_pin` tylko dla płytek z osobnym TCXO enable |
 | `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | eksperymentalny; wymaga `cc1101_allow_experimental: true`; single-IRQ nie jest wspierany |
-| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | eksperymentalny; wymaga `lr1121_allow_experimental: true`; odbiera T1/C1/S1 na sprzęcie Waveshare HF |
+| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | eksperymentalny; wymaga `lr1121_allow_experimental: true`; odbiera T1/C1/S1 na sprzęcie Waveshare HF. `lr1121_auto_length` znosi sufit 255 B przechwycenia, czytając pole L każdej ramki w trakcie jej odbioru |
 
 ## Domyślne częstotliwości trybów
 

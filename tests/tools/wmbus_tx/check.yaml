@@ -1,0 +1,42 @@
+# Compile-only. Pins are placeholders, the broker is in the documentation range
+# (RFC 5737) and the meter id is synthetic. DO NOT FLASH THIS.
+#
+# It exists so `wmbus_tx` is compiled somewhere. A component that no
+# configuration selects is never built by anyone - not on a board, not in CI -
+# which is how a watchdog-starving clock loop and a C1 mode missing its mode-C
+# indicator both survived in this file for months.
+esphome:
+  name: wmbus-tx-check
+esp32:
+  board: esp32dev
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [wmbus_tx]
+logger:
+wifi:
+  ssid: compile-only
+  password: compile-only-password
+mqtt:
+  broker: 192.0.2.1
+  discovery: false
+  log_topic: null
+  reboot_timeout: 0s
+spi:
+  clk_pin: GPIO5
+  miso_pin: GPIO19
+  mosi_pin: GPIO27
+wmbus_tx:
+  cs_pin: GPIO18
+  reset_pin: GPIO14
+  dclk_pin: GPIO33
+  data_gpio: 32
+  # Both non-default paths compiled here on purpose: the diagnostics block, and
+  # mode c1, whose indicator bytes were the defect fixed on 2026-09-23.
+  dclk_diagnostics: true
+  mode: c1
+  frame: "1444A51166067F4170077A550000000C1321430000"

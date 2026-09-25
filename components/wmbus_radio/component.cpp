@@ -455,6 +455,90 @@ void Radio::dump_config() {
 
 void Radio::loop() {
   const uint32_t loop_now_ms = (uint32_t) esphome::millis();
+  if (this->radio != nullptr) {
+    // Two different audiences, two different gates.
+    //
+    // MQTT carries this from `low` upward: it is archivable, it is what the
+    // diagnostics documentation tells you to export after a test, and nobody
+    // is watching the topic in real time.
+    //
+    // The log copy is `dev` only. A register and counter dump once a minute is
+    // not an event a human should be reading past; it was bench instrumentation
+    // and on a working node it says nothing that the summary does not. It used
+    // to print unconditionally, on every node, including ones with diagnostics
+    // off entirely.
+    if (this->diag_publish_summary_) {
+      const auto diagnostic = this->radio->runtime_diag_json();
+      if (!diagnostic.empty()) {
+        if (this->diag_verbose_) ESP_LOGI(TAG, "Radio runtime: %s", diagnostic.c_str());
+        if (!this->diag_topic_.empty() && mqtt::global_mqtt_client != nullptr &&
+            mqtt::global_mqtt_client->is_connected()) {
+          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/radio_runtime", diagnostic, 1, true);
+        }
+        if (!this->probe_baseline_reported_) {
+          const auto baseline = this->radio->probe_baseline_json();
+          if (!baseline.empty()) {
+            // Its own line and its own topic. setup() logging never reaches the
+            // API, and folding this into the runtime JSON pushed that line past
+            // the logger buffer, so it printed a JSON object cut off mid-key.
+            // Same split: the log line is `dev`, the topic is not. This one is
+            // once per boot rather than once a minute, but it is still four raw
+            // undocumented register values, which is bench reading.
+            if (this->diag_verbose_)
+              ESP_LOGI(TAG, "Register probe baseline (pre-RX, read-only): %s", baseline.c_str());
+            if (!this->diag_topic_.empty() && mqtt::global_mqtt_client != nullptr &&
+                mqtt::global_mqtt_client->is_connected()) {
+              mqtt::global_mqtt_client->publish(this->diag_topic_ + "/probe_baseline", baseline, 1, true);
+            }
+            // Marked reported whether or not MQTT took it. It used to be set
+            // only inside the publish branch, so with the broker away the
+            // "once at boot" line repeated every minute instead.
+            this->probe_baseline_reported_ = true;
+          }
+        }
+      }
+    }
+    RadioTransceiver::RawRxSample raw_sample{};
+    while (this->radio->take_raw_rx_sample(raw_sample)) {
+      if (!this->diag_publish_summary_ || this->diag_topic_.empty() || mqtt::global_mqtt_client == nullptr ||
+          !mqtt::global_mqtt_client->is_connected()) continue;
+      char hex[511];
+      for (size_t i = 0; i < raw_sample.length; ++i)
+        snprintf(hex + i * 2, 3, "%02X", (unsigned) raw_sample.bytes[i]);
+      hex[raw_sample.length * 2] = 0;
+      char body[1200];
+      snprintf(body, sizeof(body),
+        "{\"schema\":1,\"kind\":\"fifo_sample\",\"boot_id\":\"%08X\",\"sample\":%u,\"captured_ms\":%u,"
+        "\"irq\":%u,\"rssi\":%d,\"raw_length\":%u,\"fifo_dump\":%u,\"packet_start\":%u,"
+        "\"packet_len\":%u,\"verify\":%u,"
+        "\"differing_bytes\":%u,\"first_difference\":%u,"
+        "\"probe\":{\"F20384\":%u,\"F20368\":%u,\"F30028\":%u,\"F30030\":%u},"
+        "\"raw\":\"%s\"}",
+        (unsigned) this->rx_boot_id_, (unsigned) ++this->lr_raw_sample_seq_,
+        (unsigned) raw_sample.captured_ms, (unsigned) raw_sample.irq,
+        (int) raw_sample.rssi, (unsigned) raw_sample.length, (unsigned) raw_sample.fifo_dump,
+        (unsigned) raw_sample.packet_start, (unsigned) raw_sample.packet_len,
+        (unsigned) raw_sample.verify,
+        (unsigned) raw_sample.differing_bytes, (unsigned) raw_sample.first_difference,
+        (unsigned) raw_sample.probe[0], (unsigned) raw_sample.probe[1],
+        (unsigned) raw_sample.probe[2], (unsigned) raw_sample.probe[3], hex);
+      mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_fifo/" +
+        std::to_string((this->lr_raw_sample_seq_ - 1) % 8), std::string(body), 1, true);
+    }
+    if (strcmp(this->radio->get_name(), "LR1121") == 0 &&
+        (uint32_t) (loop_now_ms - this->lr_pipeline_report_ms_) >= 60000) {
+      this->lr_pipeline_report_ms_ = loop_now_ms;
+      this->publish_lr_pipeline_diag_(nullptr, false);
+      const auto sync_probe = this->radio->sync_probe_json();
+      if (!sync_probe.empty() && this->diag_publish_summary_ && !this->diag_topic_.empty() &&
+          mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected()) {
+        mqtt::global_mqtt_client->publish(this->diag_topic_ + "/sync_probe", sync_probe, 1, true);
+        const auto drain_sample = this->radio->drain_sample_json();
+        if (!drain_sample.empty())
+          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_drain", drain_sample, 1, true);
+      }
+    }
+  }
 
   // Report where a frame's RSSI came from. The receive path records this but
   // cannot log it - it runs in the receiver task, whose output only reaches
@@ -740,8 +824,11 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
 
   // The raw-hex capture inside convert_to_frame() is only ever read behind
   // diag_publish_raw_, so let the packet skip it when that's off.
-  p->set_capture_raw_hex(this->diag_publish_raw_);
+  const bool lr_diagnostic = this->radio != nullptr && strcmp(this->radio->get_name(), "LR1121") == 0;
+  p->set_capture_raw_hex(this->diag_publish_raw_ || (lr_diagnostic && this->diag_publish_summary_ &&
+    (uint32_t) (loop_now_ms - this->lr_drop_sample_ms_) >= 5000));
   auto frame = p->convert_to_frame();
+  if (lr_diagnostic) this->publish_lr_pipeline_diag_(p, frame.has_value());
 
   if (this->listen_mode_filter_after_parse_) {
     mode_idx = (uint8_t) p->get_link_mode();
@@ -1154,6 +1241,26 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
   }
 
+  // Per-frame frequency error, next to the meter that sent it.
+  //
+  // This exists because the offset is a property of the TRANSMITTER's crystal,
+  // so it only means anything when it is tied to a meter id. The timeout dump
+  // reports the same numbers, but only after 60 s with no interrupt at all -
+  // a condition a board receiving T1 traffic never reaches, which made the
+  // measurement unobtainable in exactly the mode where it matters.
+  //
+  // Only the SX1276 answers: SX126x and LR1121 have no AFC in GFSK and no
+  // register that reports the offset, so on those radios this is silent.
+  if (this->diag_verbose_) {
+    int32_t afc_hz = 0, fei_hz = 0;
+    if (this->radio->take_frame_freq_error(&afc_hz, &fei_hz)) {
+      ESP_LOGI(TAG, "FREQERR id:%s mode:%s len:%zu rssi:%ddBm afc:%ldHz fei:%ldHz"
+                    " / blad czestotliwosci nadajnika",
+               id_str, link_mode_name(frame->link_mode()), d.size(), frame->rssi(),
+               (long) afc_hz, (long) fei_hz);
+    }
+  }
+
   this->maybe_forward_frame_(frame.value(), id_val, id_raw, id_str, log_tag);
 
   for (auto &handler : this->handlers_)
@@ -1227,13 +1334,20 @@ void Radio::receive_frame() {
   // intentionally not called an on-air start or RX_DONE timestamp: different
   // transceivers signal at different receive stages.
   const uint64_t rx_task_wakeup_us = (uint64_t) esp_timer_get_time();
+  struct OutcomeGuard {
+    std::array<std::atomic<uint32_t>, 8> *counts;
+    unsigned outcome{3};  // preamble/read failure until the next stage
+    ~OutcomeGuard() { if (counts != nullptr) (*counts)[outcome].fetch_add(1); }
+  } outcome{strcmp(this->radio->get_name(), "LR1121") == 0 ? &this->lr_rx_outcomes_ : nullptr};
+  if (outcome.counts != nullptr) this->lr_rx_outcomes_[0].fetch_add(1);
   auto packet = std::make_unique<Packet>();
   packet->set_rx_task_wakeup_us(rx_task_wakeup_us);
 
-  auto queue_packet = [this](std::unique_ptr<Packet> &pkt) -> bool {
+  auto queue_packet = [this, &outcome](std::unique_ptr<Packet> &pkt) -> bool {
     pkt->set_rssi(this->radio->get_rssi());
     auto packet_ptr = pkt.get();
     if (xQueueSend(this->packet_queue_, &packet_ptr, 0) == pdTRUE) {
+      outcome.outcome = 1;
       ESP_LOGV(TAG, "Queue items: %zu", uxQueueMessagesWaiting(this->packet_queue_));
       ESP_LOGV(TAG, "Queue send success");
       this->collect_radio_rx_diag_();
@@ -1241,6 +1355,7 @@ void Radio::receive_frame() {
       return true;
     }
 
+    outcome.outcome = 2;
     this->diag_rx_path_.queue_send_failed++;
     this->diag_15m_rx_path_.queue_send_failed++;
     this->diag_60min_rx_path_.queue_send_failed++;
@@ -1251,6 +1366,7 @@ void Radio::receive_frame() {
   };
 
   if (this->radio != nullptr && this->radio->get_listen_mode() == LISTEN_MODE_S1) {
+    outcome.outcome = 7;
     packet->set_forced_link_mode(LinkMode::S1);
     const size_t max_raw = WMBUS_RAW_DRAIN_MAX_BYTES;
     auto *raw = packet->append_space(max_raw);
@@ -1359,6 +1475,7 @@ void Radio::receive_frame() {
   }
 
   const bool is_c_mode = (preamble[0] == WMBUS_MODE_C_PREAMBLE);
+  outcome.outcome = 4;
   size_t already_read = WMBUS_PREAMBLE_SIZE;
   if (!is_c_mode) {
     const int current_rssi = this->radio->get_rssi();
@@ -1376,6 +1493,7 @@ void Radio::receive_frame() {
     }
   }
   if (!is_c_mode && WMBUS_T1_LEN_PROBE_BYTES > WMBUS_PREAMBLE_SIZE) {
+    outcome.outcome = 5;
     const size_t extra = WMBUS_T1_LEN_PROBE_BYTES - WMBUS_PREAMBLE_SIZE;
     auto *hdr = packet->append_space(extra);
     size_t got_hdr = 0;
@@ -1391,6 +1509,7 @@ void Radio::receive_frame() {
   }
 
   const size_t total_len = packet->expected_size();
+  outcome.outcome = 5;
   if (total_len == 0 || total_len < already_read) {
     this->diag_rx_path_.payload_size_unknown++;
     this->diag_15m_rx_path_.payload_size_unknown++;
@@ -1428,6 +1547,7 @@ void Radio::receive_frame() {
   }
 
   const size_t remaining = total_len - already_read;
+  outcome.outcome = 6;
   if (remaining > 0) {
     auto *rest = packet->append_space(remaining);
     if (!this->radio->read_in_task(rest, remaining)) {

@@ -68,7 +68,8 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `tcxo_startup_ticks` | `LR1121` | `3000` | zaawansowana | czas rozruchu TCXO w taktach 32,768 kHz (~91,6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | zaawansowana | szerokość pasma RX w Hz |
 | `min_preamble_bits` | `SX1262`, `SX1276`, `LR1121` | `16` | zaawansowana | ile bitów preambuły radio musi zobaczyć, zanim zacznie odbiór. **Dla `listen_mode: t1` i `both` maksimum to 16** — preambuła T1 jest krótsza niż 24 bity, więc `24` i `32` dają zero odebranych ramek (zmierzone: 184 wyzwolenia, 0 ramek) i są odrzucane przy walidacji. `8` działa, ale kosztuje ok. 16% słyszanych liczników. Na `SX1276` nie ma wartości `32`. Nie mylić z długością preambuły nadawanej — to osobne pole `SetPacketParams`, nieustawiane z YAML-a |
-| `payload_length` | `LR1121` | `255` | zaawansowana | długość stałego przechwycenia T1; host przycina telegram według zdekodowanego L-field |
+| `payload_length` | `LR1121` | `255` | zaawansowana | stała długość przechwycenia; host przycina telegram według zdekodowanego pola L. To sufit, na którym ramka jest ucinana — chyba że włączone jest `lr1121_auto_length` |
+| `lr1121_auto_length` | `LR1121` | `false` | zaawansowana | czyta pole L nadchodzącej ramki i kończy przechwycenie na jej prawdziwej długości zamiast na `payload_length`. Znosi sufit 255 B: zmierzone 326 B surowych w T1, 434 w S1 i 219 w C1 z jednej ramki. Wymaga `lr1121_sync_probe` i `lr1121_drain`, wyklucza się z `lr1121_expected_len_override`. Domyślnie wyłączone, bo zapisuje niezadokumentowany rejestr zweryfikowany wobec jednego firmware radia |
 | `rx_boosted` | `LR1121` | `true` | zaawansowana | +2 dB czułości kosztem ok. 2 mA |
 | `bitrate` | `LR1121` | `100000` | zaawansowana | bitrate GFSK |
 | `deviation` | `LR1121` | `50000` | zaawansowana | dewiacja GFSK |

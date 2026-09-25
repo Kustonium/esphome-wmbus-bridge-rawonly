@@ -26,6 +26,19 @@ class SX1276 : public RadioTransceiver {
   // 0 disables the detector; 8/16/24 map to the 1/2/3-byte sizes. 32 does not
   // exist on this chip - the field is two bits wide.
   void set_min_preamble_bits(uint8_t bits) { this->min_preamble_bits_ = bits; }
+  // Chip errors tolerated inside the preamble pattern (RegPreambleDetect 0x1F,
+  // bits 4:0). The SX126x and LR1121 have NO equivalent field - their sync
+  // match is exact - and that is the leading candidate for why this chip is the
+  // only one in the benchmark that still decodes an off-rate transmitter.
+  //
+  // Measured 2026-09-05 on a common input, four receivers at once: at a chip
+  // rate 6% off nominal the SX1276 delivered 8.4% / 6.7% of frames while two
+  // SX1262 boards and an LR1121 delivered exactly zero - and logged exactly
+  // zero interrupts, i.e. their correlator never fired at all.
+  //
+  // Setting this to 0 makes the match exact here too. If the SX1276 then
+  // collapses to zero like the others, this field IS the mechanism.
+  void set_preamble_tolerance(uint8_t tol) { this->preamble_tolerance_ = tol; }
   void setup() override;
   optional<uint8_t> read() override;
   void restart_rx() override;
@@ -39,11 +52,13 @@ class SX1276 : public RadioTransceiver {
   uint32_t take_fifo_overrun_count() override;
   void log_reg_status() override;
   void dump_debug_status(const char *reason) override;
+  bool take_frame_freq_error(int32_t *afc_hz, int32_t *fei_hz) override;
 
  protected:
   uint32_t configured_frequency_hz_{868950000UL};
   InternalGPIOPin *tcxo_pin_{nullptr};
   uint8_t min_preamble_bits_{16};
+  uint8_t preamble_tolerance_{0x0A};
   uint8_t sync_cycle_{0};
 
   // Burst chunk buffered in ESP32 RAM and served byte-by-byte to upper layer.
@@ -81,6 +96,12 @@ class SX1276 : public RadioTransceiver {
   // Timestamp of the latch, 0 = nothing received since boot. Not cleared by
   // restart_rx(): the point is to report how old the last real reading is.
   int64_t frame_metrics_us_{0};
+  // Set by latch_frame_metrics_(), cleared by take_frame_freq_error(). Exists
+  // so the per-frame report is tied to a frame and not to whoever asks: the
+  // timeout dump prints the same latch every minute by design, and that is
+  // fine there because it prints the age alongside. A per-frame line has no
+  // age field, so it must not be allowed to repeat.
+  bool freq_error_fresh_{false};
 
   // Whole FSK register bank as hex, once at boot under verbose diagnostics.
   // Meant to be run in one listen mode and then the other, and the two logs

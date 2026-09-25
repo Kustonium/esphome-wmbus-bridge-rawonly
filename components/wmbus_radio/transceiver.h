@@ -74,6 +74,16 @@ public:
   // Optional radio-specific debug dump. Used when RX waits time out.
   virtual void dump_debug_status(const char *reason) {}
 
+  // Frequency error of the frame just received, in Hz, latched when its first
+  // bytes arrived. Returns false on radios that cannot measure it - which is
+  // every one here except the SX1276: SX126x and LR1121 have no AFC in GFSK
+  // and no register that reports the offset.
+  //
+  // Single-shot on purpose: it answers true once per latched frame and then
+  // goes quiet, so a caller that runs more often than frames arrive cannot
+  // report the same reading twice as if it were two measurements.
+  virtual bool take_frame_freq_error(int32_t *afc_hz, int32_t *fei_hz) { return false; }
+
   // Verbose diagnostics, pushed down from the component before the receiver
   // task starts.
   //
@@ -122,6 +132,35 @@ public:
   // report, which is the default for drivers that do not record provenance.
   // Call it until it returns false: a driver may have more than one waiting.
   virtual bool take_rssi_diag(RssiDiag &out) { return false; }
+  // Main-task, cached diagnostics only: implementations must not access SPI.
+  virtual std::string runtime_diag_json() { return {}; }
+  // Cached at setup(), published once. Main task, no SPI.
+  virtual std::string probe_baseline_json() { return {}; }
+  // Empty unless the sync-word probe is enabled. Main task, no SPI.
+  virtual std::string sync_probe_json() { return {}; }
+  // Last completed drain as hex, empty when draining is off.
+  virtual std::string drain_sample_json() { return {}; }
+  struct RawRxSample {
+    uint32_t captured_ms{0};
+    uint32_t irq{0};
+    uint16_t length{0};
+    int8_t rssi{-127};
+    uint8_t verify{0};  // 0 off, 1 inconclusive, 2 equal, 3 different
+    // 1 = bytes[] is the whole 255-byte RX buffer read from offset 0, which is
+    // wider than the packet the decoder received. 0 = packet-sized read.
+    uint8_t fifo_dump{0};
+    // Where the declared packet sits inside a fifo_dump, from GetRxBufferStatus.
+    // Without these the dump cannot be split into "packet" and "past the packet".
+    uint8_t packet_start{0};
+    uint8_t packet_len{0};
+    // Read-only probe of four undocumented addresses, taken right after
+    // RX_DONE. Meaningful only against the at-rest baseline logged at boot.
+    uint32_t probe[4]{};
+    uint16_t differing_bytes{0};
+    uint16_t first_difference{255};
+    uint8_t bytes[255]{};
+  };
+  virtual bool take_raw_rx_sample(RawRxSample &out) { return false; }
 
   bool read_in_task(uint8_t *buffer, size_t length);
   bool read_in_task_partial(uint8_t *buffer, size_t max_length, size_t &out_read,

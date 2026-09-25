@@ -2,6 +2,17 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Feature: `lr1121_auto_length` - the frame's own L-field sets the capture length
+
+- **New option, off by default, LR1121 only.** `payload_length` is a ceiling: the packet engine captures exactly that many bytes on every frame and the host trims. Anything longer is cut, which put a hard 255-byte limit on what the chip could receive. `lr1121_auto_length` reads each frame's L-field out of the first bytes as they arrive, computes how many raw bytes that frame really occupies, and writes it into the packet engine while the frame is still on air - so the capture ends where the frame does.
+- **Measured across all three modes from one L=0xBE telegram:** 326 raw bytes in T1 (3-of-6), 434 in S1 (Manchester) and 219 in C1 (no line coding). Three different lengths, each computed by that mode's own arithmetic. None of those numbers is in the source.
+- **The ceiling it lifts is the protocol's, not an arbitrary one.** The longest frame wM-Bus can put on air is L = 255: 435 raw bytes in T1, 292 in C1, 580 in S1. All three were received and decoded byte- or bit-exact on hardware before this option existed, using a manual length; this is what makes that reachable without one.
+- **It requires `lr1121_sync_probe` and `lr1121_drain`, and the configuration is refused without them** rather than quietly doing nothing - the length is read from bytes the drain copied, inside the window the probe opens. It is also refused alongside `lr1121_expected_len_override`, which does the same job by the opposite means.
+- **Off by default because it writes an undocumented register**, verified against one radio firmware image. On any other image the driver refuses the write and falls back to `payload_length`, loudly. Below 255 bytes nothing needs that register, which is exactly where the switch sits.
+- A failed derivation is never worse than not trying: with no length by 48 drained bytes it writes `payload_length`, which is what the board captures today.
+
+---
+
 ## Feature: MQTT store-and-forward outbox with QoS and buffer controls
 
 - **New option `mqtt_buffer_size` (default `0`, off).** When the broker goes away, decoded messages are held in RAM and published on reconnect instead of being dropped. Companion controls for QoS and per-meter priority ship with it, plus a runtime capacity number and a QoS select.

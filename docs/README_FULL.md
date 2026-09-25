@@ -301,8 +301,17 @@ CC1101 support is available in the component, but it is still experimental. It r
 
 LR1121 support is experimental too. It requires `lr1121_allow_experimental: true`,
 a `busy_pin`, and on the Waveshare HF board `tcxo_voltage: 3.0v` plus
-`payload_length: 255`. It has decoded T1, C1 and S1 on that board. See
-[`CHIP_SELECTION.md`](CHIP_SELECTION.md) for where it stands against the others,
+`payload_length: 255`. It has decoded T1, C1 and S1 on that board.
+
+`payload_length` is a ceiling, not a length: the packet engine captures exactly
+that many bytes and the host trims. `lr1121_auto_length` replaces it with the
+frame's own L-field, read while the frame is still arriving, which lifts the
+255-byte limit - measured at 326 raw bytes in T1, 434 in S1 and 219 in C1, all
+from the same telegram. It is off by default because it writes an undocumented
+register verified against one radio firmware; the measurements are in
+[`LR1121-runtime-diagnostics.md`](LR1121-runtime-diagnostics.md).
+
+See [`CHIP_SELECTION.md`](CHIP_SELECTION.md) for where it stands against the others,
 and [`RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) for the wiring.
 
 ## Documentation

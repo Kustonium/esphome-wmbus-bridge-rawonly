@@ -9,7 +9,7 @@
 | `SX1262` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, TCXO, FEM, RF-switch gate, `long_gfsk_packets` | recommended for difficult RF conditions and long frames |
 | `SX1276` | `cs_pin`, `reset_pin`, `irq_pin` | `frequency`, `busy_pin`, `sx1276_busy_ether_mode`, `tcxo_pin` | suitable for quieter installations; has busy-ether handling; `tcxo_pin` only for boards with a separate TCXO-enable pin |
 | `CC1101` | `cs_pin`, `gdo0_pin`, `gdo2_pin` | `frequency` | experimental; requires `cc1101_allow_experimental: true`; single IRQ is unsupported |
-| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | experimental; requires `lr1121_allow_experimental: true`; receives T1/C1/S1 on Waveshare HF hardware |
+| `LR1121` | `cs_pin`, `reset_pin`, `irq_pin`, `busy_pin` | `frequency`, `tcxo_voltage`, `tcxo_startup_ticks`, `payload_length` | experimental; requires `lr1121_allow_experimental: true`; receives T1/C1/S1 on Waveshare HF hardware. `lr1121_auto_length` lifts the 255-byte capture ceiling by reading each frame's L-field as it arrives |
 
 ## Listen mode frequency defaults
 
