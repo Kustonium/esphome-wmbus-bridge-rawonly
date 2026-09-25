@@ -103,7 +103,8 @@ spi:
   mosi_pin: GPIO10
   miso_pin: GPIO11
 
-# Optional status LED on Heltec V4-R8, active-low.
+# Optional status LED on Heltec V4-R8, active-high: GPIO46 -> R34 330R -> LED3
+# -> GND on the R8 schematic, and Heltec's factory test drives it HIGH to light it.
 # NOTE: on R8 the LED moved to GPIO46 (on V4.2 it was GPIO35). GPIO46 is exactly
 # the pin that used to be FEM_PA on V4.2 — which is why fem_pa_pin below is GPIO5.
 output:
@@ -111,7 +112,6 @@ output:
     id: led_output
     pin:
       number: GPIO46
-      inverted: true
 
 light:
   - platform: binary
@@ -194,6 +194,9 @@ wmbus_radio:
   # Turn it on only if a meter here actually sends more than about 150 decoded
   # bytes: a three-phase electricity meter does, a water or heat meter does not.
   # Check your longest decoded frame before enabling it prophylactically.
+  # The sign that you need it: the same meter logs
+  #   payload read short ... total_len=<over 255>
+  # on every transmission of that meter (for example total_len=353).
   # long_gfsk_packets: false  # default: false
 
   # EN: Receive mode. Available values: t1, c1, both, s1.

@@ -2,6 +2,16 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Diagnostyka: na czym ruszyło każde wyzwolenie odbiornika i ostrzeżenie, gdy licznik potrzebuje `long_gfsk_packets`
+
+- **`irq_fired` jest teraz dzielone według tego, na czym radio ruszyło**, na podstawie pierwszych bajtów po sync wordzie: `t1`, `c1a`, `c1b`, `c_other`, `s1`, `no_data`. Sumują się do `irq_fired`, są w nawiasie po `irq=` w logu i jako `rx_path.irq_start` we wszystkich trzech podsumowaniach. T1 i C1 mają ten sam sync word `0x543D`, więc dotąd odbiornik C1, który się wyzwalał i nic nie dekodował, nie odróżniał gubionych ramek C1 od ruchu T1 i szumu. Zobacz `DIAGNOSTIC_PL.md`.
+- **SX1262 mówi teraz, kiedy licznik potrzebuje `long_gfsk_packets: true`.** Przy wyłączonej opcji tor odbioru mieści 255 bajtów surowych; licznik wysyłający więcej był widoczny tylko jako `payload read short` / `Failed to read data` przy każdym nadaniu. Gdy ta sama za długa ramka T1 przyjdzie dwa razy, płytka raz na uruchomienie wypisuje ostrzeżenie i zgłasza sugestię `ENABLE_LONG_GFSK_PACKETS`. Pierwszy Heltec V4-R8 w terenie spędził tak dobę (`total_len=353` co minutę), zanim ktoś to policzył.
+- **SX1262 w `listen_mode: c1` korzysta teraz z `sx1262_rx_bandwidth` (domyślnie 312 kHz)** zamiast przypiętych 234,3 kHz, wartości zmierzonej wyłącznie dla S1. Tylko S1 zostaje na stałych 234,3 kHz. To usuwa ustawienie na pewno złe; nie leczy słabego C1 na SX1262 - patrz następny punkt.
+- **Zmierzone, bez zmiany kodu: C1 na SX1262 i LR1121 słyszy tylko „czyste” nadajniki.** Z siedmiu liczników Techem C1, które dekodował SX1276, oba układy słyszały jeden; pasmo do 467 kHz, `min_preamble_bits` 16/8/0 i przesunięcie częstotliwości nadajnika (w granicach ±4 kHz) niczego nie zmieniały. Ustawienie `sx1276_preamble_tolerance: 0` sprawiło, że SX1276 słyszał dokładnie ten sam jeden licznik. Przewaga SX1276 w C1 to tolerancja błędów preambuły, której SX1262 i LR1121 nie mają. Do C1 bezpiecznym wyborem pozostaje płytka z SX1276.
+- **Przykład Heltec V4-R8:** dioda statusu na GPIO46 jest aktywna stanem wysokim (schemat R8 i fabryczny test Helteca); przykład z komentarzami sterował nią odwrotnie.
+
+---
+
 ## Funkcja: `lr1121_auto_length` — długość przechwycenia z pola L samej ramki
 
 - **Nowa opcja, domyślnie wyłączona, tylko LR1121.** `payload_length` jest sufitem: silnik pakietowy przechwytuje dokładnie tyle bajtów przy każdej ramce, a host przycina. Cokolwiek dłuższego jest ucinane, co stawiało twardy limit 255 bajtów na to, co układ potrafi odebrać. `lr1121_auto_length` czyta pole L z pierwszych nadchodzących bajtów, liczy, ile bajtów surowych ta ramka naprawdę zajmuje, i wpisuje to do silnika pakietowego, **gdy ramka jest jeszcze w eterze** — więc przechwycenie kończy się tam, gdzie kończy się ramka.

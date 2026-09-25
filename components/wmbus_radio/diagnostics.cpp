@@ -216,6 +216,18 @@ void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   const uint32_t t1_sym_inv_pct = (this->diag_t1_symbols_total_ > 0)
       ? ((this->diag_t1_symbols_invalid_ * 100U) / this->diag_t1_symbols_total_) : 0U;
 
+  // A meter whose frames cannot fit the radio's fixed capture. Checked before
+  // everything else: those frames never reach `total`, so a board hearing
+  // nothing but that meter would otherwise only ever be told to check wiring.
+  if (this->over_capture_confirmed_) {
+    publish_suggestion_(mqtt, topic, this->last_suggestion_ms_, now_ms, SUGGESTION_THROTTLE_MS_, this->diag_qos_,
+        this->radio != nullptr ? this->radio->get_name() : chip, "ENABLE_LONG_GFSK_PACKETS",
+        "long_gfsk_packets", "true",
+        "long_gfsk_packets: true",
+        "A meter here sends frames longer than the receive path holds (payload read short on every transmission). Set long_gfsk_packets: true; it costs some sensitivity on weak meters.",
+        "Licznik w zasięgu wysyła ramki dłuższe niż mieści tor odbioru (payload read short przy każdym nadaniu). Ustaw long_gfsk_packets: true; kosztuje to trochę czułości na słabych licznikach.");
+  }
+
   // ── STAGE 1: orientation ────────────────────────────────────────────────────
   // An empty window says nothing on its own: `total` is diag_total_, which is a
   // per-summary-window counter reset immediately after this call. A receiver
@@ -700,6 +712,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            "},"
            "\"rx_path\":{"
              "\"irq_fired\":%u,"
+             "\"irq_start\":{\"t1\":%u,\"c1a\":%u,\"c1b\":%u,\"c_other\":%u,\"s1\":%u,\"no_data\":%u},"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -801,6 +814,12 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_dropped_by_stage_[SB_LINK_MODE],
            (unsigned) this->diag_dropped_by_stage_[SB_OTHER],
            (unsigned) this->diag_rx_path_.irq_fired,
+           (unsigned) this->diag_rx_path_.irq_start_t1,
+           (unsigned) this->diag_rx_path_.irq_start_c1a,
+           (unsigned) this->diag_rx_path_.irq_start_c1b,
+           (unsigned) this->diag_rx_path_.irq_start_c_other,
+           (unsigned) this->diag_rx_path_.irq_start_s1,
+           (unsigned) this->diag_rx_path_.irq_start_no_data,
            (unsigned) this->diag_rx_path_.irq_timeout,
            (unsigned) this->diag_rx_path_.preamble_read_failed,
            (unsigned) this->diag_rx_path_.preamble_retry_recovered,
@@ -849,9 +868,11 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_rx_path_.irq_fired,
+           (unsigned) this->diag_rx_path_.irq_start_t1, (unsigned) this->diag_rx_path_.irq_start_c1a, (unsigned) this->diag_rx_path_.irq_start_c1b,
+           (unsigned) this->diag_rx_path_.irq_start_c_other, (unsigned) this->diag_rx_path_.irq_start_s1, (unsigned) this->diag_rx_path_.irq_start_no_data,
            (unsigned) total, (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
 
@@ -1166,6 +1187,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            "},"
            "\"rx_path\":{"
              "\"irq_fired\":%u,"
+             "\"irq_start\":{\"t1\":%u,\"c1a\":%u,\"c1b\":%u,\"c_other\":%u,\"s1\":%u,\"no_data\":%u},"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -1261,6 +1283,12 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_15m_dropped_by_stage_[SB_LINK_MODE],
            (unsigned) this->diag_15m_dropped_by_stage_[SB_OTHER],
            (unsigned) this->diag_15m_rx_path_.irq_fired,
+           (unsigned) this->diag_15m_rx_path_.irq_start_t1,
+           (unsigned) this->diag_15m_rx_path_.irq_start_c1a,
+           (unsigned) this->diag_15m_rx_path_.irq_start_c1b,
+           (unsigned) this->diag_15m_rx_path_.irq_start_c_other,
+           (unsigned) this->diag_15m_rx_path_.irq_start_s1,
+           (unsigned) this->diag_15m_rx_path_.irq_start_no_data,
            (unsigned) this->diag_15m_rx_path_.irq_timeout,
            (unsigned) this->diag_15m_rx_path_.preamble_read_failed,
            (unsigned) this->diag_15m_rx_path_.preamble_retry_recovered,
@@ -1302,9 +1330,11 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_15min_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_15m_rx_path_.irq_fired,
+           (unsigned) this->diag_15m_rx_path_.irq_start_t1, (unsigned) this->diag_15m_rx_path_.irq_start_c1a, (unsigned) this->diag_15m_rx_path_.irq_start_c1b,
+           (unsigned) this->diag_15m_rx_path_.irq_start_c_other, (unsigned) this->diag_15m_rx_path_.irq_start_s1, (unsigned) this->diag_15m_rx_path_.irq_start_no_data,
            (unsigned) total, (unsigned) this->diag_15m_ok_,
            (unsigned) this->diag_15m_truncated_, (unsigned) this->diag_15m_dropped_, (unsigned) crc_failed);
 
@@ -1632,6 +1662,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            "},"
            "\"rx_path\":{"
              "\"irq_fired\":%u,"
+             "\"irq_start\":{\"t1\":%u,\"c1a\":%u,\"c1b\":%u,\"c_other\":%u,\"s1\":%u,\"no_data\":%u},"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -1727,6 +1758,12 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_60min_dropped_by_stage_[SB_LINK_MODE],
            (unsigned) this->diag_60min_dropped_by_stage_[SB_OTHER],
            (unsigned) this->diag_60min_rx_path_.irq_fired,
+           (unsigned) this->diag_60min_rx_path_.irq_start_t1,
+           (unsigned) this->diag_60min_rx_path_.irq_start_c1a,
+           (unsigned) this->diag_60min_rx_path_.irq_start_c1b,
+           (unsigned) this->diag_60min_rx_path_.irq_start_c_other,
+           (unsigned) this->diag_60min_rx_path_.irq_start_s1,
+           (unsigned) this->diag_60min_rx_path_.irq_start_no_data,
            (unsigned) this->diag_60min_rx_path_.irq_timeout,
            (unsigned) this->diag_60min_rx_path_.preamble_read_failed,
            (unsigned) this->diag_60min_rx_path_.preamble_retry_recovered,
@@ -1768,9 +1805,11 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_60min_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_60min_rx_path_.irq_fired,
+           (unsigned) this->diag_60min_rx_path_.irq_start_t1, (unsigned) this->diag_60min_rx_path_.irq_start_c1a, (unsigned) this->diag_60min_rx_path_.irq_start_c1b,
+           (unsigned) this->diag_60min_rx_path_.irq_start_c_other, (unsigned) this->diag_60min_rx_path_.irq_start_s1, (unsigned) this->diag_60min_rx_path_.irq_start_no_data,
            (unsigned) total, (unsigned) this->diag_60min_ok_,
            (unsigned) this->diag_60min_truncated_, (unsigned) this->diag_60min_dropped_, (unsigned) crc_failed);
 

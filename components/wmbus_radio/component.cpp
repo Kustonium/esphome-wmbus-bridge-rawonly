@@ -1343,6 +1343,13 @@ void Radio::receive_frame() {
   auto packet = std::make_unique<Packet>();
   packet->set_rx_task_wakeup_us(rx_task_wakeup_us);
 
+  // Exactly one call per irq_fired, see RxPathCounters::irq_start_*.
+  auto count_irq_start = [this](uint32_t RxPathCounters::*field) {
+    this->diag_rx_path_.*field += 1;
+    this->diag_15m_rx_path_.*field += 1;
+    this->diag_60min_rx_path_.*field += 1;
+  };
+
   auto queue_packet = [this, &outcome](std::unique_ptr<Packet> &pkt) -> bool {
     pkt->set_rssi(this->radio->get_rssi());
     auto packet_ptr = pkt.get();
@@ -1373,6 +1380,7 @@ void Radio::receive_frame() {
     size_t got_raw = 0;
     this->radio->read_in_task_partial(raw, max_raw, got_raw, WMBUS_NOTIFY_WAIT_MS, 3);
     packet->resize(got_raw);
+    count_irq_start(got_raw == 0 ? &RxPathCounters::irq_start_no_data : &RxPathCounters::irq_start_s1);
     if (got_raw == 0) {
       this->diag_rx_path_.preamble_read_failed++;
       this->diag_15m_rx_path_.preamble_read_failed++;
@@ -1452,6 +1460,7 @@ void Radio::receive_frame() {
   }
 
   if (got_preamble < WMBUS_PREAMBLE_SIZE) {
+    count_irq_start(&RxPathCounters::irq_start_no_data);
     packet->resize(got_preamble);
     this->diag_rx_path_.preamble_read_failed++;
     this->diag_15m_rx_path_.preamble_read_failed++;
@@ -1475,6 +1484,15 @@ void Radio::receive_frame() {
   }
 
   const bool is_c_mode = (preamble[0] == WMBUS_MODE_C_PREAMBLE);
+  if (!is_c_mode) {
+    count_irq_start(&RxPathCounters::irq_start_t1);
+  } else if (preamble[1] == WMBUS_MODE_C_FORMAT_A) {
+    count_irq_start(&RxPathCounters::irq_start_c1a);
+  } else if (preamble[1] == WMBUS_MODE_C_FORMAT_B) {
+    count_irq_start(&RxPathCounters::irq_start_c1b);
+  } else {
+    count_irq_start(&RxPathCounters::irq_start_c_other);
+  }
   outcome.outcome = 4;
   size_t already_read = WMBUS_PREAMBLE_SIZE;
   if (!is_c_mode) {
@@ -1544,6 +1562,29 @@ void Radio::receive_frame() {
     this->publish_rx_path_event_("rx_path", "receive_expected_size", detail, current_rssi);
     ESP_LOGD(TAG, "Cannot calculate payload size");
     return;
+  }
+
+  // A meter that sends more than the radio's fixed capture can hold looks
+  // like any other failed read ("payload read short") unless someone does the
+  // arithmetic. T1 only: its length comes out of a fully valid 3-of-6 decode,
+  // which random data practically never passes, whereas the C1 L-field is one
+  // raw byte. First seen in the field 2026-09-25 on a Heltec V4-R8: the same
+  // total_len=353 every minute for a day, with nothing pointing at the option.
+  const size_t capture_limit = this->radio->fixed_capture_limit();
+  if (!is_c_mode && capture_limit > 0 && total_len > capture_limit) {
+    if (total_len == this->over_capture_len_) {
+      if (this->over_capture_repeats_ < 255) this->over_capture_repeats_++;
+    } else {
+      this->over_capture_len_ = (uint16_t) total_len;
+      this->over_capture_repeats_ = 1;
+    }
+    if (this->over_capture_repeats_ >= 2 && !this->over_capture_confirmed_) {
+      this->over_capture_confirmed_ = true;
+      ESP_LOGW(TAG, "Frame longer than the receive path: a meter sends %u raw bytes, the capture holds %u - "
+                    "set long_gfsk_packets: true to receive it / ramka dluzsza niz tor odbioru: licznik wysyla %u "
+                    "bajtow, odbiornik miesci %u - ustaw long_gfsk_packets: true",
+               (unsigned) total_len, (unsigned) capture_limit, (unsigned) total_len, (unsigned) capture_limit);
+    }
   }
 
   const size_t remaining = total_len - already_read;

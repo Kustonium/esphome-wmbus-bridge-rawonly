@@ -50,8 +50,8 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `has_tcxo` | `SX1262` | `false` | publiczna | włącz dla płytek SX1262 z TCXO; brak może dawać objaw „Radio active, ale brak ramek” |
 | `dio2_rf_switch` | `SX1262` | `true` | publiczna | sterowanie przełącznikiem RF przez DIO2 |
 | `rx_gain` | `SX1262` | `boosted` | publiczna | `boosted` albo `power_saving` |
-| `long_gfsk_packets` | `SX1262` | `false` | publiczna | zalecane dla długich ramek T1; brak może powodować ucinanie/dropy |
-| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | publiczna | `312khz` (domyślne, odziedziczone, niezmierzone dla T1), `234khz`, `156khz`. Działa dla `listen_mode: t1` **i `both`**; `c1` oraz `s1` ignorują — ich 234,3 kHz jest zmierzone i przypięte |
+| `long_gfsk_packets` | `SX1262` | `false` | publiczna | zalecane dla długich ramek T1; brak może powodować ucinanie/dropy. Gdy licznik w zasięgu tego wymaga, płytka to zgłasza: ostrzeżenie w logu i sugestia `ENABLE_LONG_GFSK_PACKETS`, po dwukrotnym odebraniu tej samej za długiej ramki T1 |
+| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | publiczna | `312khz` (domyślne, odziedziczone, niezmierzone dla T1), `234khz`, `156khz`. Działa dla `listen_mode: t1`, `both` **i `c1`**; `s1` ignoruje — jego 234,3 kHz jest zmierzone i przypięte. Do 25.09.2026 `c1` też był przypięty do 234,3 kHz, wartości zmierzonej tylko dla S1 |
 | `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | brak | zależna od płytki | piny zewnętrznego front-endu RF, np. Heltec V4 |
 | `rf_sw_pin` | `SX1262` | brak | zależna od płytki | bramka wewnętrznego przełącznika RF modułu; wymagane na XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), inaczej czułość niższa o ~30 dB |
 | `sx1276_busy_ether_mode` | `SX1276` | `normal` | publiczna | `normal`, `aggressive`, `adaptive`; podnosić dopiero przy **zmierzonym** przeciążeniu (`fifo_overrun`/`truncated` > 0) — `adaptive` przerywa słabe starty i kosztuje ok. 12 dB czułości |
