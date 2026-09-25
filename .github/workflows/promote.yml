@@ -158,20 +158,43 @@ jobs:
 
       # Captured BEFORE the sync overwrites docs/. docs/RELEASE_NOTES.md is one
       # running log shared by both repos, newest entry first; stable holds an
-      # older truncation of it. The stable top heading is therefore the exact
-      # water mark: everything above it in dev is what this release adds.
+      # older truncation of it. The stable top ENTRY is therefore the exact
+      # water mark: every entry above it in dev is what this release adds.
+      #
+      # The log has had two shapes, and both must be read:
+      #   old     - every entry is "# Title", with "## EN" / "## PL" inside it;
+      #   current - one "# Release notes" title and a language link, then
+      #             entries as "## Title", with "###" sections inside them.
+      # 017b342 (2026-09-05) switched to the current shape. Taking the first
+      # "# " line as the water mark then meant taking the file's own title,
+      # which sits on line 1 in dev too - so nothing was ever "above" it and
+      # every promote stopped at "nothing to release". The shape is decided
+      # per file by counting top-level headings: more than one means old.
+      # Headings are compared without their leading #s, so a water mark still
+      # matches if one side has been reformatted and the other has not.
       - name: Remember the stable release-notes water mark
         id: watermark
         shell: bash
         run: |
           set -euo pipefail
+          # Prints "<line number><TAB><heading text>" for every entry heading.
+          # Two passes over the same file: the first only counts "# " lines.
+          cat > /tmp/entries.awk <<'AWK'
+          FNR == NR { if ($0 ~ /^# /) top++; next }
+          {
+            if ($0 ~ ((top > 1) ? "^# " : "^## ")) {
+              t = $0; sub(/^#+[ \t]*/, "", t); print FNR "\t" t
+            }
+          }
+          AWK
           if [[ ! -s docs/RELEASE_NOTES.md ]]; then
             echo "ERROR: docs/RELEASE_NOTES.md missing or empty in stable"
             exit 1
           fi
-          PREV="$(grep -m1 '^# ' docs/RELEASE_NOTES.md || true)"
+          PREV="$(awk -f /tmp/entries.awk docs/RELEASE_NOTES.md docs/RELEASE_NOTES.md \
+                  | head -n1 | cut -f2-)"
           if [[ -z "${PREV}" ]]; then
-            echo "ERROR: no '# ' heading found in stable docs/RELEASE_NOTES.md"
+            echo "ERROR: no entry heading found in stable docs/RELEASE_NOTES.md"
             exit 1
           fi
           echo "Stable currently tops out at: ${PREV}"
@@ -198,7 +221,13 @@ jobs:
           PREV="$(cat /tmp/watermark.txt)"
           export PREV
 
-          if ! grep -Fxq "${PREV}" _dev/docs/RELEASE_NOTES.md; then
+          awk -f /tmp/entries.awk _dev/docs/RELEASE_NOTES.md _dev/docs/RELEASE_NOTES.md \
+            > /tmp/dev-entries.tsv
+          # The heading travels through the environment, not through -v: awk
+          # expands backslash escapes in -v assignments, and a heading is
+          # arbitrary prose.
+          END_LINE="$(awk -F'\t' '$2 == ENVIRON["PREV"] { print $1; exit }' /tmp/dev-entries.tsv)"
+          if [[ -z "${END_LINE}" ]]; then
             echo "ERROR: the stable water mark is not present in the dev log:"
             echo "  ${PREV}"
             echo "The shared docs/RELEASE_NOTES.md has diverged - an entry was"
@@ -207,27 +236,27 @@ jobs:
             exit 1
           fi
 
-          # Everything above the water mark, with the trailing '---' separator
-          # and trailing blank lines trimmed. The heading travels through the
-          # environment, not through -v: awk expands backslash escapes in -v
-          # assignments, and a heading is arbitrary prose.
-          awk '$0 == ENVIRON["PREV"] { exit } { print }' \
-            _dev/docs/RELEASE_NOTES.md > /tmp/new-entries.md
-          awk 'BEGIN{n=0} {lines[n++]=$0} END{
-                 last=n-1
-                 while (last >= 0 && (lines[last] ~ /^[[:space:]]*$/ || lines[last] ~ /^-{3,}[[:space:]]*$/)) last--
-                 for (i=0; i<=last; i++) print lines[i]
-               }' /tmp/new-entries.md > /tmp/release-body.md
-
-          if ! grep -q '^# ' /tmp/release-body.md; then
+          # New entries are the ones listed before the water mark. Starting at
+          # the first of them, not at line 1, keeps the file's own title and
+          # language link out of the release body.
+          COUNT="$(awk -F'\t' -v end="${END_LINE}" '$1 < end' /tmp/dev-entries.tsv | wc -l | tr -d ' ')"
+          if (( COUNT == 0 )); then
             echo "ERROR: no new entry in dev docs/RELEASE_NOTES.md above the stable"
             echo "water mark - there is nothing to release. Add the release note in"
             echo "dev first (notes travel with the code in this project)."
             exit 1
           fi
+          START_LINE="$(head -n1 /tmp/dev-entries.tsv | cut -f1)"
+          TITLE="$(head -n1 /tmp/dev-entries.tsv | cut -f2-)"
 
-          COUNT="$(grep -c '^# ' /tmp/release-body.md)"
-          TITLE="$(grep -m1 '^# ' /tmp/release-body.md | sed -E 's/^#[[:space:]]*//')"
+          # Everything from the first new entry up to the water mark, with the
+          # trailing '---' separator and trailing blank lines trimmed.
+          sed -n "${START_LINE},$((END_LINE - 1))p" _dev/docs/RELEASE_NOTES.md > /tmp/new-entries.md
+          awk 'BEGIN{n=0} {lines[n++]=$0} END{
+                 last=n-1
+                 while (last >= 0 && (lines[last] ~ /^[[:space:]]*$/ || lines[last] ~ /^-{3,}[[:space:]]*$/)) last--
+                 for (i=0; i<=last; i++) print lines[i]
+               }' /tmp/new-entries.md > /tmp/release-body.md
           echo "TITLE=${TITLE}" >> "$GITHUB_OUTPUT"
           echo "COUNT=${COUNT}" >> "$GITHUB_OUTPUT"
           echo "New entries: ${COUNT}"
@@ -255,7 +284,10 @@ jobs:
           # copied verbatim. ci.yml is a single named file on purpose - copying
           # .github/workflows/ as a directory would delete this workflow and
           # FUNDING.yml sits in the same tree.
-          for item in README.md NOTICE SUPPORT.md \
+          # The _PL twins were missing from this list, so the Polish README
+          # and SUPPORT never followed dev: a section added to both READMEs
+          # reached stable in English only.
+          for item in README.md README_PL.md NOTICE SUPPORT.md SUPPORT_PL.md \
                       .github/workflows/ci.yml \
                       .github/ISSUE_TEMPLATE/bug_report.yml; do
             if [[ -e "_dev/${item}" ]]; then
