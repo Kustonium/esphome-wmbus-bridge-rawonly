@@ -2,6 +2,17 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Funkcja: `lr1121_auto_length` — długość przechwycenia z pola L samej ramki
+
+- **Nowa opcja, domyślnie wyłączona, tylko LR1121.** `payload_length` jest sufitem: silnik pakietowy przechwytuje dokładnie tyle bajtów przy każdej ramce, a host przycina. Cokolwiek dłuższego jest ucinane, co stawiało twardy limit 255 bajtów na to, co układ potrafi odebrać. `lr1121_auto_length` czyta pole L z pierwszych nadchodzących bajtów, liczy, ile bajtów surowych ta ramka naprawdę zajmuje, i wpisuje to do silnika pakietowego, **gdy ramka jest jeszcze w eterze** — więc przechwycenie kończy się tam, gdzie kończy się ramka.
+- **Zmierzone we wszystkich trzech trybach z jednego telegramu L=0xBE:** 326 bajtów surowych w T1 (3-z-6), 434 w S1 (Manchester) i 219 w C1 (bez kodowania liniowego). Trzy różne długości, każda policzona arytmetyką swojego trybu. Żadnej z tych liczb nie ma w kodzie.
+- **Zniesiony sufit jest sufitem protokołu, nie umownym.** Najdłuższa ramka, jaką wM-Bus potrafi wysłać, to L = 255: 435 bajtów surowych w T1, 292 w C1, 580 w S1. Wszystkie trzy zostały odebrane i zdekodowane bajt/bit w bajt na sprzęcie, zanim ta opcja powstała, przy ręcznie podanej długości — ta opcja sprawia, że są osiągalne bez niej.
+- **Wymaga `lr1121_sync_probe` i `lr1121_drain`, a bez nich konfiguracja jest odrzucana** zamiast po cichu nic nie robić — długość czytana jest z bajtów skopiowanych przez drenaż, w oknie otwartym przez sondę. Odrzucana jest też razem z `lr1121_expected_len_override`, który robi to samo odwrotnym sposobem.
+- **Domyślnie wyłączona, bo zapisuje niezadokumentowany rejestr**, zweryfikowany wobec jednego obrazu firmware radia. Przy innym obrazie sterownik odmawia zapisu i wraca do `payload_length`, głośno. Poniżej 255 bajtów ten rejestr nie jest do niczego potrzebny — i dokładnie tam leży ten przełącznik.
+- Nieudane wyprowadzenie długości nigdy nie jest gorsze od nierobienia niczego: gdy po 48 zdrenowanych bajtach nie ma odpowiedzi, wpisywane jest `payload_length`, czyli to, co płytka przechwytuje dziś.
+
+---
+
 ## Nowość: bufor MQTT z QoS i sterowaniem pojemnością
 
 - **Nowa opcja `mqtt_buffer_size` (domyślnie `0`, wyłączona).** Gdy broker znika, zdekodowane wiadomości czekają w RAM i idą przy ponownym połączeniu, zamiast przepaść. Razem z nią sterowanie QoS i priorytetem per licznik, plus regulacja pojemności i wybór QoS w czasie pracy.

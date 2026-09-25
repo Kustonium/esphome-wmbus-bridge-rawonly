@@ -107,6 +107,27 @@ void SX1276::latch_frame_metrics_() {
   this->last_fei_lsb_ = this->spi_read(REG_FEI_MSB + 1);
   this->frame_metrics_us_ = esp_timer_get_time();
   this->rssi_captured_ = true;
+  // One flag assignment, deliberately no logging here. This function runs
+  // inside the FIFO drain, and at 100 kchip/s the 64-byte FIFO refills in
+  // ~7.7 ms - less than a network log line can take. The report is emitted by
+  // the component after the frame is complete; see take_frame_freq_error().
+  this->freq_error_fresh_ = true;
+}
+
+// take_frame_freq_error: hand the latched offset to the component, once.
+//
+// Only this chip can answer. The SX126x and LR1121 have no AFC in GFSK at all -
+// there is no register for it in either map - so on those radios the base
+// implementation returns false and nothing is logged.
+bool SX1276::take_frame_freq_error(int32_t *afc_hz, int32_t *fei_hz) {
+  if (!this->freq_error_fresh_)
+    return false;
+  this->freq_error_fresh_ = false;
+  if (afc_hz != nullptr)
+    *afc_hz = sx1276_steps_to_hz_(this->last_afc_msb_, this->last_afc_lsb_);
+  if (fei_hz != nullptr)
+    *fei_hz = sx1276_steps_to_hz_(this->last_fei_msb_, this->last_fei_lsb_);
+  return true;
 }
 
 optional<uint8_t> SX1276::drain_fifo_once_() {
@@ -243,7 +264,7 @@ void SX1276::setup() {
   // Size was pinned at 2 bytes (16 bits) until 2026-09-01; it is now the
   // min_preamble_bits option, shared with SX1262 and LR1121.
   {
-    const uint8_t tol = 0x0A;
+    const uint8_t tol = this->preamble_tolerance_;
     uint8_t v = 0;
     if (this->min_preamble_bits_ == 0) {
       v = tol;  // detector off

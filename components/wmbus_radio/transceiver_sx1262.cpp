@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_sx1262.h"
 #include "decode3of6.h"
+#include "frame_length.h"
 
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
@@ -226,7 +227,7 @@ static inline int8_t sx126x_rssi_dbm_(uint8_t raw) {
 // ---------------------------------------------------------------------------
 // Frame-start search, diagnostic only.
 //
-// s1_expected_raw_len_() below assumes the frame begins at chip 0 of the
+// expected_raw_len_s1() below assumes the frame begins at chip 0 of the
 // captured buffer, because the radio strips the sync word in hardware and the
 // payload should start immediately after it. Every S1 capture on this driver
 // ends at exit=buffer_cap, which is what happens when that assumption fails and
@@ -239,22 +240,6 @@ static inline int8_t sx126x_rssi_dbm_(uint8_t raw) {
 // capture path; an answer that moves between captures locates the bug.
 // ---------------------------------------------------------------------------
 
-// One Manchester pair at absolute chip index `chip` in raw. Returns false when
-// the pair is 00 or 11, which encodes nothing.
-static bool s1_chip_pair_(const std::vector<uint8_t> &raw, size_t chip, bool polarity, uint8_t &bit_out) {
-  const size_t a_i = chip * 2U;
-  const size_t b_i = a_i + 1U;
-  if ((b_i >> 3) >= raw.size())
-    return false;
-  const uint8_t a = (uint8_t) ((raw[a_i >> 3] >> (7U - (a_i & 7U))) & 0x01U);
-  const uint8_t b = (uint8_t) ((raw[b_i >> 3] >> (7U - (b_i & 7U))) & 0x01U);
-  if (a == b)
-    return false;
-  bit_out = (uint8_t) ((a == 0 && b == 1) ? 0 : 1);
-  if (polarity)
-    bit_out ^= 1U;
-  return true;
-}
 
 // Decode `count` bytes starting at Manchester-pair index `start_pair`. Returns
 // false on the first invalid pair.
@@ -264,7 +249,7 @@ static bool s1_decode_bytes_(const std::vector<uint8_t> &raw, size_t start_pair,
     uint8_t byte = 0;
     for (size_t bit = 0; bit < 8; bit++) {
       uint8_t v = 0;
-      if (!s1_chip_pair_(raw, start_pair + i * 8U + bit, polarity, v))
+      if (!manchester_chip_pair(raw, start_pair + i * 8U + bit, polarity, v))
         return false;
       byte = (uint8_t) ((byte << 1U) | v);
     }
@@ -317,7 +302,7 @@ static void s1_log_erasure_map_(const std::vector<uint8_t> &raw, size_t start_pa
     while (block + 1U < blocks && byte >= block_end[block])
       block++;
     uint8_t v = 0;
-    if (!s1_chip_pair_(raw, start_pair + p, polarity, v)) {
+    if (!manchester_chip_pair(raw, start_pair + p, polarity, v)) {
       per_block[block]++;
       total++;
       if (per_block[block] > worst)
@@ -368,7 +353,7 @@ void SX1262::log_s1_frame_start_(const std::vector<uint8_t> &raw) {
       uint8_t v = 0;
       if ((chip * 2U + 1U) >> 3 >= raw.size())
         break;
-      if (s1_chip_pair_(raw, chip, false, v)) {
+      if (manchester_chip_pair(raw, chip, false, v)) {
         if (run == 0)
           run_start = chip;
         run++;
@@ -421,7 +406,7 @@ void SX1262::log_s1_frame_start_(const std::vector<uint8_t> &raw) {
         if (((start + p) * 2U + 1U) >> 3 >= raw.size())
           break;
         checked++;
-        if (!s1_chip_pair_(raw, start + p, polarity != 0, v))
+        if (!manchester_chip_pair(raw, start + p, polarity != 0, v))
           invalid++;
       }
       // Keep the four cleanest, measured as invalid pairs per checked pair.
@@ -461,136 +446,11 @@ void SX1262::log_s1_frame_start_(const std::vector<uint8_t> &raw) {
   }
 }
 
-// Decode the S1 L- and C-fields from the start of the captured stream and
-// return the exact number of raw Manchester bytes a complete format-A frame
-// occupies, DLL CRC bytes included. Zero means "cannot tell", which is what
-// makes capture_rx_stream_() run on to its 512-byte cap.
-static size_t s1_expected_raw_len_(const std::vector<uint8_t> &raw) {
-  if (raw.size() < 4)
-    return 0;
-
-  for (uint8_t polarity = 0; polarity < 2; polarity++) {
-    // L-field, raw bytes 0-1. Every pair must decode: this value cuts the
-    // capture, so a substituted bit here yields a wrong length rather than a
-    // recoverable one. No tolerance.
-    uint8_t l_field = 0;
-    bool l_ok = true;
-    for (size_t bit = 0; bit < 8; bit++) {
-      uint8_t v = 0;
-      if (!s1_chip_pair_(raw, bit, polarity != 0, v)) {
-        l_ok = false;
-        break;
-      }
-      l_field = (uint8_t) ((l_field << 1U) | v);
-    }
-    if (!l_ok)
-      continue;
-
-    const size_t frame_len = (size_t) l_field + 1U;
-    if (frame_len < 12U || frame_len > 260U)
-      continue;
-
-    // C-field, raw bytes 2-3. Up to two invalid pairs tolerated, and only the
-    // bits that did decode are compared against 0x44 / 0x46.
-    //
-    // The C-field is here to stop the complemented polarity selecting a
-    // plausible but wrong L-field - it contributes nothing to the length. So
-    // demanding it decode perfectly buys nothing and costs a great deal:
-    // measured 2026-08-01 at the sensitivity threshold, a single chip error in
-    // raw byte 3 turned 0x65 into 0x6D, no length was derived, and the capture
-    // ran to the 512-byte cap collecting 85 ms of post-frame noise. The frame
-    // itself had one bad pair in 776.
-    //
-    // Two masked bits still leave six to match, so the complement (0xBB against
-    // 0x44) is not going to slip through.
-    uint8_t c_bits = 0, c_mask = 0;
-    size_t c_invalid = 0;
-    for (size_t bit = 0; bit < 8; bit++) {
-      uint8_t v = 0;
-      c_bits = (uint8_t) (c_bits << 1U);
-      c_mask = (uint8_t) (c_mask << 1U);
-      if (s1_chip_pair_(raw, 8U + bit, polarity != 0, v)) {
-        c_bits = (uint8_t) (c_bits | v);
-        c_mask = (uint8_t) (c_mask | 1U);
-      } else {
-        c_invalid++;
-      }
-    }
-    if (c_invalid > 2)
-      continue;
-    if ((c_bits & c_mask) != (0x44U & c_mask) && (c_bits & c_mask) != (0x46U & c_mask))
-      continue;
-
-    const size_t blocks = (l_field < 26U) ? 2U : (size_t) ((l_field - 26U) / 16U + 3U);
-    const size_t decoded_with_crc = frame_len + 2U * blocks;
-    return decoded_with_crc * 2U;
-  }
-  return 0;
-}
 
 // ---------------------------------------------------------------------------
-// t1_expected_raw_len_: how many raw (3-of-6 coded) bytes this T-mode frame
-// occupies, derived from its own L field. The T counterpart of
-// s1_expected_raw_len_() above, and it exists for the same reason: with no
-// length the stream capture does not know where the frame ends, so it runs on
-// to its byte cap collecting post-frame noise.
-//
-// That was not a corner case in T mode, it was every single capture, because
-// both of the loop's early exits are unreachable in this configuration:
-//
-//   * `end_irq` waits for RX_DONE or TIMEOUT. RX_DONE cannot fire - the loop
-//     pushes REG_RXTX_PAYLOAD_LEN ahead of the write pointer on every poll,
-//     which is exactly what AN1200.53 asks for - and RX is armed continuous,
-//     so there is no TIMEOUT either.
-//   * `silence` waits 30 ms without new bytes. In continuous RX the
-//     demodulator keeps producing bits out of noise once the frame has ended,
-//     so bytes keep arriving, last_change_ms keeps being refreshed, and the
-//     silence never happens. (The S-mode branch does reach this exit, which is
-//     why the note there reads the other way round - a different packet
-//     configuration, and not a claim that holds for T mode.)
-//
-// So every capture ran to `buffer_cap`: 512 bytes, 125 ms of deafness, and a
-// short frame buried under repeated reads of a 256-byte circular buffer. That
-// is where `long_gfsk_packets: true` spent its 7.5 dB - not in sensitivity,
-// which is why no register ever explained it. Confirmed by the field data: the
-// exit reason recorded in the RSSI diagnostics was `buffer_cap` every time,
-// and 512 copied bytes means 512 bytes really did arrive.
-//
-// Two differences from the S-mode helper, both making this one simpler:
-//
-//   * No polarity search. Manchester has two, so s1_expected_raw_len_() tries
-//     both and needs the C field to reject the complement. 3-of-6 has no
-//     polarity ambiguity, so the C field buys nothing here and is not read -
-//     one less byte that has to survive at the sensitivity threshold.
-//   * A decoded byte is exactly 1.5 raw bytes, so encoded_size() from the
-//     3-of-6 decoder answers directly instead of the S-mode x2.
-//
-// Returns 0 when no length can be derived; the caller then keeps its cap.
-// ---------------------------------------------------------------------------
-static size_t t1_expected_raw_len_(const std::vector<uint8_t> &raw) {
-  // Two raw bytes carry the two 6-bit symbols that make up the L field (with
-  // four bits to spare). That is the entire input this needs.
-  if (raw.size() < 2)
-    return 0;
-
-  const std::vector<uint8_t> head(raw.begin(), raw.begin() + 2);
-  const auto decoded = decode3of6(head);
-  if (!decoded.has_value() || decoded->empty())
-    return 0;
-
-  const uint8_t l_field = (*decoded)[0];
-  const size_t frame_len = (size_t) l_field + 1U;
-  // Same bounds as the S-mode helper: under 12 there is no room for a DLL
-  // header, over 260 no wM-Bus frame exists.
-  if (frame_len < 12U || frame_len > 260U)
-    return 0;
-
-  // Format A block layout, identical in both modes: block 1 carries 10 bytes,
-  // every further block 16, each followed by a 2-byte CRC.
-  const size_t blocks = (l_field < 26U) ? 2U : (size_t) ((l_field - 26U) / 16U + 3U);
-  const size_t decoded_with_crc = frame_len + 2U * blocks;
-  return encoded_size(decoded_with_crc);
-}
+// manchester_chip_pair(), expected_raw_len_s1() and expected_raw_len_t1() moved to
+// frame_length.h on 2026-09-24, unchanged, so the LR1121 drain uses the same
+// arithmetic instead of a second copy. Call sites below are renamed only.
 
 // ---------------------------------------------------------------------------
 // wait_while_busy_: poll BUSY pin until low (command accepted).
@@ -1121,8 +981,8 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
 
       if (this->listen_mode_ == LISTEN_MODE_S1) {
         if (s1_expected_raw_len == 0) {
-          s1_expected_raw_len = s1_expected_raw_len_(this->rx_buffer_);
-          // s1_expected_raw_len_() only ever reads raw bytes 0..3. Once it has
+          s1_expected_raw_len = expected_raw_len_s1(this->rx_buffer_);
+          // expected_raw_len_s1() only ever reads raw bytes 0..3. Once it has
           // seen them and produced nothing, it will keep producing nothing for
           // the rest of this capture - those bytes do not change. The frame is
           // already lost at that point and the only question left is how long
@@ -1144,7 +1004,7 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
         }
       } else if (this->listen_mode_ == LISTEN_MODE_T1) {
         if (t1_expected_raw_len == 0) {
-          t1_expected_raw_len = t1_expected_raw_len_(this->rx_buffer_);
+          t1_expected_raw_len = expected_raw_len_t1(this->rx_buffer_);
           // Same argument as the S-mode branch: the helper only ever reads raw
           // bytes 0..1, so once those have arrived and yielded nothing they
           // will keep yielding nothing. Without an L field nothing downstream

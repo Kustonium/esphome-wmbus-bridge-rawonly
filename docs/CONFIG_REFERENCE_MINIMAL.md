@@ -68,7 +68,8 @@ A valid S1 telegram is published on `wmbus/<topic_name>/telegram` just like vali
 | `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | TCXO startup delay in 32.768 kHz ticks (~91.6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | advanced | RX bandwidth in Hz |
 | `min_preamble_bits` | `SX1262`, `SX1276`, `LR1121` | `16` | advanced | preamble bits required before reception starts. **Maximum 16 for `listen_mode: t1` and `both`**: the T1 preamble is shorter than 24 bits, so `24`/`32` decode no frames (measured: 184 triggers, 0 frames) and fail validation. `8` works but costs about 16% of meters heard. SX1276 has no `32` setting. This is not the transmitted preamble length, a separate `SetPacketParams` field not exposed in YAML |
-| `payload_length` | `LR1121` | `255` | advanced | fixed T1 capture length; the host trims the telegram using the decoded L-field |
+| `payload_length` | `LR1121` | `255` | advanced | fixed capture length; the host trims the telegram using the decoded L-field. This is the ceiling a frame is cut at unless `lr1121_auto_length` is on |
+| `lr1121_auto_length` | `LR1121` | `false` | advanced | read each frame's own L-field while it is still arriving and stop the capture at its real length, instead of at `payload_length`. Lifts the 255-byte ceiling: measured at 326 raw bytes in T1, 434 in S1 and 219 in C1 from one frame. Requires `lr1121_sync_probe` and `lr1121_drain`, and is refused alongside `lr1121_expected_len_override`. Off by default because it writes an undocumented register verified against one radio firmware |
 | `rx_boosted` | `LR1121` | `true` | advanced | +2 dB sensitivity at a cost of about 2 mA |
 | `bitrate` | `LR1121` | `100000` | advanced | GFSK bitrate |
 | `deviation` | `LR1121` | `50000` | advanced | GFSK deviation |

@@ -251,9 +251,36 @@ wmbus_radio:
   # encoded and cannot be used by the radio as an on-air length byte. Capture
   # the maximum single-packet length (255 bytes) and let the host trim it. A
   # real L=0x4C meter needs about 134 encoded bytes, so the former value 128
-  # truncated valid telegrams. Frames exceeding 255 encoded bytes will require
-  # a streaming FIFO path analogous to the SX1262 long-frame receiver.
+  # truncated valid telegrams.
+  #
+  # This is a ceiling, not a length: every capture is exactly this long and the
+  # host trims. A frame longer than 255 encoded bytes is cut here - see
+  # lr1121_auto_length below, which removes that limit.
   payload_length: 255
+
+  # Read each frame's own L-field while it is still arriving and stop the
+  # capture at its real length, instead of always taking payload_length bytes.
+  #
+  # This is what lifts the 255-byte ceiling. Measured on the Waveshare HF board
+  # from one L=0xBE telegram: 326 raw bytes in T1 (3-of-6), 434 in S1
+  # (Manchester) and 219 in C1 (no line coding) - three different lengths, each
+  # computed from the same L-field by that mode's own arithmetic.
+  #
+  # Off by default, and deliberately so. It works by writing the frame's length
+  # into an undocumented register while the frame is still on air. That register
+  # is verified against one radio firmware (0x0101) and the driver refuses to
+  # touch it on any other image, falling back to payload_length. Below 255 bytes
+  # nothing needs it, which is exactly where this switch sits.
+  #
+  # The three options only work together: the length is read out of bytes the
+  # drain copied, inside the window the sync probe opens. Setting this one alone
+  # is refused at validation rather than quietly doing nothing, as is setting it
+  # alongside lr1121_expected_len_override, which pins every capture to one
+  # fixed length and stops ordinary meters decoding.
+  #
+  # lr1121_sync_probe: true   # default: false
+  # lr1121_drain: true        # default: false
+  # lr1121_auto_length: true  # default: false
 
   # ---------------------------------------------------------------------------
   # RF PARAMETERS
