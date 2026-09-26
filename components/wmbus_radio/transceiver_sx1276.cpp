@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_sx1276.h"
+#include "log_lang.h"
 
 #include "esphome/core/log.h"
 #include <esp_timer.h>
@@ -142,7 +143,7 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
     this->last_rssi_dbm_ = -127;
     this->abort_requested_ = true;
     this->fifo_overrun_count_++;
-    ESP_LOGW(TAG, "FIFO overrun / przepelnienie FIFO");
+    ESP_LOGW(TAG, LOG_TR("FIFO overrun", "Przepelnienie FIFO"));
     return {};
   }
 
@@ -209,7 +210,7 @@ void SX1276::setup() {
     this->tcxo_pin_->setup();
     this->tcxo_pin_->digital_write(true);
     delay(10);
-    ESP_LOGI(TAG, "TCXO enable pin set HIGH before radio init / pin TCXO ustawiony HIGH przed inicjalizacja radia");
+    ESP_LOGI(TAG, LOG_TR("TCXO enable pin set HIGH before radio init", "Pin TCXO ustawiony HIGH przed inicjalizacja radia"));
   }
 
   this->common_setup();
@@ -219,13 +220,13 @@ void SX1276::setup() {
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                    : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only"
                    : "T1+C1 (both, 3:1 bias)";
-    ESP_LOGI(TAG, "Listen mode / tryb nasluchu: %s", lm);
+    ESP_LOGI(TAG, LOG_TR("Listen mode: %s", "Tryb nasluchu: %s"), lm);
   }
   this->reset();
 
   const uint8_t revision = this->spi_read(0x42);
   if (revision < 0x11 || revision > 0x13) {
-    ESP_LOGE(TAG, "Invalid silicon revision / nieprawidlowa rewizja ukladu: %02X", revision);
+    ESP_LOGE(TAG, LOG_TR("Invalid silicon revision: %02X", "Nieprawidlowa rewizja ukladu: %02X"), revision);
     return;
   }
 
@@ -332,8 +333,8 @@ void SX1276::log_reg_status() {
 
   if (reg_version == 0x00 && reg_op_mode == 0x00 && reg_irq2 == 0x00 &&
       reg_rssi == 0x00 && reg_dio == 0x00 && reg_fifo_thresh == 0x00) {
-    ESP_LOGE(TAG, "SX1276 not responding over SPI / SX1276 nie odpowiada po SPI. "
-                  "Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.");
+    ESP_LOGE(TAG, LOG_TR("SX1276 not responding over SPI. Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.",
+                         "SX1276 nie odpowiada po SPI. Sprawdz VCC/GND/SCK/MOSI/MISO/NSS/RESET."));
   }
 
   if (this->diag_verbose_)
@@ -358,7 +359,7 @@ void SX1276::log_reg_status() {
 // diagnostics only. Five lines per boot.
 // ---------------------------------------------------------------------------
 void SX1276::dump_register_bank_() {
-  ESP_LOGI(TAG, "Register bank / bank rejestrow (FSK, 0x00-0x4F; 0x00 = RegFifo, not read):");
+  ESP_LOGI(TAG, LOG_TR("Register bank (FSK, 0x00-0x4F; 0x00 = RegFifo, not read):", "Bank rejestrow (FSK, 0x00-0x4F; 0x00 = RegFifo, nieczytany):"));
   for (uint8_t base = 0x00; base < 0x50; base = (uint8_t) (base + 0x10)) {
     char line[80];
     int pos = snprintf(line, sizeof(line), "  %02X:", base);
@@ -424,8 +425,10 @@ void SX1276::dump_debug_status(const char *reason) {
   if (this->frame_metrics_us_ != 0) {
     const long age_s = (long) ((esp_timer_get_time() - this->frame_metrics_us_) / 1000000LL);
     ESP_LOGI(TAG,
-             "DEBUG [%s]: last frame %lds ago: RegAfc=%02X%02X (%ld Hz) RegFei=%02X%02X (%ld Hz) "
-             "RSSI=%ddBm / blad czestotliwosci ostatniej ramki",
+             LOG_TR("DEBUG [%s]: last frame %lds ago: RegAfc=%02X%02X (%ld Hz) RegFei=%02X%02X (%ld Hz) "
+                    "RSSI=%ddBm",
+                    "DEBUG [%s]: ostatnia ramka %lds temu: RegAfc=%02X%02X (%ld Hz) RegFei=%02X%02X (%ld Hz) "
+                    "RSSI=%ddBm (blad czestotliwosci ostatniej ramki)"),
              reason != nullptr ? reason : "?", age_s,
              this->last_afc_msb_, this->last_afc_lsb_,
              (long) sx1276_steps_to_hz_(this->last_afc_msb_, this->last_afc_lsb_),

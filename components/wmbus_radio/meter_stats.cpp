@@ -6,6 +6,7 @@
 // names and the windowing behaviour are identical.
 
 #include "component.h"
+#include "log_lang.h"
 #include "meter_filter.h"
 #include "wmbus_radio_internal.h"
 
@@ -109,7 +110,7 @@ void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s,
 
   const std::string snapshot_topic = this->diag_topic_ + "/meter_snapshot";
   mqtt->publish(snapshot_topic, batch, this->diag_qos_, false);
-  ESP_LOGI(TAG, "METER SNAPSHOT / snapshot licznikow: trigger=%s meters=%zu", trigger, this->highlight_meter_stats_.size());
+  ESP_LOGI(TAG, LOG_TR("METER SNAPSHOT: trigger=%s meters=%zu", "SNAPSHOT LICZNIKOW: trigger=%s meters=%zu"), trigger, this->highlight_meter_stats_.size());
 }
 
 // Publish windowed stats for a single meter and reset its window counters.
@@ -174,7 +175,7 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
   if (!meter_window_topic.empty()) {
     mqtt->publish(meter_window_topic, std::string(payload), this->diag_qos_, false);
   }
-  ESP_LOGI(TAG, "METER / LICZNIK [%s] uptime_ms=%lu listen_mode=%s id=%s mode=%s win=%us count_window=%u total=%u avg_interval=%us win_avg_interval=%us win_avg_rssi=%ddBm",
+  ESP_LOGI(TAG, LOG_TR("METER", "LICZNIK") " [%s] uptime_ms=%lu listen_mode=%s id=%s mode=%s win=%us count_window=%u total=%u avg_interval=%us win_avg_interval=%us win_avg_rssi=%ddBm",
            trigger, (unsigned long) now_ms, listen_mode, id_str, mode_str,
            (unsigned) elapsed_s,
            (unsigned) count_window,

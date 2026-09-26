@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "component.h"
+#include "log_lang.h"
 #include "meter_filter.h"
 
 #include "freertos/queue.h"
@@ -148,9 +149,9 @@ static void parse_meter_priority_csv_(const std::string &csv,
 
     const size_t colon = tok.find(':');
     if (colon == std::string::npos) {
-      ESP_LOGW("wmbus", "buffer_priority: malformed entry '%s' (expected <id>:<weight>), ignoring / "
-                        "bledny wpis '%s' (oczekiwano <id>:<waga>), ignorowanie",
-               tok.c_str(), tok.c_str());
+      ESP_LOGW("wmbus", LOG_TR("buffer_priority: malformed entry '%s' (expected <id>:<weight>), ignoring",
+                               "buffer_priority: bledny wpis '%s' (oczekiwano <id>:<waga>), ignorowanie"),
+               tok.c_str());
       continue;
     }
     const std::string id_tok = tok.substr(0, colon);
@@ -163,9 +164,9 @@ static void parse_meter_priority_csv_(const std::string &csv,
     char *endp = nullptr;
     const unsigned long w = std::strtoul(w_tok.c_str(), &endp, 10);
     if (endp == w_tok.c_str() || *endp != '\0' || w == 0) {
-      ESP_LOGW("wmbus", "buffer_priority: invalid weight '%s' for '%s' (must be a positive integer), ignoring / "
-                        "nieprawidlowa waga '%s' dla '%s' (wymagana dodatnia liczba calkowita), ignorowanie",
-               w_tok.c_str(), id_tok.c_str(), w_tok.c_str(), id_tok.c_str());
+      ESP_LOGW("wmbus", LOG_TR("buffer_priority: invalid weight '%s' for '%s' (must be a positive integer), ignoring",
+                               "buffer_priority: nieprawidlowa waga '%s' dla '%s' (wymagana dodatnia liczba calkowita), ignorowanie"),
+               w_tok.c_str(), id_tok.c_str());
       continue;
     }
 
@@ -178,7 +179,7 @@ std::string Radio::forward_whitelist_summary_() const {
   const size_t bcd_n = this->forward_meter_ids_.size();
   const size_t raw_n = this->forward_meter_raw_ids_.size();
   if (bcd_n == 0 && raw_n == 0)
-    return "disabled - every decoded frame is published / wylaczona - publikowana jest kazda ramka";
+    return LOG_TR("disabled - every decoded frame is published", "wylaczona - publikowana jest kazda ramka");
 
   // List the parsed IDs, not just the count: a mistyped entry is only obvious
   // when the resulting values are visible. Each form is printed the way the log
@@ -239,7 +240,7 @@ void Radio::setup() {
   this->rx_boot_id_ = esp_random();
   if (this->rx_boot_id_ == 0) this->rx_boot_id_ = 1;
   for (const auto &warning : this->config_warnings_) {
-    ESP_LOGW(TAG, "Config warning / ostrzezenie konfiguracji: %s", warning.c_str());
+    ESP_LOGW(TAG, LOG_TR("Config warning: %s", "Ostrzezenie konfiguracji: %s"), warning.c_str());
   }
   // Parse optional highlight meter list (CSV provided by python/YAML).
   parse_meter_id_csv_(this->highlight_meters_csv_, this->highlight_meter_ids_,
@@ -252,8 +253,8 @@ void Radio::setup() {
     if (tmp.empty() && !tmp_raw.empty()) {
       // Would otherwise be accepted and then never match anything, because the
       // target is compared against the BCD-decoded ID only.
-      ESP_LOGW(TAG, "target_meter_id: non-BCD (hex) meter IDs are not supported here - use forward_meters for such meters / "
-                    "szesnastkowe ID nie sa tu obslugiwane - dla takich licznikow uzyj forward_meters");
+      ESP_LOGW(TAG, LOG_TR("target_meter_id: non-BCD (hex) meter IDs are not supported here - use forward_meters for such meters",
+                           "target_meter_id: szesnastkowe ID nie sa tu obslugiwane - dla takich licznikow uzyj forward_meters"));
     }
     if (!tmp.empty()) {
       this->target_meter_id_ = tmp.front();
@@ -263,14 +264,14 @@ void Radio::setup() {
       }
       char id_buf[9];
       snprintf(id_buf, sizeof(id_buf), "%08u", (unsigned) this->target_meter_id_);
-      ESP_LOGI(TAG, "Target meter forwarding enabled / wlaczono przekazywanie docelowego licznika id=%s topic=%s",
+      ESP_LOGI(TAG, LOG_TR("Target meter forwarding enabled id=%s topic=%s", "Wlaczono przekazywanie docelowego licznika id=%s topic=%s"),
                id_buf, this->target_topic_.empty() ? "<derived at runtime>" : this->target_topic_.c_str());
     }
   }
 
   if (!this->telegram_topic_.empty()) {
-    ESP_LOGI(TAG, "Frame RAW forwarding topic / topic publikacji RAW: %s", this->telegram_topic_.c_str());
-    ESP_LOGI(TAG, "Frame RX metadata topic / topic metadanych RX: %s", this->rx_topic_.c_str());
+    ESP_LOGI(TAG, LOG_TR("Frame RAW forwarding topic: %s", "Topic publikacji RAW: %s"), this->telegram_topic_.c_str());
+    ESP_LOGI(TAG, LOG_TR("Frame RX metadata topic: %s", "Topic metadanych RX: %s"), this->rx_topic_.c_str());
   }
   if (this->mqtt_outbox_auto_) {
     // Seed an initial estimate right away rather than waiting for the first
@@ -287,11 +288,8 @@ void Radio::setup() {
     const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     const bool store_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0;
     ESP_LOGI(TAG,
-             "MQTT outbox / bufor MQTT: capacity=%u (max=%u, %s, store=%s) free_heap=%u B free_psram=%u B / "
-             "pojemnosc=%u (maksimum=%u, %s, storage=%s) wolny_heap=%u B wolny_psram=%u B",
-             (unsigned) this->mqtt_outbox_capacity_, (unsigned) this->mqtt_outbox_max_capacity_,
-             this->mqtt_outbox_auto_ ? "auto" : "fixed", store_psram ? "PSRAM" : "internal",
-             (unsigned) free_internal, (unsigned) free_psram,
+             LOG_TR("MQTT outbox: capacity=%u (max=%u, %s, store=%s) free_heap=%u B free_psram=%u B",
+                    "Bufor MQTT: pojemnosc=%u (maksimum=%u, %s, storage=%s) wolny_heap=%u B wolny_psram=%u B"),
              (unsigned) this->mqtt_outbox_capacity_, (unsigned) this->mqtt_outbox_max_capacity_,
              this->mqtt_outbox_auto_ ? "auto" : "fixed", store_psram ? "PSRAM" : "internal",
              (unsigned) free_internal, (unsigned) free_psram);
@@ -311,8 +309,8 @@ void Radio::setup() {
   parse_meter_priority_csv_(this->buffer_priority_csv_, this->buffer_priority_weights_);
   if (!this->buffer_priority_weights_.empty() &&
       this->forward_meter_ids_.empty() && this->forward_meter_raw_ids_.empty()) {
-    ESP_LOGW(TAG, "buffer_priority is set but forward_meters is empty: nothing to prioritise, ignoring / "
-                  "ustawiono buffer_priority bez forward_meters: brak whitelisty do priorytetyzacji, ignorowanie");
+    ESP_LOGW(TAG, LOG_TR("buffer_priority is set but forward_meters is empty: nothing to prioritise, ignoring",
+                         "Ustawiono buffer_priority bez forward_meters: brak whitelisty do priorytetyzacji, ignorowanie"));
   }
 
   // First real per-meter quota computation. Must happen only now: any earlier
@@ -337,21 +335,21 @@ void Radio::setup() {
       if (!quota_list.empty()) quota_list += ", ";
       quota_list += std::string(id_buf) + ":w" + std::to_string(mq.weight) + "->" + std::to_string(mq.quota);
     }
-    ESP_LOGI(TAG, "MQTT outbox per-meter quotas (id:weight->slots) / bufor MQTT wg licznika (id:waga->miejsca): %s",
+    ESP_LOGI(TAG, LOG_TR("MQTT outbox per-meter quotas (id:weight->slots): %s", "Bufor MQTT wg licznika (id:waga->miejsca): %s"),
              quota_list.c_str());
   }
 
   if (!this->forward_meter_ids_.empty() || !this->forward_meter_raw_ids_.empty()) {
-    ESP_LOGI(TAG, "Forward whitelist / whitelista przekazywania: %s",
+    ESP_LOGI(TAG, LOG_TR("Forward whitelist: %s", "Whitelista przekazywania: %s"),
              this->forward_whitelist_summary_().c_str());
   }
 
   if (this->publish_radio_raw_) {
-    ESP_LOGI(TAG, "Internal radio RAW tap enabled / wlaczono wewnetrzny RAW tap: wmbus_bridge/raw");
+    ESP_LOGI(TAG, LOG_TR("Internal radio RAW tap enabled: wmbus_bridge/raw", "Wlaczono wewnetrzny RAW tap: wmbus_bridge/raw"));
   }
 
   if (this->publish_rssi_) {
-    ESP_LOGI(TAG, "Per-meter RSSI publishing enabled / wlaczono publikacje RSSI per licznik: %s/<meter_id>",
+    ESP_LOGI(TAG, LOG_TR("Per-meter RSSI publishing enabled: %s/<meter_id>", "Wlaczono publikacje RSSI per licznik: %s/<meter_id>"),
              this->rssi_topic_.c_str());
   }
 
@@ -361,7 +359,8 @@ void Radio::setup() {
     // meter_window_interval_ms_ defaults to 15 min; cap it at diag_summary_interval_ms_ minimum
     if (this->meter_window_interval_ms_ < this->diag_summary_interval_ms_)
       this->meter_window_interval_ms_ = this->diag_summary_interval_ms_;
-    ESP_LOGI(TAG, "Highlight meters enabled / wlaczono wyroznione liczniki (%u ids) tag=%s ansi=%s window=%us",
+    ESP_LOGI(TAG, LOG_TR("Highlight meters enabled (%u ids) tag=%s ansi=%s window=%us",
+                    "Wlaczono wyroznione liczniki (%u ids) tag=%s ansi=%s window=%us"),
              (unsigned) (this->highlight_meter_ids_.size() + this->highlight_meter_raw_ids_.size()),
              this->highlight_tag_.empty() ? "wmbus_user" : this->highlight_tag_.c_str(),
              this->highlight_ansi_ ? "true" : "false",
@@ -395,7 +394,7 @@ void Radio::setup() {
                            this->receiver_task_stack_size_, this, 24, &(this->receiver_task_handle_)));
 #endif
 
-  ESP_LOGI(TAG, "Receiver task created / utworzono task odbiornika [%p], stack=%u bytes",
+  ESP_LOGI(TAG, LOG_TR("Receiver task created [%p], stack=%u bytes", "Utworzono task odbiornika [%p], stack=%u bytes"),
            this->receiver_task_handle_, (unsigned) this->receiver_task_stack_size_);
 
   this->radio->attach_data_interrupt(Radio::wakeup_receiver_task_from_isr,
@@ -473,7 +472,7 @@ void Radio::loop() {
         if (this->diag_verbose_) ESP_LOGI(TAG, "Radio runtime: %s", diagnostic.c_str());
         if (!this->diag_topic_.empty() && mqtt::global_mqtt_client != nullptr &&
             mqtt::global_mqtt_client->is_connected()) {
-          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/radio_runtime", diagnostic, 1, true);
+          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/radio_runtime", diagnostic, 1, false);
         }
         if (!this->probe_baseline_reported_) {
           const auto baseline = this->radio->probe_baseline_json();
@@ -488,7 +487,7 @@ void Radio::loop() {
               ESP_LOGI(TAG, "Register probe baseline (pre-RX, read-only): %s", baseline.c_str());
             if (!this->diag_topic_.empty() && mqtt::global_mqtt_client != nullptr &&
                 mqtt::global_mqtt_client->is_connected()) {
-              mqtt::global_mqtt_client->publish(this->diag_topic_ + "/probe_baseline", baseline, 1, true);
+              mqtt::global_mqtt_client->publish(this->diag_topic_ + "/probe_baseline", baseline, 1, false);
             }
             // Marked reported whether or not MQTT took it. It used to be set
             // only inside the publish branch, so with the broker away the
@@ -523,7 +522,7 @@ void Radio::loop() {
         (unsigned) raw_sample.probe[0], (unsigned) raw_sample.probe[1],
         (unsigned) raw_sample.probe[2], (unsigned) raw_sample.probe[3], hex);
       mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_fifo/" +
-        std::to_string((this->lr_raw_sample_seq_ - 1) % 8), std::string(body), 1, true);
+        std::to_string((this->lr_raw_sample_seq_ - 1) % 8), std::string(body), 1, false);
     }
     if (strcmp(this->radio->get_name(), "LR1121") == 0 &&
         (uint32_t) (loop_now_ms - this->lr_pipeline_report_ms_) >= 60000) {
@@ -532,10 +531,10 @@ void Radio::loop() {
       const auto sync_probe = this->radio->sync_probe_json();
       if (!sync_probe.empty() && this->diag_publish_summary_ && !this->diag_topic_.empty() &&
           mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected()) {
-        mqtt::global_mqtt_client->publish(this->diag_topic_ + "/sync_probe", sync_probe, 1, true);
+        mqtt::global_mqtt_client->publish(this->diag_topic_ + "/sync_probe", sync_probe, 1, false);
         const auto drain_sample = this->radio->drain_sample_json();
         if (!drain_sample.empty())
-          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_drain", drain_sample, 1, true);
+          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_drain", drain_sample, 1, false);
       }
     }
   }
@@ -551,7 +550,7 @@ void Radio::loop() {
     RadioTransceiver::RssiDiag rssi_diag{};
     while (this->radio->take_rssi_diag(rssi_diag)) {
       ESP_LOGI(TAG,
-               "RSSI source / zrodlo RSSI: %s (path=%s RssiSync=0x%02X RssiAvg=0x%02X inflight=%ddBm) -> %ddBm",
+               LOG_TR("RSSI source: ", "Zrodlo RSSI: ") "%s (path=%s RssiSync=0x%02X RssiAvg=0x%02X inflight=%ddBm) -> %ddBm",
                rssi_diag.source, rssi_diag.path, (unsigned) rssi_diag.raw_sync,
                (unsigned) rssi_diag.raw_avg, (int) rssi_diag.inflight, (int) rssi_diag.result);
       if (rssi_diag.trigger_irq != 0 || rssi_diag.captured != 0) {
@@ -592,7 +591,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       }
 
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | busy_ether=%s | state=%s | RF: %s",
+               LOG_TR("Radio active: %s | Listen mode: %s", "Radio aktywne: %s | Tryb nasluchu: %s") " | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | busy_ether=%s | state=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
@@ -603,11 +602,13 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
 
       if (this->sx1276_yaml_sanity_configured_) {
-        ESP_LOGI(TAG, "SX1276 YAML sanity / sprawdzenie YAML SX1276:");
+        ESP_LOGI(TAG, LOG_TR("SX1276 YAML sanity:", "Sprawdzenie YAML SX1276:"));
         if (this->sx1276_yaml_tcxo_pin_configured_) {
-          ESP_LOGI(TAG, "  tcxo_pin: configured -> TCXO enable pin driven HIGH before radio init / pin TCXO ustawiany HIGH przed inicjalizacja radia");
+          ESP_LOGI(TAG, LOG_TR("  tcxo_pin: configured -> TCXO enable pin driven HIGH before radio init",
+                               "  tcxo_pin: ustawiony -> pin TCXO ustawiany HIGH przed inicjalizacja radia"));
         } else {
-          ESP_LOGI(TAG, "  tcxo_pin: not configured -> OK for normal SX1276 boards; LilyGO T3 V3.0 TCXO uses tcxo_pin: GPIO12 / OK dla zwyklych plytek SX1276; LilyGO T3 V3.0 TCXO uzywa tcxo_pin: GPIO12");
+          ESP_LOGI(TAG, LOG_TR("  tcxo_pin: not configured -> OK for normal SX1276 boards; LilyGO T3 V3.0 TCXO uses tcxo_pin: GPIO12",
+                               "  tcxo_pin: nieustawiony -> OK dla zwyklych plytek SX1276; LilyGO T3 V3.0 TCXO uzywa tcxo_pin: GPIO12"));
         }
       }
       this->radio->log_reg_status();
@@ -615,7 +616,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       const bool t1_like = this->radio->get_listen_mode() == LISTEN_MODE_T1 || this->radio->get_listen_mode() == LISTEN_MODE_BOTH;
 
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
+               LOG_TR("Radio active: %s | Listen mode: %s", "Radio aktywne: %s | Tryb nasluchu: %s") " | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
@@ -623,20 +624,22 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                this->meter_stats_str_.c_str(),
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
 
-      ESP_LOGI(TAG, "SX1262 YAML sanity / sprawdzenie YAML SX1262:");
+      ESP_LOGI(TAG, LOG_TR("SX1262 YAML sanity:", "Sprawdzenie YAML SX1262:"));
 
       if (this->sx1262_yaml_has_tcxo_) {
-        ESP_LOGI(TAG, "  has_tcxo: true -> TCXO enabled / TCXO wlaczone");
+        ESP_LOGI(TAG, LOG_TR("  has_tcxo: true -> TCXO enabled", "  has_tcxo: true -> TCXO wlaczone"));
       } else {
         ESP_LOGW(TAG,
-                 "  has_tcxo: false -> RISK(!): radio may initialize but receive no frames on TCXO boards, including Heltec V4 / radio moze sie zainicjalizowac, ale nie odbierac ramek na plytkach z TCXO, w tym Heltec V4");
+                 LOG_TR("  has_tcxo: false -> RISK(!): radio may initialize but receive no frames on TCXO boards, including Heltec V4",
+                        "  has_tcxo: false -> RYZYKO(!): radio moze sie zainicjalizowac, ale nie odbierac ramek na plytkach z TCXO, w tym Heltec V4"));
       }
 
       if (this->sx1262_yaml_dio2_rf_switch_) {
-        ESP_LOGI(TAG, "  dio2_rf_switch: true -> DIO2 RF switch enabled / przelacznik RF na DIO2 wlaczony");
+        ESP_LOGI(TAG, LOG_TR("  dio2_rf_switch: true -> DIO2 RF switch enabled", "  dio2_rf_switch: true -> przelacznik RF na DIO2 wlaczony"));
       } else {
         ESP_LOGW(TAG,
-                 "  dio2_rf_switch: false -> check board wiring; OK only for boards without DIO2 RF switch / sprawdz plytke; OK tylko bez przelacznika RF na DIO2");
+                 LOG_TR("  dio2_rf_switch: false -> check board wiring; OK only for boards without DIO2 RF switch",
+                        "  dio2_rf_switch: false -> sprawdz plytke; OK tylko bez przelacznika RF na DIO2"));
       }
 
       // Which of these two is the warning was inverted on 2026-09-03, because
@@ -655,13 +658,16 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       if (t1_like) {
         if (this->sx1262_yaml_long_gfsk_packets_) {
           ESP_LOGW(TAG,
-                   "  long_gfsk_packets: true -> costs ~7 dB in weak signal; worth it only if you receive frames above ~150 decoded bytes / kosztuje ~7 dB przy slabym sygnale; oplaca sie tylko, jesli odbierasz ramki powyzej ~150 bajtow zdekodowanych");
+                   LOG_TR("  long_gfsk_packets: true -> costs ~7 dB in weak signal; worth it only if you receive frames above ~150 decoded bytes",
+                          "  long_gfsk_packets: true -> kosztuje ~7 dB przy slabym sygnale; oplaca sie tylko, jesli odbierasz ramki powyzej ~150 bajtow zdekodowanych"));
         } else {
           ESP_LOGI(TAG,
-                   "  long_gfsk_packets: false -> full sensitivity; frames above ~150 decoded bytes are truncated / pelna czulosc; ramki powyzej ~150 bajtow zdekodowanych sa ucinane");
+                   LOG_TR("  long_gfsk_packets: false -> full sensitivity; frames above ~150 decoded bytes are truncated",
+                          "  long_gfsk_packets: false -> pelna czulosc; ramki powyzej ~150 bajtow zdekodowanych sa ucinane"));
         }
       } else {
-        ESP_LOGI(TAG, "  long_gfsk_packets: %s -> long T1 check not applicable for this listen_mode / kontrola dlugich T1 nie dotyczy tego trybu",
+        ESP_LOGI(TAG, LOG_TR("  long_gfsk_packets: %s -> long T1 check not applicable for this listen_mode",
+                             "  long_gfsk_packets: %s -> kontrola dlugich T1 nie dotyczy tego trybu"),
                  this->sx1262_yaml_long_gfsk_packets_ ? "true" : "false");
       }
 
@@ -672,15 +678,17 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       // its antenna path. Reported in both states so "not configured" is a
       // positive statement rather than a missing line.
       if (this->sx1262_yaml_rf_sw_pin_) {
-        ESP_LOGI(TAG, "  rf_sw_pin: configured -> module RF switch gated by the driver / przelacznik RF modulu sterowany przez sterownik");
+        ESP_LOGI(TAG, LOG_TR("  rf_sw_pin: configured -> module RF switch gated by the driver",
+                             "  rf_sw_pin: ustawiony -> przelacznik RF modulu sterowany przez sterownik"));
       } else {
         ESP_LOGI(TAG,
-                 "  rf_sw_pin: not configured -> OK for boards without a module RF switch; REQUIRED on XIAO ESP32-S3 + Wio-SX1262 (GPIO38), otherwise ~30 dB less sensitivity / OK dla plytek bez przelacznika RF w module; WYMAGANE na XIAO ESP32-S3 + Wio-SX1262 (GPIO38), inaczej czulosc nizsza o ~30 dB");
+                 LOG_TR("  rf_sw_pin: not configured -> OK for boards without a module RF switch; REQUIRED on XIAO ESP32-S3 + Wio-SX1262 (GPIO38), otherwise ~30 dB less sensitivity",
+                        "  rf_sw_pin: nieustawiony -> OK dla plytek bez przelacznika RF w module; WYMAGANE na XIAO ESP32-S3 + Wio-SX1262 (GPIO38), inaczej czulosc nizsza o ~30 dB"));
       }
       this->radio->log_reg_status();
     } else {
       ESP_LOGI(TAG,
-               "Radio active / radio aktywne: %s | Listen mode / tryb nasluchu: %s | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
+               LOG_TR("Radio active: %s | Listen mode: %s", "Radio aktywne: %s | Tryb nasluchu: %s") " | receiver_stack=%u bytes | diagnostic_mode=%s | meter_stats=%s | RF: %s",
                radio_name,
                listen_mode_to_string_(this->radio->get_listen_mode()),
                (unsigned) this->receiver_task_stack_size_,
@@ -689,12 +697,14 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                this->radio->get_rf_params_str().empty() ? "n/a" : this->radio->get_rf_params_str().c_str());
 
       if (this->cc1101_yaml_sanity_configured_) {
-        ESP_LOGI(TAG, "CC1101 YAML sanity / sprawdzenie YAML CC1101:");
-        ESP_LOGI(TAG, "  cc1101_allow_experimental: true -> experimental gate open / bramka eksperymentalna otwarta");
+        ESP_LOGI(TAG, LOG_TR("CC1101 YAML sanity:", "Sprawdzenie YAML CC1101:"));
+        ESP_LOGI(TAG, LOG_TR("  cc1101_allow_experimental: true -> experimental gate open",
+                             "  cc1101_allow_experimental: true -> bramka eksperymentalna otwarta"));
         // The schema already refuses to build without both pins, so these can
         // only read "configured". They are logged anyway: a reader debugging a
         // silent CC1101 should see dual-IRQ confirmed, not have to infer it.
-        ESP_LOGI(TAG, "  gdo0_pin: %s / gdo2_pin: %s -> dual IRQ; single-IRQ CC1101 wiring is not supported / dwa przerwania; okablowanie single-IRQ nie jest wspierane",
+        ESP_LOGI(TAG, LOG_TR("  gdo0_pin: %s / gdo2_pin: %s -> dual IRQ; single-IRQ CC1101 wiring is not supported",
+                             "  gdo0_pin: %s / gdo2_pin: %s -> dwa przerwania; okablowanie single-IRQ nie jest wspierane"),
                  this->cc1101_yaml_gdo0_ ? "configured" : "MISSING",
                  this->cc1101_yaml_gdo2_ ? "configured" : "MISSING");
       }
@@ -706,7 +716,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     // never seen - exactly the reason the YAML sanity block lives here too.
     // Logged in both states, so "no filter configured" is a positive statement
     // rather than a missing line.
-    ESP_LOGI(TAG, "Forward whitelist / whitelista przekazywania: %s",
+    ESP_LOGI(TAG, LOG_TR("Forward whitelist: %s", "Whitelista przekazywania: %s"),
              this->forward_whitelist_summary_().c_str());
 
     // Every effective setting, marked (default) / (CHANGED) / (set). Logged for
@@ -716,7 +726,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     // Deliberately here and not in setup(): setup() runs before the network
     // logger attaches, so over `esphome logs` those lines are never seen.
     if (!this->config_report_.empty()) {
-      ESP_LOGI(TAG, "Configuration / konfiguracja (%s):", radio_name);
+      ESP_LOGI(TAG, LOG_TR("Configuration (%s):", "Konfiguracja (%s):"), radio_name);
       for (const auto &line : this->config_report_)
         ESP_LOGI(TAG, "%s", line.c_str());
     }
@@ -913,13 +923,13 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
 
       if (this->diag_verbose_) {
         ESP_LOGW(TAG,
-                 "TRUNCATED frame / ucieta ramka: uptime_ms=%lu listen_mode=%s stage=%s reason=%s mode=%s want=%u got=%u raw_got=%u decoded_len=%u final_len=%u RSSI=%ddBm detail=%s",
+                 LOG_TR("TRUNCATED frame: ", "Ucieta ramka: ") "uptime_ms=%lu listen_mode=%s stage=%s reason=%s mode=%s want=%u got=%u raw_got=%u decoded_len=%u final_len=%u RSSI=%ddBm detail=%s",
                  (unsigned long) loop_now_ms, listen_mode, p->drop_stage().c_str(), p->drop_reason().c_str(), mode,
                  (unsigned) p->want_len(), (unsigned) p->got_len(),
                  (unsigned) p->raw_got_len(), (unsigned) p->decoded_len(),
                  (unsigned) p->final_len(), (int) p->get_rssi(), p->drop_detail().c_str());
         if (this->diag_publish_raw_) {
-          ESP_LOGW(TAG, "TRUNCATED raw(hex) / ucieta ramka raw(hex)=%s", p->raw_hex().c_str());
+          ESP_LOGW(TAG, LOG_TR("TRUNCATED raw(hex)=%s", "Ucieta ramka raw(hex)=%s"), p->raw_hex().c_str());
         }
       }
     } else if (!p->drop_reason().empty()) {
@@ -1000,13 +1010,13 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
 
       if (this->diag_verbose_) {
         ESP_LOGW(TAG,
-                 "DROPPED packet / odrzucony pakiet: uptime_ms=%lu listen_mode=%s stage=%s reason=%s mode=%s want=%u got=%u raw_got=%u decoded_len=%u final_len=%u RSSI=%ddBm detail=%s",
+                 LOG_TR("DROPPED packet: ", "Odrzucony pakiet: ") "uptime_ms=%lu listen_mode=%s stage=%s reason=%s mode=%s want=%u got=%u raw_got=%u decoded_len=%u final_len=%u RSSI=%ddBm detail=%s",
                  (unsigned long) loop_now_ms, listen_mode, p->drop_stage().c_str(), p->drop_reason().c_str(), mode,
                  (unsigned) p->want_len(), (unsigned) p->got_len(),
                  (unsigned) p->raw_got_len(), (unsigned) p->decoded_len(),
                  (unsigned) p->final_len(), (int) p->get_rssi(), p->drop_detail().c_str());
         if (this->diag_publish_raw_) {
-          ESP_LOGW(TAG, "DROPPED raw(hex) / odrzucony pakiet raw(hex)=%s", p->raw_hex().c_str());
+          ESP_LOGW(TAG, LOG_TR("DROPPED raw(hex)=%s", "Odrzucony pakiet raw(hex)=%s"), p->raw_hex().c_str());
         }
       }
     }
@@ -1213,7 +1223,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
     const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
     const char *ansi_suf = this->highlight_ansi_ ? "\033[0m" : "";
-    ESP_LOGI(log_tag, "%s%sHave data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
+    ESP_LOGI(log_tag, "%s%s" LOG_TR("Have data", "Odebrano dane") " (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]%s",
              ansi_pre, this->highlight_prefix_.c_str(),
              d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
@@ -1225,16 +1235,15 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     const uint64_t stats_key_ro = ((uint64_t) id_raw << 8) | (uint8_t) frame->link_mode();
     const auto &stats = this->highlight_meter_stats_[stats_key_ro];
     if (stats.count == 1) {
-      ESP_LOGI(log_tag, "%s[id:%s] first packet / pierwszy pakiet (packet #1)",
+      ESP_LOGI(log_tag, LOG_TR("%s[id:%s] first packet (packet #1)", "%s[id:%s] pierwszy pakiet (pakiet nr 1)"),
                this->highlight_prefix_.c_str(), id_str);
     } else {
-      ESP_LOGI(log_tag, "%s[id:%s] packet #%u received / odebrano pakiet nr %u",
+      ESP_LOGI(log_tag, LOG_TR("%s[id:%s] packet #%u received", "%s[id:%s] odebrano pakiet nr %u"),
                this->highlight_prefix_.c_str(), id_str,
-               (unsigned) stats.count,
                (unsigned) stats.count);
     }
   } else {
-    ESP_LOGI(TAG, "Have data / odebrano dane (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
+    ESP_LOGI(TAG, LOG_TR("Have data", "Odebrano dane") " (decoded=%zu bytes, raw=%zu bytes) [RSSI: %ddBm, mode: %s %s, mfr:%s id:%s ver:%u type:%u ci:%02X]",
              d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
@@ -1255,7 +1264,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     int32_t afc_hz = 0, fei_hz = 0;
     if (this->radio->take_frame_freq_error(&afc_hz, &fei_hz)) {
       ESP_LOGI(TAG, "FREQERR id:%s mode:%s len:%zu rssi:%ddBm afc:%ldHz fei:%ldHz"
-                    " / blad czestotliwosci nadajnika",
+                    LOG_TR("", " (blad czestotliwosci nadajnika)"),
                id_str, link_mode_name(frame->link_mode()), d.size(), frame->rssi(),
                (long) afc_hz, (long) fei_hz);
     }
@@ -1267,7 +1276,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     handler(&frame.value());
 
   if (frame->handlers_count()) {
-    ESP_LOGI(TAG, "Telegram handled / obsluzono przez %d handlers", frame->handlers_count());
+    ESP_LOGI(TAG, LOG_TR("Telegram handled by %d handlers", "Telegram obsluzony przez %d handlerow"), frame->handlers_count());
   } else {
     // Braces are required: at log level INFO the ESP_LOGD below compiles to an
     // empty statement, and an unbraced 'else' with an empty body warns
@@ -1368,7 +1377,7 @@ void Radio::receive_frame() {
     this->diag_60min_rx_path_.queue_send_failed++;
     this->collect_radio_rx_diag_();
     this->publish_rx_path_event_("rx_path", "queue_send", "queue_full_or_busy", this->radio->get_rssi());
-    ESP_LOGW(TAG, "Queue send failed / wyslanie do kolejki nie powiodlo sie");
+    ESP_LOGW(TAG, LOG_TR("Queue send failed", "Wyslanie do kolejki nie powiodlo sie"));
     return false;
   };
 
@@ -1580,10 +1589,11 @@ void Radio::receive_frame() {
     }
     if (this->over_capture_repeats_ >= 2 && !this->over_capture_confirmed_) {
       this->over_capture_confirmed_ = true;
-      ESP_LOGW(TAG, "Frame longer than the receive path: a meter sends %u raw bytes, the capture holds %u - "
-                    "set long_gfsk_packets: true to receive it / ramka dluzsza niz tor odbioru: licznik wysyla %u "
-                    "bajtow, odbiornik miesci %u - ustaw long_gfsk_packets: true",
-               (unsigned) total_len, (unsigned) capture_limit, (unsigned) total_len, (unsigned) capture_limit);
+      ESP_LOGW(TAG, LOG_TR("Frame longer than the receive path: a meter sends %u raw bytes, the capture holds %u - "
+                           "set long_gfsk_packets: true to receive it",
+                           "Ramka dluzsza niz tor odbioru: licznik wysyla %u bajtow, odbiornik miesci %u - "
+                           "ustaw long_gfsk_packets: true"),
+               (unsigned) total_len, (unsigned) capture_limit);
     }
   }
 
@@ -1623,7 +1633,7 @@ void Radio::receive_frame() {
         static bool pld_dump_done = false;
         if (!pld_dump_done) {
           pld_dump_done = true;
-          ESP_LOGW(TAG, "payload read short / urwany odczyt payloadu: %s", detail);
+          ESP_LOGW(TAG, LOG_TR("payload read short: %s", "Urwany odczyt payloadu: %s"), detail);
           this->radio->dump_debug_status("payload_read_failed");
         }
       }
@@ -1638,7 +1648,7 @@ void Radio::receive_frame() {
 
       this->collect_radio_rx_diag_();
       this->publish_rx_path_event_("rx_path", "receive_payload", detail, this->radio->get_rssi());
-      ESP_LOGW(TAG, "Failed to read data / nie udalo sie odczytac danych");
+      ESP_LOGW(TAG, LOG_TR("Failed to read data", "Nie udalo sie odczytac danych"));
       return;
     }
   }

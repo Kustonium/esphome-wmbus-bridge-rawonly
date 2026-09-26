@@ -2,6 +2,15 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Log urządzenia w jednym języku: domyślnie angielski, polski przez `log_language: pl`
+
+- **Log urządzenia nie wypisuje już każdego komunikatu dwa razy.** Linie wyglądały jak `DIAG summary / podsumowanie diag: ...`, z polską połową między angielską etykietą a danymi. Użytkownik budujący na ESP32-C3 z CC1101 zwrócił uwagę, że dla kogoś, kto nie zna polskiego, taki log trudniej się czyta.
+- **Nowa opcja `log_language`, `en` (domyślnie) albo `pl`.** Do firmware trafia tylko wybrany język, więc jest ono o około 6 KB mniejsze niż z oboma. Ostrzeżenia konfiguracji wyświetlane w logu też się do tego stosują.
+- **Na MQTT nic się nie zmienia.** Dane, nazwy pól i para `hint_en` / `hint_pl` w JSON-ie diagnostyki zostają bez zmian, więc dodatek do Home Assistant działa jak dotąd.
+- Jeśli chcesz z powrotem polskie komunikaty, dodaj `log_language: pl`. Przy kilku `wmbus_radio` w jednym firmware wartość musi być wszędzie taka sama.
+
+---
+
 ## Diagnostyka: na czym ruszyło każde wyzwolenie odbiornika i ostrzeżenie, gdy licznik potrzebuje `long_gfsk_packets`
 
 - **`irq_fired` jest teraz dzielone według tego, na czym radio ruszyło**, na podstawie pierwszych bajtów po sync wordzie: `t1`, `c1a`, `c1b`, `c_other`, `s1`, `no_data`. Sumują się do `irq_fired`, są w nawiasie po `irq=` w logu i jako `rx_path.irq_start` we wszystkich trzech podsumowaniach. T1 i C1 mają ten sam sync word `0x543D`, więc dotąd odbiornik C1, który się wyzwalał i nic nie dekodował, nie odróżniał gubionych ramek C1 od ruchu T1 i szumu. Zobacz `DIAGNOSTIC_PL.md`.

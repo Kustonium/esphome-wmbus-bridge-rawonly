@@ -6,6 +6,7 @@
 // topic names, payloads and the MQTT contract are identical.
 
 #include "component.h"
+#include "log_lang.h"
 #include "meter_filter.h"
 #include "wmbus_radio_internal.h"
 #include "rx_metadata.h"
@@ -126,7 +127,7 @@ void Radio::maybe_forward_frame_(Frame &frame, uint32_t meter_id, uint32_t meter
 
   if (want_target && mqtt->is_connected()) {
     if (this->target_log_) {
-      ESP_LOGI(log_tag != nullptr ? log_tag : TAG, "TARGET %s caught / przechwycono RSSI=%d len=%u",
+      ESP_LOGI(log_tag != nullptr ? log_tag : TAG, LOG_TR("TARGET %s caught RSSI=%d len=%u", "TARGET %s przechwycono RSSI=%d len=%u"),
                id_str != nullptr ? id_str : "????????",
                (int) frame.rssi(),
                (unsigned) frame.data().size());

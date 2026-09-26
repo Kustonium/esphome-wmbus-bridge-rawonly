@@ -11,6 +11,7 @@
 | `listen_mode` | `both` | public | `t1`, `c1`, `both` = T1/C1 only; `s1` = experimental S1 only |
 | `frequency` | mode default | public | optional override; T1/C1/both default to `868.950 MHz`, S1 to `868.300 MHz` |
 | `diagnostic_mode` | `off` | public | `off`, `low`, `normal`, `debug`, `dev` |
+| `log_language` | `en` | public | language of the device log text: `en` or `pl`; only the chosen one is compiled in. MQTT payloads are not affected |
 | `highlight_meters` | empty | public | meter IDs for highlighting and statistics in `normal/debug`; **does not filter MQTT** |
 | `forward_meters` | empty | public | whitelist of IDs published on `wmbus/<topic_name>/telegram`; a list or `true` to use `highlight_meters`; empty forwards everything |
 | `publish_rssi` | `false` | public | publish each meter's latest frame RSSI on `wmbus/<topic_name>/rssi/<meter_id>`; see below |

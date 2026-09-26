@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_cc1101.h"
+#include "log_lang.h"
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
@@ -219,12 +220,13 @@ static bool fscal3_config_ok_(uint8_t got, uint8_t expected) {
 static void log_expected_reg_(const char *name, uint8_t got, uint8_t expected,
                               const char *meaning_en, const char *meaning_pl) {
   if (got == expected) {
-    ESP_LOGI(TAG, "CC1101 check OK / test OK: %s=0x%02X (%s / %s)",
-             name, got, meaning_en, meaning_pl);
+    ESP_LOGI(TAG, LOG_TR("CC1101 check OK: %s=0x%02X (%s)", "CC1101 test OK: %s=0x%02X (%s)"),
+             name, got, LOG_TR(meaning_en, meaning_pl));
   } else {
     ESP_LOGE(TAG,
-             "CC1101 CONFIG MISMATCH / blad konfiguracji: %s expected=0x%02X got=0x%02X (%s / %s)",
-             name, expected, got, meaning_en, meaning_pl);
+             LOG_TR("CC1101 CONFIG MISMATCH: %s expected=0x%02X got=0x%02X (%s)",
+                    "CC1101 blad konfiguracji: %s oczekiwano=0x%02X odczyt=0x%02X (%s)"),
+             name, expected, got, LOG_TR(meaning_en, meaning_pl));
   }
 }
 
@@ -294,9 +296,10 @@ void CC1101::write_reg_(uint8_t address, uint8_t value) {
     esp_rom_delay_us(CC1101_RETRY_GAP_US);
   }
   ESP_LOGW(TAG,
-           "CC1101 register 0x%02X may not have been written: chip reported CHIP_RDYn after %u "
-           "attempts / zapis rejestru 0x%02X mogl nie dojsc: uklad zglasza CHIP_RDYn po %u probach",
-           address, (unsigned) CC1101_WRITE_RETRIES, address, (unsigned) CC1101_WRITE_RETRIES);
+           LOG_TR("CC1101 register 0x%02X may not have been written: chip reported CHIP_RDYn after %u "
+                  "attempts",
+                  "CC1101: zapis rejestru 0x%02X mogl nie dojsc: uklad zglasza CHIP_RDYn po %u probach"),
+           address, (unsigned) CC1101_WRITE_RETRIES);
 }
 
 void CC1101::write_burst_(uint8_t address, const uint8_t *data, size_t len) {
@@ -395,9 +398,8 @@ bool CC1101::write_reg_verified_(uint8_t address, uint8_t value) {
   this->reg_failed_count_++;
   const uint8_t last = this->read_reg_(address);
   ESP_LOGW(TAG,
-           "CC1101 register 0x%02X did not hold 0x%02X after %u attempts (last read 0x%02X) / "
-           "rejestr 0x%02X nie utrzymal 0x%02X po %u probach (ostatni odczyt 0x%02X)",
-           address, value, (unsigned) CC1101_VERIFY_RETRIES, last,
+           LOG_TR("CC1101 register 0x%02X did not hold 0x%02X after %u attempts (last read 0x%02X)",
+                  "CC1101: rejestr 0x%02X nie utrzymal 0x%02X po %u probach (ostatni odczyt 0x%02X)"),
            address, value, (unsigned) CC1101_VERIFY_RETRIES, last);
   return false;
 }
@@ -493,10 +495,10 @@ void CC1101::apply_radio_profile_() {
 
   if (this->reg_retry_count_ != 0 || this->reg_failed_count_ != 0) {
     ESP_LOGW(TAG,
-             "CC1101 profile write-back / zapis profilu: %u register(s) never held their value, "
-             "%u extra attempt(s) were needed / %u rejestr(ow) nie utrzymalo wartosci, "
-             "potrzeba bylo %u dodatkowych prob",
-             (unsigned) this->reg_failed_count_, (unsigned) this->reg_retry_count_,
+             LOG_TR("CC1101 profile write-back: %u register(s) never held their value, "
+                    "%u extra attempt(s) were needed",
+                    "CC1101 zapis profilu: %u rejestr(ow) nie utrzymalo wartosci, "
+                    "potrzeba bylo %u dodatkowych prob"),
              (unsigned) this->reg_failed_count_, (unsigned) this->reg_retry_count_);
     // CHIP_RDYn was checked for every one of these and was never the cause
     // (chip_not_ready_count_ is logged separately and covers that). A write
@@ -508,22 +510,24 @@ void CC1101::apply_radio_profile_() {
     // changed. One correlated report is a lead, not a proof, hence "likely".
     if (this->reg_failed_count_ != 0) {
       ESP_LOGW(TAG,
-               "CC1101 hint / wskazowka: registers that never held their value even after retries "
-               "point at a persistent fault, not an intermittent one - reseat or resolder every "
-               "connection on this module, check for a short between adjacent pins/wires, and try a "
-               "shorter cable before suspecting the chip itself / rejestry ktore nie utrzymaly "
-               "wartosci mimo powtorek wskazuja na trwaly, nie przejsciowy blad - sprawdz kazde "
-               "polaczenie na tym module, szukaj zwarcia miedzy sasiednimi pinami/przewodami i "
-               "sprobuj krotszego kabla, zanim podejrzewasz sam uklad");
+               LOG_TR("CC1101 hint: registers that never held their value even after retries "
+                      "point at a persistent fault, not an intermittent one - reseat or resolder every "
+                      "connection on this module, check for a short between adjacent pins/wires, and try a "
+                      "shorter cable before suspecting the chip itself",
+                      "CC1101 wskazowka: rejestry ktore nie utrzymaly "
+                      "wartosci mimo powtorek wskazuja na trwaly, nie przejsciowy blad - sprawdz kazde "
+                      "polaczenie na tym module, szukaj zwarcia miedzy sasiednimi pinami/przewodami i "
+                      "sprobuj krotszego kabla, zanim podejrzewasz sam uklad"));
     } else {
       ESP_LOGW(TAG,
-               "CC1101 hint / wskazowka: registers needing a retry but eventually landing likely "
-               "means a marginal SPI connection - a loose header pin, an intermittent short between "
-               "two wires, or a cable that is too long for the clock speed. Worth checking the "
-               "wiring even though setup will proceed / rejestry ktore potrzebowaly powtorki, ale "
-               "ostatecznie sie zapisaly, wskazuja prawdopodobnie na niepewne polaczenie SPI - luzny "
-               "pin, przejsciowe zwarcie miedzy dwoma przewodami albo kabel za dlugi jak na predkosc "
-               "zegara. Warto sprawdzic okablowanie, mimo ze uruchomienie przejdzie dalej");
+               LOG_TR("CC1101 hint: registers needing a retry but eventually landing likely "
+                      "means a marginal SPI connection - a loose header pin, an intermittent short between "
+                      "two wires, or a cable that is too long for the clock speed. Worth checking the "
+                      "wiring even though setup will proceed",
+                      "CC1101 wskazowka: rejestry ktore potrzebowaly powtorki, ale "
+                      "ostatecznie sie zapisaly, wskazuja prawdopodobnie na niepewne polaczenie SPI - luzny "
+                      "pin, przejsciowe zwarcie miedzy dwoma przewodami albo kabel za dlugi jak na predkosc "
+                      "zegara. Warto sprawdzic okablowanie, mimo ze uruchomienie przejdzie dalej"));
     }
   }
 
@@ -562,7 +566,7 @@ bool CC1101::validate_startup_config_() {
 
   bool ok = true;
 
-  ESP_LOGI(TAG, "CC1101 self-check / autotest konfiguracji CC1101");
+  ESP_LOGI(TAG, LOG_TR("CC1101 self-check", "Autotest konfiguracji CC1101"));
 
   auto check = [&ok](const char *name, uint8_t got, uint8_t expected,
                     const char *meaning_en, const char *meaning_pl) {
@@ -576,14 +580,17 @@ bool CC1101::validate_startup_config_() {
   // identity test, and they are the ones that can actually explain a dead radio.
   if (version_known_(version) && partnum == EXP_PARTNUM) {
     ESP_LOGI(TAG,
-             "CC1101 check OK / test OK: PARTNUM=0x%02X VERSION=0x%02X "
-             "(known CC1101 revision / znana rewizja CC1101)",
+             LOG_TR("CC1101 check OK: PARTNUM=0x%02X VERSION=0x%02X (known CC1101 revision)",
+                    "CC1101 test OK: PARTNUM=0x%02X VERSION=0x%02X (znana rewizja CC1101)"),
              partnum, version);
   } else {
     ESP_LOGW(TAG,
-             "CC1101 unknown revision / nieznana rewizja: PARTNUM=0x%02X VERSION=0x%02X "
-             "(known / znane: PARTNUM=0x00, VERSION=0x04 or/lub 0x14). Continuing - the register "
-             "self-check below decides / Kontynuuje - decyduje autotest rejestrow ponizej",
+             LOG_TR("CC1101 unknown revision: PARTNUM=0x%02X VERSION=0x%02X "
+                    "(known: PARTNUM=0x00, VERSION=0x04 or 0x14). Continuing - the register "
+                    "self-check below decides",
+                    "CC1101 nieznana rewizja: PARTNUM=0x%02X VERSION=0x%02X "
+                    "(znane: PARTNUM=0x00, VERSION=0x04 lub 0x14). Kontynuuje - decyduje autotest "
+                    "rejestrow ponizej"),
              partnum, version);
   }
 
@@ -610,14 +617,17 @@ bool CC1101::validate_startup_config_() {
   ok = ok && fscal3_ok;
   if (fscal3_ok) {
     ESP_LOGI(TAG,
-             "CC1101 check OK / test OK: FSCAL3=0x%02X "
-             "(config bits match 0x%02X; result nibble may vary after SCAL / "
-             "bity konfiguracji zgodne z 0x%02X; wynik kalibracji moze sie zmieniac po SCAL)",
-             fscal3, EXP_FSCAL3 & 0xF0, EXP_FSCAL3 & 0xF0);
+             LOG_TR("CC1101 check OK: FSCAL3=0x%02X "
+                    "(config bits match 0x%02X; result nibble may vary after SCAL)",
+                    "CC1101 test OK: FSCAL3=0x%02X "
+                    "(bity konfiguracji zgodne z 0x%02X; wynik kalibracji moze sie zmieniac po SCAL)"),
+             fscal3, EXP_FSCAL3 & 0xF0);
   } else {
     ESP_LOGE(TAG,
-             "CC1101 CONFIG MISMATCH / blad konfiguracji: FSCAL3 expected config bits=0x%02X got=0x%02X "
-             "(only FSCAL3[7:4] are validated / sprawdzane sa tylko bity FSCAL3[7:4])",
+             LOG_TR("CC1101 CONFIG MISMATCH: FSCAL3 expected config bits=0x%02X got=0x%02X "
+                    "(only FSCAL3[7:4] are validated)",
+                    "CC1101 blad konfiguracji: FSCAL3 oczekiwane bity konfiguracji=0x%02X odczyt=0x%02X "
+                    "(sprawdzane sa tylko bity FSCAL3[7:4])"),
              EXP_FSCAL3 & 0xF0, fscal3);
   }
 
@@ -631,28 +641,31 @@ bool CC1101::validate_startup_config_() {
   ok = ok && freq_ok;
   if (freq_ok) {
     ESP_LOGI(TAG,
-             "CC1101 check OK / test OK: FREQ=0x%06X (%.3f MHz carrier / nosna %.3f MHz)",
-             (unsigned) freq_got, this->configured_frequency_hz_ / 1000000.0f,
-             this->configured_frequency_hz_ / 1000000.0f);
+             LOG_TR("CC1101 check OK: FREQ=0x%06X (%.3f MHz carrier)",
+                    "CC1101 test OK: FREQ=0x%06X (nosna %.3f MHz)"),
+             (unsigned) freq_got, this->configured_frequency_hz_ / 1000000.0f);
   } else {
     const double got_mhz = ((double) freq_got * (double) CC1101_FOSC_HZ) / 65536.0 / 1000000.0;
     ESP_LOGE(TAG,
-             "CC1101 CONFIG MISMATCH / blad konfiguracji: FREQ expected=0x%06X got=0x%06X "
-             "(radio is tuned to %.3f MHz instead of %.3f MHz / radio jest nastrojone na %.3f MHz "
-             "zamiast %.3f MHz)",
+             LOG_TR("CC1101 CONFIG MISMATCH: FREQ expected=0x%06X got=0x%06X "
+                    "(radio is tuned to %.3f MHz instead of %.3f MHz)",
+                    "CC1101 blad konfiguracji: FREQ oczekiwano=0x%06X odczyt=0x%06X "
+                    "(radio jest nastrojone na %.3f MHz zamiast %.3f MHz)"),
              (unsigned) freq_want, (unsigned) freq_got, got_mhz,
-             this->configured_frequency_hz_ / 1000000.0f, got_mhz,
              this->configured_frequency_hz_ / 1000000.0f);
   }
 
   if (ok) {
     ESP_LOGI(TAG,
-             "CC1101 self-check result / wynik autotestu: CONFIG_OK - SPI, GDO mapping, packet mode and RF profile look correct / SPI, GDO, tryb pakietu i profil RF wygladaja poprawnie");
+             LOG_TR("CC1101 self-check result: CONFIG_OK - SPI, GDO mapping, packet mode and RF profile look correct",
+                    "CC1101 wynik autotestu: CONFIG_OK - SPI, GDO, tryb pakietu i profil RF wygladaja poprawnie"));
   } else {
     ESP_LOGE(TAG,
-             "CC1101 self-check result / wynik autotestu: CONFIG_ERROR - receiver will be stopped / odbiornik zostanie zatrzymany");
+             LOG_TR("CC1101 self-check result: CONFIG_ERROR - receiver will be stopped",
+                    "CC1101 wynik autotestu: CONFIG_ERROR - odbiornik zostanie zatrzymany"));
     ESP_LOGE(TAG,
-             "CC1101 hint / wskazowka: this is not an RF-range problem; the chip configuration does not match the expected T1 profile / to nie jest problem zasiegu RF, konfiguracja ukladu nie zgadza sie z oczekiwanym profilem T1");
+             LOG_TR("CC1101 hint: this is not an RF-range problem; the chip configuration does not match the expected T1 profile",
+                    "CC1101 wskazowka: to nie jest problem zasiegu RF, konfiguracja ukladu nie zgadza sie z oczekiwanym profilem T1"));
   }
 
   return ok;
@@ -799,22 +812,24 @@ void CC1101::dump_debug_status(const char *reason) {
   }
 
   if (severe) {
-    ESP_LOGE(TAG, "CC1101 DIAG result / wynik diag: %s", diag_code);
-    ESP_LOGE(TAG, "CC1101 DIAG explanation / wyjasnienie: %s / %s", diag_en, diag_pl);
+    ESP_LOGE(TAG, LOG_TR("CC1101 DIAG result: %s", "CC1101 wynik diag: %s"), diag_code);
+    ESP_LOGE(TAG, LOG_TR("CC1101 DIAG explanation: %s", "CC1101 wyjasnienie: %s"), LOG_TR(diag_en, diag_pl));
   } else if (warning) {
-    ESP_LOGW(TAG, "CC1101 DIAG result / wynik diag: %s", diag_code);
-    ESP_LOGW(TAG, "CC1101 DIAG explanation / wyjasnienie: %s / %s", diag_en, diag_pl);
+    ESP_LOGW(TAG, LOG_TR("CC1101 DIAG result: %s", "CC1101 wynik diag: %s"), diag_code);
+    ESP_LOGW(TAG, LOG_TR("CC1101 DIAG explanation: %s", "CC1101 wyjasnienie: %s"), LOG_TR(diag_en, diag_pl));
   } else {
-    ESP_LOGI(TAG, "CC1101 DIAG result / wynik diag: %s", diag_code);
-    ESP_LOGI(TAG, "CC1101 DIAG explanation / wyjasnienie: %s / %s", diag_en, diag_pl);
+    ESP_LOGI(TAG, LOG_TR("CC1101 DIAG result: %s", "CC1101 wynik diag: %s"), diag_code);
+    ESP_LOGI(TAG, LOG_TR("CC1101 DIAG explanation: %s", "CC1101 wyjasnienie: %s"), LOG_TR(diag_en, diag_pl));
   }
 
   if (spi_ok && !chip_id_known) {
     ESP_LOGW(TAG,
-             "CC1101 chip id / identyfikator ukladu: PARTNUM=0x%02X VERSION=0x%02X is not a revision "
-             "seen here before (known / znane: PARTNUM=0x00, VERSION=0x04 or/lub 0x14). This alone "
-             "does not stop reception; read the config line above / To samo w sobie nie zatrzymuje "
-             "odbioru; patrz linia konfiguracji powyzej",
+             LOG_TR("CC1101 chip id: PARTNUM=0x%02X VERSION=0x%02X is not a revision "
+                    "seen here before (known: PARTNUM=0x00, VERSION=0x04 or 0x14). This alone "
+                    "does not stop reception; read the config line above",
+                    "CC1101 identyfikator ukladu: PARTNUM=0x%02X VERSION=0x%02X to rewizja wczesniej "
+                    "tu niewidziana (znane: PARTNUM=0x00, VERSION=0x04 lub 0x14). To samo w sobie nie "
+                    "zatrzymuje odbioru; patrz linia konfiguracji powyzej"),
              partnum, version);
   }
 
@@ -825,7 +840,7 @@ void CC1101::dump_debug_status(const char *reason) {
   const bool gdo0_inverted = (iocfg0 & 0x40) != 0;
 
   ESP_LOGW(TAG,
-           "CC1101 health / ocena: SPI=%s config=%s RX=%s(%s) FIFO=%s overflow=%s event=%s "
+           LOG_TR("CC1101 health: ", "CC1101 ocena: ") "SPI=%s config=%s RX=%s(%s) FIFO=%s overflow=%s event=%s "
            "GDO0=%s/%s%s GDO2=%s/%s%s packet=%s sync=%s",
            ok_bad_(spi_ok), ok_bad_(config_ok), rx_summary, marc_state_name_(marc),
            data_summary, yes_no_(overflow), event_summary,
@@ -835,7 +850,7 @@ void CC1101::dump_debug_status(const char *reason) {
            sync_t1 ? "T1(0x543D)" : (sync_c1 ? "C1(0x54CD)" : "UNKNOWN"));
 
   ESP_LOGW(TAG,
-           "CC1101 plain status / po ludzku: chip=%s, config=%s, radio=%s, fifo_bytes=%u, "
+           LOG_TR("CC1101 plain status: ", "CC1101 po ludzku: ") "chip=%s, config=%s, radio=%s, fifo_bytes=%u, "
            "sync_pin=%s, fifo_pin=%s, packet_mode=%s, rf_profile=%s",
            spi_ok ? "responds" : "NOT_RESPONDING",
            config_ok ? "OK" : "BAD",
@@ -847,7 +862,7 @@ void CC1101::dump_debug_status(const char *reason) {
            rf_profile_ok ? "OK" : "BAD");
 
   ESP_LOGW(TAG,
-           "CC1101 debug status / status debug: reason=%s PARTNUM=0x%02X VERSION=0x%02X "
+           LOG_TR("CC1101 debug status: ", "CC1101 status debug: ") "reason=%s PARTNUM=0x%02X VERSION=0x%02X "
            "MARCSTATE=0x%02X(%u) RXBYTES=0x%02X(count=%u overflow=%s) "
            "GDO0=%d GDO2=%d chip_not_ready=%u reg_write_failed=%u reg_write_retries=%u",
            reason ? reason : "unknown", partnum, version,
@@ -857,7 +872,7 @@ void CC1101::dump_debug_status(const char *reason) {
            (unsigned) this->reg_retry_count_);
 
   ESP_LOGW(TAG,
-           "CC1101 config snapshot / zrzut konfiguracji: IOCFG2=0x%02X IOCFG0=0x%02X "
+           LOG_TR("CC1101 config snapshot: ", "CC1101 zrzut konfiguracji: ") "IOCFG2=0x%02X IOCFG0=0x%02X "
            "FIFOTHR=0x%02X PKTCTRL1=0x%02X PKTCTRL0=0x%02X FSCTRL1=0x%02X "
            "MDMCFG4=0x%02X MDMCFG3=0x%02X MDMCFG2=0x%02X DEVIATN=0x%02X "
            "FOCCFG=0x%02X BSCFG=0x%02X AGCCTRL2=0x%02X AGCCTRL1=0x%02X AGCCTRL0=0x%02X "
@@ -885,12 +900,12 @@ void CC1101::setup() {
   this->reset_cc1101_();
   const uint8_t version = this->read_status_(REG_VERSION);
   if (!version_responds_(version)) {
-    ESP_LOGE(TAG, "Invalid CC1101 VERSION=0x%02X. Check SPI wiring / zly odczyt VERSION, sprawdz SPI", version);
+    ESP_LOGE(TAG, LOG_TR("Invalid CC1101 VERSION=0x%02X. Check SPI wiring", "Zly odczyt CC1101 VERSION=0x%02X, sprawdz SPI"), version);
     this->mark_failed();
     return;
   }
   ESP_LOGI(TAG, "CC1101 VERSION=0x%02X%s", version,
-           version_known_(version) ? "" : " (unknown revision, continuing / nieznana rewizja, kontynuuje)");
+           version_known_(version) ? "" : LOG_TR(" (unknown revision, continuing)", " (nieznana rewizja, kontynuuje)"));
 
   this->apply_radio_profile_();
   char rf_buf[112];
@@ -988,7 +1003,7 @@ optional<uint8_t> CC1101::drain_fifo_once_() {
   if (this->rx_overflow_()) {
     this->fifo_overrun_count_++;
     this->abort_requested_ = true;
-    ESP_LOGW(TAG, "RX FIFO overflow / przepelnienie RX FIFO");
+    ESP_LOGW(TAG, LOG_TR("RX FIFO overflow", "Przepelnienie RX FIFO"));
     this->flush_rx_();
     return {};
   }

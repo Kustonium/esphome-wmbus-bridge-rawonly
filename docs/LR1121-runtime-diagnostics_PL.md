@@ -6,15 +6,16 @@ Zmiana wyłącznie diagnostyczna; modulacja, maski przerwań, polityka timeoutu
 BUSY i decyzje o restarcie RX pozostają bez zmian. Pozostałe sterowniki radiowe
 nie zwracają diagnostyki czasu pracy.
 
-Co 60 sekund zadanie główne publikuje migawkę JSON jako retained z QoS 1 na
+Co 60 sekund zadanie główne publikuje migawkę JSON (QoS 1, bez retained) na
 `<diagnostic_topic>/radio_runtime`, od `diagnostic_mode: low` w górę. Ta sama
 migawka trafia do logu **wyłącznie przy `diagnostic_mode: dev`**: zrzut
 rejestrów i liczników raz na minutę to instrumentacja stanowiskowa, a na
 działającym węźle nie mówi nic, czego nie mówi podsumowanie.
 
-Liczniki są kumulatywne od startu urządzenia. Archiwizuj ten temat w trakcie
-testu — retained zachowuje wyłącznie najnowszą migawkę, więc przebieg, na
-którym Ci zależało, znika w chwili nadejścia kolejnego. `uptime_ms` zeruje się
+Liczniki są kumulatywne od startu urządzenia. Nagrywaj ten temat w trakcie
+testu — nic nie jest zachowywane jako retained, więc migawka, której nie
+złapiesz w chwili nadejścia, przepada.
+`uptime_ms` zeruje się
 przy restarcie i przepełnia po około 49 dniach.
 
 - `busy_timeouts`: nieudane oczekiwania, łącznie z tymi przy starcie i przy
@@ -54,7 +55,8 @@ w eksperymencie z tłumieniem.
 ## Ograniczony bufor FIFO i próbki odrzuceń
 
 Przy włączonej diagnostyce zbiorczej LR1121 publikuje dodatkowo wiadomości
-retained z QoS 1:
+z QoS 1 (bez retained — to były przyrządy stanowiskowe i broker nie powinien
+ich przechowywać):
 
 - `<diagnostic_topic>/lr_pipeline`: kumulatywne liczniki konwersji z zadania
   głównego, co 60 sekund. `converted = valid + decode_failed + length_failed +
@@ -98,7 +100,7 @@ retained z QoS 1:
   albo czyta się jako same zera lub same jedynki, jest **wynikiem**, a nie
   usterką.
 
-  Ten punkt odniesienia jest publikowany na własny temat retained,
+  Ten punkt odniesienia jest publikowany na własny temat (bez retained),
   `<diagnostic_topic>/probe_baseline`, i logowany raz z zadania głównego jako
   `Register probe baseline (pre-RX, read-only)`. Dwa powody, dla których nie
   jest po prostu logowany z `setup()` ani wciśnięty do `radio_runtime`:
@@ -133,10 +135,10 @@ zmianie. Próbkowanie dokłada ograniczony narzut na CPU, pamięć i MQTT;
 zweryfikuj nominalny odbiór kontrolny. Nie trzeba włączać istniejącego
 `diagnostic_publish_raw` ani szczegółowego logowania. Próbkowanie surowego FIFO
 i odrzuceń działa niezależnie: **nie parować ich po numerze slotu**. Do
-korelacji używać identyfikatora bootu oraz czasu przechwycenia i pobudki. Sloty
-retained są nadpisywane; stare sloty z wcześniejszych bootów zostają, dopóki nie
-zostaną nadpisane. Zawsze filtrować po boot ID i czasie testu. Po teście
-eksportować wszystkie te tematy, a także `radio_runtime`, istniejące
+korelacji używać identyfikatora bootu oraz czasu przechwycenia i pobudki. Numery
+slotów powtarzają się co osiem próbek, a nic nie jest zachowywane jako retained,
+więc subskrybować przed testem i zawsze filtrować po boot ID i czasie testu.
+Nagrywać wszystkie te tematy, a także `radio_runtime`, istniejące
 podsumowanie diagnostyczne i JSON odbiornika. Przy rozłączonym MQTT nic nie jest
 publikowane; te próbki nie są trwałym rejestratorem.
 

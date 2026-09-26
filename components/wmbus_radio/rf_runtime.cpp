@@ -6,6 +6,7 @@
 // (move-only refactor); behaviour, timings and thresholds are identical.
 
 #include "component.h"
+#include "log_lang.h"
 #include "wmbus_radio_internal.h"
 
 #include "esphome/core/log.h"
@@ -144,7 +145,9 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
   if (trigger) {
     this->busy_ether_active_until_ms_ = now_ms + 300000; // 5-minute hold
     if (!was_active) {
-      ESP_LOGW(TAG, "BusyEther [ADAPTIVE]: noisy window detected / wykryto zaszumione okno — activating / aktywacja na 5 min "
+      ESP_LOGW(TAG, LOG_TR("BusyEther [ADAPTIVE]: noisy window detected — activating for 5 min ",
+                      "BusyEther [ADAPTIVE]: wykryto zaszumione okno — aktywacja na 5 min ")
+               
                "(fsl_ext=%" PRIu32 " fsl_total=%" PRIu32 " drop_pct=%" PRIu32 " t1_sym_inv_pct=%" PRIu32
                " preamble_fail=%" PRIu32 " probe_abort=%" PRIu32 " fifo_overrun=%" PRIu32 ")",
                fsl, fsl_total, drop_pct, t1_sym_inv_pct,
@@ -166,11 +169,12 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
       }
       this->busy_ether_was_active_ = true;
     } else {
-      ESP_LOGI(TAG, "BusyEther [ADAPTIVE]: hold extended / przedluzono hold (fsl_ext=%" PRIu32 " fsl_total=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, fsl_total, drop_pct);
+      ESP_LOGI(TAG, LOG_TR("BusyEther [ADAPTIVE]: hold extended (fsl_ext=%", "BusyEther [ADAPTIVE]: przedluzono hold (fsl_ext=%") PRIu32 " fsl_total=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, fsl_total, drop_pct);
     }
   } else if (was_active && !is_active_now) {
     // Hold has expired and no new trigger — transition to passive.
-    ESP_LOGI(TAG, "BusyEther [ADAPTIVE]: hold expired / hold wygasl, returning to passive mode / powrot do trybu pasywnego (fsl_ext=%" PRIu32 " fsl_total=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, fsl_total, drop_pct);
+    ESP_LOGI(TAG, LOG_TR("BusyEther [ADAPTIVE]: hold expired, returning to passive mode (fsl_ext=%",
+                        "BusyEther [ADAPTIVE]: hold wygasl, powrot do trybu pasywnego (fsl_ext=%") PRIu32 " fsl_total=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, fsl_total, drop_pct);
     // Publish busy_ether_changed event: active -> passive
     if (!this->diag_topic_.empty()) {
       auto *mqtt = esphome::mqtt::global_mqtt_client;
