@@ -27,6 +27,7 @@
 // every call site decide independently whether to route through it.
 
 #include "component.h"
+#include "log_lang.h"
 #include "meter_filter.h"
 
 #include "esphome/core/defines.h"
@@ -195,9 +196,8 @@ void Radio::maybe_reautosize_outbox_(uint32_t now_ms) {
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     const size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG,
-             "MQTT outbox auto-size: %u -> %u messages (free heap=%u B, free psram=%u B) / "
-             "auto-dobor bufora MQTT: %u -> %u wiadomosci (wolny heap=%u B, wolny psram=%u B)",
-             (unsigned) current, (unsigned) suggested, (unsigned) free_internal, (unsigned) free_psram,
+             LOG_TR("MQTT outbox auto-size: %u -> %u messages (free heap=%u B, free psram=%u B)",
+                    "Auto-dobor bufora MQTT: %u -> %u wiadomosci (wolny heap=%u B, wolny psram=%u B)"),
              (unsigned) current, (unsigned) suggested, (unsigned) free_internal, (unsigned) free_psram);
     const uint32_t dropped_before = this->mqtt_outbox_dropped_total_;
     // Set both members, then recompute ONCE (the two setters would each call
@@ -214,10 +214,10 @@ void Radio::maybe_reautosize_outbox_(uint32_t now_ms) {
     const uint32_t trimmed = this->mqtt_outbox_dropped_total_ - dropped_before;
     if (trimmed > 0) {
       ESP_LOGW(TAG,
-               "MQTT outbox auto-size shrink dropped %u still-queued message(s) to fit the new, smaller "
-               "capacity (%u remaining queued) / zmniejszenie bufora MQTT (auto) odrzucilo %u "
-               "oczekujacych wiadomosci, aby zmiescic sie w nowej, mniejszej pojemnosci (%u pozostalo w kolejce)",
-               (unsigned) trimmed, (unsigned) this->mqtt_outbox_.size(),
+               LOG_TR("MQTT outbox auto-size shrink dropped %u still-queued message(s) to fit the new, smaller "
+                      "capacity (%u remaining queued)",
+                      "Zmniejszenie bufora MQTT (auto) odrzucilo %u oczekujacych wiadomosci, aby zmiescic sie "
+                      "w nowej, mniejszej pojemnosci (%u pozostalo w kolejce)"),
                (unsigned) trimmed, (unsigned) this->mqtt_outbox_.size());
     }
   }
@@ -341,9 +341,8 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
           (heap_now_ms - this->last_outbox_heap_warning_ms_) >= HEAP_WARNING_THROTTLE_MS) {
         this->last_outbox_heap_warning_ms_ = heap_now_ms;
         ESP_LOGW(TAG,
-                 "MQTT outbox: %s, refusing to buffer (free heap=%u B, largest block=%u B, free psram=%u B) / "
-                 "odmowa buforowania: %s (wolny heap=%u B, najwiekszy blok=%u B, wolny psram=%u B)",
-                 why, (unsigned) free_internal, (unsigned) largest_internal, (unsigned) free_psram,
+                 LOG_TR("MQTT outbox: %s, refusing to buffer (free heap=%u B, largest block=%u B, free psram=%u B)",
+                        "Bufor MQTT: odmowa buforowania: %s (wolny heap=%u B, najwiekszy blok=%u B, wolny psram=%u B)"),
                  why, (unsigned) free_internal, (unsigned) largest_internal, (unsigned) free_psram);
       }
       return;
@@ -411,11 +410,12 @@ void Radio::enqueue_or_publish_(const std::string &topic, const std::string &pay
   // not flood the log. The periodic "MQTT outbox stats" line (every 30s, see
   // update_outbox_stats_) carries the running depth.
   if (this->mqtt_outbox_.size() == 1) {
-    ESP_LOGI(TAG, "MQTT outbox: buffering started, broker unreachable (1 message queued) / "
-                  "bufor MQTT: rozpoczeto buforowanie, broker nieosiagalny (1 wiadomosc w kolejce)");
+    ESP_LOGI(TAG, LOG_TR("MQTT outbox: buffering started, broker unreachable (1 message queued)",
+                         "Bufor MQTT: rozpoczeto buforowanie, broker nieosiagalny (1 wiadomosc w kolejce)"));
   } else {
-    ESP_LOGD(TAG, "MQTT outbox: queued message (%u in queue) / zakolejkowano wiadomosc (%u w kolejce)",
-             (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_.size());
+    ESP_LOGD(TAG, LOG_TR("MQTT outbox: queued message (%u in queue)",
+                         "Bufor MQTT: zakolejkowano wiadomosc (%u w kolejce)"),
+             (unsigned) this->mqtt_outbox_.size());
   }
 }
 
@@ -423,7 +423,7 @@ void Radio::flush_mqtt_outbox_() {
   if (this->mqtt_outbox_.empty()) {
     if (this->outbox_draining_) {
       this->outbox_draining_ = false;
-      ESP_LOGI(TAG, "MQTT outbox: backlog cleared / bufor MQTT: kolejka oprozniona");
+      ESP_LOGI(TAG, LOG_TR("MQTT outbox: backlog cleared", "Bufor MQTT: kolejka oprozniona"));
     }
     return;
   }
@@ -434,9 +434,9 @@ void Radio::flush_mqtt_outbox_() {
   // per-batch progress below is DEBUG so a large backlog does not flood.
   if (!this->outbox_draining_) {
     this->outbox_draining_ = true;
-    ESP_LOGI(TAG, "MQTT outbox: broker reachable again, draining %u queued message(s) / "
-                  "bufor MQTT: broker znow osiagalny, oproznianie %u wiadomosci",
-             (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_.size());
+    ESP_LOGI(TAG, LOG_TR("MQTT outbox: broker reachable again, draining %u queued message(s)",
+                         "Bufor MQTT: broker znow osiagalny, oproznianie %u wiadomosci"),
+             (unsigned) this->mqtt_outbox_.size());
   }
 
   // Bounded per call: a receiver that was offline for hours can wake up with
@@ -464,12 +464,13 @@ void Radio::flush_mqtt_outbox_() {
     sent++;
   }
   if (sent > 0) {
-    ESP_LOGD(TAG, "MQTT outbox: flushed %u queued message(s), %u still pending / bufor MQTT: wyslano %u wiadomosci, w kolejce %u",
-             (unsigned) sent, (unsigned) this->mqtt_outbox_.size(), (unsigned) sent, (unsigned) this->mqtt_outbox_.size());
+    ESP_LOGD(TAG, LOG_TR("MQTT outbox: flushed %u queued message(s), %u still pending",
+                         "Bufor MQTT: wyslano %u wiadomosci, w kolejce %u"),
+             (unsigned) sent, (unsigned) this->mqtt_outbox_.size());
   }
   if (this->mqtt_outbox_.empty() && this->outbox_draining_) {
     this->outbox_draining_ = false;
-    ESP_LOGI(TAG, "MQTT outbox: backlog cleared / bufor MQTT: kolejka oprozniona");
+    ESP_LOGI(TAG, LOG_TR("MQTT outbox: backlog cleared", "Bufor MQTT: kolejka oprozniona"));
   }
 }
 
@@ -791,14 +792,10 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
       const char *mode = board_has_psram_() ? (this->mqtt_outbox_auto_ ? " auto,psram" : " psram")
                                             : (this->mqtt_outbox_auto_ ? " auto" : "");
       ESP_LOGI(TAG,
-               "MQTT outbox stats: depth=%u cap=%u/%u%s | dropped total=%u this-outage=%u "
-               "(heap-refused=%u evicted=%u) | queued total=%u / statystyki bufora MQTT: kolejka=%u "
-               "poj=%u/%u%s | odrzucone total=%u ta-awaria=%u (brak-RAM=%u eksmisja=%u) | zakolejkowane=%u",
-               (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
-               (unsigned) this->mqtt_outbox_max_capacity_, mode,
-               (unsigned) this->mqtt_outbox_dropped_total_, (unsigned) this->mqtt_outbox_dropped_this_outage_,
-               (unsigned) this->mqtt_outbox_refused_heap_this_outage_, (unsigned) evicted_outage,
-               (unsigned) this->mqtt_outbox_queued_total_,
+               LOG_TR("MQTT outbox stats: depth=%u cap=%u/%u%s | dropped total=%u this-outage=%u "
+                      "(heap-refused=%u evicted=%u) | queued total=%u",
+                      "Statystyki bufora MQTT: kolejka=%u poj=%u/%u%s | odrzucone total=%u ta-awaria=%u "
+                      "(brak-RAM=%u eksmisja=%u) | zakolejkowane=%u"),
                (unsigned) this->mqtt_outbox_.size(), (unsigned) this->mqtt_outbox_capacity_,
                (unsigned) this->mqtt_outbox_max_capacity_, mode,
                (unsigned) this->mqtt_outbox_dropped_total_, (unsigned) this->mqtt_outbox_dropped_this_outage_,
@@ -816,7 +813,7 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
                    (unsigned) (kv.first & 0xFFFFFFFFu), (unsigned) kv.second);
           by_meter += b;
         }
-        ESP_LOGI(TAG, "MQTT outbox drops this outage by meter / odrzucone w tej awarii wg licznika: %s",
+        ESP_LOGI(TAG, LOG_TR("MQTT outbox drops this outage by meter: %s", "Bufor MQTT: odrzucone w tej awarii wg licznika: %s"),
                  by_meter.c_str());
       }
 
@@ -833,7 +830,7 @@ void Radio::update_outbox_stats_(uint32_t now_ms) {
                    (unsigned) (mq.key & 0xFFFFFFFFu), (unsigned) mq.count, (unsigned) mq.quota);
           per_meter += b;
         }
-        ESP_LOGI(TAG, "MQTT outbox per-meter queued/quota / w buforze wg licznika (kolejka/limit): %s",
+        ESP_LOGI(TAG, LOG_TR("MQTT outbox per-meter queued/quota: %s", "Bufor MQTT wg licznika (kolejka/limit): %s"),
                  per_meter.c_str());
       }
     }

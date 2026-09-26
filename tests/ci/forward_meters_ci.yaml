@@ -74,6 +74,10 @@ wmbus_radio:
       mode: input
     listen_mode: t1
     diagnostic_mode: normal
+    # The only build that compiles the Polish log text; every other target
+    # takes the default (en). It must match on both instances - log_language
+    # is one build-wide define, and mixing values is rejected.
+    log_language: pl
     highlight_meters:
       - "00088888"
       - "0x417F0666"
@@ -90,6 +94,7 @@ wmbus_radio:
       number: GPIO34
       mode: input
     listen_mode: t1
+    log_language: pl
     forward_meters:
       - "03500001"
       - "0x417F0666"

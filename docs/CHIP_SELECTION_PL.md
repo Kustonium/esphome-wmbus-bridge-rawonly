@@ -10,6 +10,7 @@ radia: `CC1101`, `SX1276`, `SX1262` i `LR1121`.
 - **Dom / kilka liczników / spokojny eter / głównie wolne T1** → `SX1276` zwykle wystarczy.
 - **Blok / dużo liczników / częste pakiety / większe pakiety** → wybierz `SX1262`.
 - **Liczniki S1 na granicy słyszalności** → `SX1276`. Patrz [S1 to osobne pytanie](#s1-to-osobne-pytanie).
+- **Liczniki C1** → `SX1276`. `SX1262` i `LR1121` słyszą tylko nieliczne nadajniki C1. Patrz [C1 też jest osobnym pytaniem](#c1-też-jest-osobnym-pytaniem).
 - **Mieszane T1 + C1 na jednym urządzeniu** → działa, ale kosztuje skuteczność odbioru.
 - **Najlepszy układ dla środowiska mieszanego** → dwa osobne urządzenia: `T1-only` i `C1-only`.
 - **`CC1101`** → tylko jeśli już masz taki sprzęt. Stoi za jawną bramką
@@ -70,6 +71,7 @@ Sama liczba liczników nie mówi wszystkiego. Kilka szybkich liczników może sz
 | Duże pakiety pod presją czasu | słaby | słaby | zalecany | dobry |
 | `both` na jednym urządzeniu | niezalecane | niezalecane przy istotnym ruchu T1 | możliwe, ale nadal kompromis | możliwe, niesprawdzone w czasie |
 | Liczniki S1 przy progu szumu | tylko surowy sniffer | **zalecany** | słabszy, patrz niżej | obiecujący, jeden test |
+| Liczniki C1 | niesprawdzony tutaj | **zalecany** | słyszy nieliczne nadajniki C1, patrz niżej | słyszy nieliczne nadajniki C1, patrz niżej |
 | Maksymalna niezawodność | nie | ograniczony | zalecany | jeszcze nie do udowodnienia |
 | Dostępność drugiej opinii | szeroka | szeroka | szeroka | jedna płytka, jeden dom |
 
@@ -108,6 +110,40 @@ S-mode, a nie ścieżka odbiorcza — sterownik mówi to wprost przy starcie. `L
 odebrał S1 poprawnie za pierwszym razem, ale wyłącznie z nadajnika warsztatowego
 przy −59 dBm, co dowodzi działania toru i nie mówi nic o czułości.
 
+## C1 też jest osobnym pytaniem
+
+C1 również nie układa radiów tak jak T1. Zmierzone 25–26.09.2026 na prawdziwych
+licznikach Techem C1, wszystkie płytki w jednym pokoju, 868,95 MHz:
+
+| odbiornik | słyszane liczniki C1 | uwagi |
+|---|---|---|
+| `SX1276` (LilyGO), domyślne `sx1276_preamble_tolerance: 10` | **8–9** | 100 ramek w 2,2 h, 487 przez noc |
+| `SX1276` z `sx1276_preamble_tolerance: 0` | **1** | ten sam jeden licznik co układy niżej |
+| `SX1262` (Heltec V4.2, zewnętrzny LNA) | 1 | |
+| `SX1262` (LilyGO T-Beam, bez LNA, inny producent i antena) | 2 | drugi: 4 ramki przez noc |
+| `LR1121` | 1 | |
+
+Po drodze wykluczone, każde bezpośrednim pomiarem: pasmo odbiornika (234, 312
+i 467 kHz), przesunięcie częstotliwości nadajnika (wszystkie liczniki w ±4 kHz
+według AFC `SX1276`), `min_preamble_bits` 16 / 8 / 0 oraz ustawienie dewiacji
+(`LR1121` odbiera C1 z 50 kHz i zachowuje się tak samo). Na `SX1262` słabsze
+liczniki C1 nie wywołują nawet przerwania - patrz `rx_path.irq_start` w
+[DIAGNOSTIC_PL.md](DIAGNOSTIC_PL.md).
+
+**Przewagę `SX1276` w C1 daje tolerancja błędów jego detektora preambuły.** Przy
+tolerancji 0 słyszy dokładnie to samo co `SX1262` i `LR1121`. Żaden z tych
+układów nie ma odpowiednika tego pola, więc różnicy nie da się nadrobić
+programowo. Dwie płytki `SX1262` różnych producentów dały ten sam wynik, co
+wyklucza płytkę: decyduje układ.
+
+Dla części liczników ma to mniejsze znaczenie, niż się wydaje: ciepłomierze
+Techem wysyłają jawny telegram we własnym formacie w **T1** i osobny,
+zaszyfrowany AES telegram OMS w C1. Czytelne wartości przychodzą w T1, które
+`SX1262` odbiera dobrze; telegram C1 bez klucza i tak jest bezużyteczny.
+
+Zasada praktyczna: **`SX1276` do C1.** `SX1262` i `LR1121` zostaw na
+`listen_mode: t1`.
+
 ## Wniosek dla trybu `both`
 
 `both` to nie jest po prostu „T1 plus trochę C1”. To dodatkowy koszt harmonogramu nawet wtedy, gdy realny ruch C1 jest mały.
@@ -116,6 +152,12 @@ Praktyczny wniosek:
 
 - na `SX1276` `both` jest z reguły złym pomysłem, jeśli zależy Ci na T1,
 - na `SX1262` `both` ma sens, ale nadal ma mierzalny koszt,
+- zmierzone przez jedną noc (25–26.09.2026, te same godziny co noc wcześniej w
+  `t1`): `both` zmniejszył liczbę słyszanych liczników T1 z **118 do 64** na
+  `SX1262` (LilyGO T-Beam) i z **62 do 40** na `LR1121`, a `SX1276` spadł ze
+  119 do 108. Na tych dwóch układach to dużo więcej niż udział czasu oddany C1, a
+  razem z wynikiem C1 powyżej oznacza, że `both` prawie nic im nie daje - jedna
+  noc, jeden budynek,
 - jeśli naprawdę zależy Ci na niezawodnym odbiorze mieszanym, użyj **dwóch urządzeń**.
 
 `both` na każdym radiu obejmuje wyłącznie T1/C1. **S1 nigdy nie bierze udziału

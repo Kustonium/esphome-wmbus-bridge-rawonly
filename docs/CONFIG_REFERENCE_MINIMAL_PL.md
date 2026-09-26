@@ -11,6 +11,7 @@
 | `listen_mode` | `both` | publiczna | `t1`, `c1`, `both` = tylko T1/C1, `s1` = tylko eksperymentalny S1 |
 | `frequency` | zależnie od trybu | publiczna | opcjonalne nadpisanie; T1/C1/both domyślnie `868.950 MHz`, S1 domyślnie `868.300 MHz` |
 | `diagnostic_mode` | `off` | publiczna | `off`, `low`, `normal`, `debug`, `dev` |
+| `log_language` | `en` | publiczna | język komunikatów w logu urządzenia: `en` albo `pl`; do firmware trafia tylko wybrany. Nie wpływa na dane MQTT |
 | `highlight_meters` | puste | publiczna | ID liczników do wyróżnienia i statystyk w `normal/debug`; **nie filtruje MQTT** |
 | `forward_meters` | puste | publiczna | whitelista ID publikowanych na `wmbus/<topic_name>/telegram`; lista ID albo `true` = użyj `highlight_meters`; puste = wysyłaj wszystko |
 | `publish_rssi` | `false` | publiczna | publikuj RSSI ostatniej ramki każdego licznika na `wmbus/<topic_name>/rssi/<meter_id>`; patrz sekcja niżej |

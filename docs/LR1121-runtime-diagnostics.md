@@ -5,15 +5,15 @@
 Diagnostic-only change; modulation, IRQ masks, BUSY timeout policy and RX restart
 decisions are unchanged. Other radio drivers return no runtime diagnostic.
 
-Every 60 seconds the main task publishes a JSON snapshot retained with QoS 1 to
+Every 60 seconds the main task publishes a JSON snapshot (QoS 1, not retained) to
 `<diagnostic_topic>/radio_runtime`, from `diagnostic_mode: low` upward. The same
 snapshot is written to the log **only at `diagnostic_mode: dev`**: a register and
 counter dump once a minute is bench instrumentation, and on a working node it
 says nothing the summary does not.
 
-Counters are cumulative since device boot. Archive the topic during a test -
-retained preserves only the latest snapshot, so the run you wanted is gone the
-moment the next one lands. `uptime_ms` restarts on reboot and wraps after about
+Counters are cumulative since device boot. Record the topic during a test -
+nothing is retained, so a snapshot you did not capture as it arrived is gone.
+`uptime_ms` restarts on reboot and wraps after about
 49 days.
 
 - `busy_timeouts`: failed waits, including boot and direct-read waits.
@@ -46,7 +46,8 @@ This does not affect the T1 IRQ mask used in the attenuation experiment.
 
 ## Bounded FIFO and rejection samples
 
-With summary diagnostics enabled, LR1121 also publishes retained QoS 1 messages:
+With summary diagnostics enabled, LR1121 also publishes these QoS 1 messages
+(not retained - they were bench instruments, and a broker should not keep them):
 
 - `<diagnostic_topic>/lr_pipeline`: cumulative main-task conversion counters,
   every 60 seconds. `converted = valid + decode_failed + length_failed +
@@ -86,7 +87,7 @@ With summary diagnostics enabled, LR1121 also publishes retained QoS 1 messages:
   value that never moves off the baseline, or reads as all-zero or all-ones,
   is a result and not a malfunction.
 
-  That baseline is published to its own retained topic,
+  That baseline is published to its own topic (not retained),
   `<diagnostic_topic>/probe_baseline`, and logged once from the main task as
   `Register probe baseline (pre-RX, read-only)`. Two reasons it is not simply
   logged from `setup()` and not folded into `radio_runtime`: component
@@ -119,9 +120,9 @@ No radio settings, restart policy or decoder decisions are changed. Sampling
 adds bounded CPU/memory/MQTT overhead; verify nominal control reception.
 Existing `diagnostic_publish_raw` and verbose logging need not be enabled.
 Raw FIFO and drop sampling run independently: do not pair them by slot number.
-Use boot ID and capture/wakeup uptime to correlate. Retained slots are overwritten;
-old slots from earlier boots remain until overwritten. Always filter by boot ID
-and test time. Export all these topics after the test as well as `radio_runtime`,
+Use boot ID and capture/wakeup uptime to correlate. The slot numbers repeat
+every eight samples and nothing is retained, so subscribe before the test and
+always filter by boot ID and test time. Record all these topics as well as `radio_runtime`,
 the existing diagnostic summary and receiver JSON. No data is published while
 MQTT is disconnected; these samples are not a durable recorder.
 

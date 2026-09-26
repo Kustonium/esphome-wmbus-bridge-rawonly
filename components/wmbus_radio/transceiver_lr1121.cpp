@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_lr1121.h"
+#include "log_lang.h"
 
 #ifdef USE_WMBUS_RADIO_LR1121
 
@@ -1251,18 +1252,21 @@ void LR1121::log_reg_status() {
   // chosen and say what it means, at INFO, where it is actually visible. Kept in
   // the driver because the driver already holds these values - the SX1262 path
   // copies them into the component, which is plumbing this does not need.
-  ESP_LOGI(TAG, "LR1121 YAML sanity / sprawdzenie YAML LR1121:");
+  ESP_LOGI(TAG, LOG_TR("LR1121 YAML sanity:", "Sprawdzenie YAML LR1121:"));
 
   if (this->tcxo_voltage_ == LR1121_TCXO_3_0V) {
-    ESP_LOGI(TAG, "  tcxo_voltage: 3.0v -> measured working on the Waveshare HF board / "
-                  "zmierzone jako dzialajace na plytce Waveshare HF");
+    ESP_LOGI(TAG, LOG_TR("  tcxo_voltage: 3.0v -> measured working on the Waveshare HF board",
+                         "  tcxo_voltage: 3.0v -> zmierzone jako dzialajace na plytce Waveshare HF"));
   } else if (this->tcxo_voltage_ == LR1121_TCXO_1_8V) {
-    ESP_LOGW(TAG, "  tcxo_voltage: 1.8v -> RISK(!): the 32 MHz TCXO did not start at this "
-                  "setting on the Waveshare HF board / na tej plytce TCXO nie wystartowal "
-                  "przy tym ustawieniu");
+    ESP_LOGW(TAG, LOG_TR("  tcxo_voltage: 1.8v -> RISK(!): the 32 MHz TCXO did not start at this "
+                         "setting on the Waveshare HF board",
+                         "  tcxo_voltage: 1.8v -> RYZYKO(!): na plytce Waveshare HF TCXO 32 MHz "
+                         "nie wystartowal przy tym ustawieniu"));
   } else {
-    ESP_LOGW(TAG, "  tcxo_voltage: code 0x%02X -> untested on this board; 3.0v is the "
-                  "measured one / nietestowane na tej plytce",
+    ESP_LOGW(TAG, LOG_TR("  tcxo_voltage: code 0x%02X -> untested on this board; 3.0v is the "
+                         "measured one",
+                         "  tcxo_voltage: kod 0x%02X -> nietestowane na tej plytce; zmierzone "
+                         "jest 3.0v"),
              (unsigned) this->tcxo_voltage_);
   }
   ESP_LOGI(TAG, "  tcxo_startup_ticks: %u (~%u ms at 32.768 kHz)",
@@ -1272,38 +1276,47 @@ void LR1121::log_reg_status() {
   const uint32_t bw = lr1121_bw_hz_((uint8_t) this->rx_bandwidth_);
   const uint32_t needed = 2UL * this->deviation_hz_ + this->bitrate_bps_;
   if (bw >= needed) {
-    ESP_LOGI(TAG, "  rx_bandwidth: %u Hz -> covers 2*fdev+bitrate = %u Hz / pokrywa wymagane %u Hz",
-             (unsigned) bw, (unsigned) needed, (unsigned) needed);
+    ESP_LOGI(TAG, LOG_TR("  rx_bandwidth: %u Hz -> covers 2*fdev+bitrate = %u Hz",
+                         "  rx_bandwidth: %u Hz -> pokrywa wymagane 2*fdev+bitrate = %u Hz"),
+             (unsigned) bw, (unsigned) needed);
   } else {
-    ESP_LOGW(TAG, "  rx_bandwidth: %u Hz -> RISK(!): narrower than 2*fdev+bitrate = %u Hz, "
-                  "frames will be clipped / wezsze niz wymagane %u Hz",
-             (unsigned) bw, (unsigned) needed, (unsigned) needed);
+    ESP_LOGW(TAG, LOG_TR("  rx_bandwidth: %u Hz -> RISK(!): narrower than 2*fdev+bitrate = %u Hz, "
+                         "frames will be clipped",
+                         "  rx_bandwidth: %u Hz -> RYZYKO(!): wezsze niz wymagane 2*fdev+bitrate = %u Hz, "
+                         "ramki beda obcinane"),
+             (unsigned) bw, (unsigned) needed);
   }
 
   if (this->payload_length_ >= 255) {
-    ESP_LOGI(TAG, "  payload_length: 255 -> full capture; host trims / pelne przechwycenie, "
-                  "host przycina");
+    ESP_LOGI(TAG, LOG_TR("  payload_length: 255 -> full capture; host trims",
+                         "  payload_length: 255 -> pelne przechwycenie; host przycina"));
   } else {
-    ESP_LOGW(TAG, "  payload_length: %u -> RISK(!): frames longer than this are truncated; "
-                  "NES telegrams arrive as 245 raw bytes / dluzsze ramki beda ucinane, "
-                  "telegramy NES maja 245 bajtow surowych",
+    ESP_LOGW(TAG, LOG_TR("  payload_length: %u -> RISK(!): frames longer than this are truncated; "
+                         "NES telegrams arrive as 245 raw bytes",
+                         "  payload_length: %u -> RYZYKO(!): dluzsze ramki beda ucinane; "
+                         "telegramy NES maja 245 bajtow surowych"),
              (unsigned) this->payload_length_);
   }
 
   if (this->expected_len_override_ != 0) {
     if (this->boot_fw_ != VERIFIED_RADIO_FW) {
-      ESP_LOGE(TAG, "  lr1121_expected_len_override: %u -> IGNORED. Verified only on radio "
-                    "firmware 0x%04X, this chip reports 0x%04X. Refusing to write an "
-                    "undocumented register on an unverified image / ODRZUCONE, niezweryfikowany "
-                    "firmware radia",
+      ESP_LOGE(TAG, LOG_TR("  lr1121_expected_len_override: %u -> IGNORED. Verified only on radio "
+                           "firmware 0x%04X, this chip reports 0x%04X. Refusing to write an "
+                           "undocumented register on an unverified image",
+                           "  lr1121_expected_len_override: %u -> ODRZUCONE. Zweryfikowane tylko na "
+                           "firmware radia 0x%04X, ten uklad zglasza 0x%04X. Bez zapisu "
+                           "niezadokumentowanego rejestru na niezweryfikowanym firmware"),
                (unsigned) this->expected_len_override_, (unsigned) VERIFIED_RADIO_FW,
                (unsigned) this->boot_fw_);
     } else {
-      ESP_LOGW(TAG, "  lr1121_expected_len_override: %u -> EXPERIMENT ACTIVE(!): writing it into "
-                    "undocumented register 0x%08X [31:20] before every SetRx, overriding the "
-                    "configured payload_length %u. Reception will not behave normally. Bench "
-                    "work, not a supported configuration / EKSPERYMENT, odbior nie bedzie "
-                    "dzialal normalnie",
+      ESP_LOGW(TAG, LOG_TR("  lr1121_expected_len_override: %u -> EXPERIMENT ACTIVE(!): writing it into "
+                           "undocumented register 0x%08X [31:20] before every SetRx, overriding the "
+                           "configured payload_length %u. Reception will not behave normally. Bench "
+                           "work, not a supported configuration",
+                           "  lr1121_expected_len_override: %u -> EKSPERYMENT AKTYWNY(!): zapis do "
+                           "niezadokumentowanego rejestru 0x%08X [31:20] przed kazdym SetRx, zamiast "
+                           "ustawionego payload_length %u. Odbior nie bedzie dzialal normalnie. "
+                           "Praca stanowiskowa, nie wspierana konfiguracja"),
                (unsigned) this->expected_len_override_, (unsigned) REG_EXPECTED_LEN,
                (unsigned) this->payload_length_);
     }
@@ -1311,31 +1324,38 @@ void LR1121::log_reg_status() {
 
   if (this->auto_length_) {
     if (this->boot_fw_ != VERIFIED_RADIO_FW) {
-      ESP_LOGE(TAG, "  lr1121_auto_length: IGNORED. Verified only on radio firmware 0x%04X, this "
-                    "chip reports 0x%04X. Refusing to write an undocumented register on an "
-                    "unverified image; reception falls back to payload_length %u / ODRZUCONE, "
-                    "niezweryfikowany firmware radia",
+      ESP_LOGE(TAG, LOG_TR("  lr1121_auto_length: IGNORED. Verified only on radio firmware 0x%04X, this "
+                           "chip reports 0x%04X. Refusing to write an undocumented register on an "
+                           "unverified image; reception falls back to payload_length %u",
+                           "  lr1121_auto_length: ODRZUCONE. Zweryfikowane tylko na firmware radia "
+                           "0x%04X, ten uklad zglasza 0x%04X. Bez zapisu niezadokumentowanego "
+                           "rejestru na niezweryfikowanym firmware; odbior wraca do payload_length %u"),
                (unsigned) VERIFIED_RADIO_FW, (unsigned) this->boot_fw_,
                (unsigned) this->payload_length_);
     } else {
-      ESP_LOGW(TAG, "  lr1121_auto_length: ON -> the frame's own L-field sets where the packet "
-                    "engine stops, written into undocumented register 0x%08X [31:20] while the "
-                    "frame is still arriving. Lifts the %u-byte ceiling (max is %u), and a header "
-                    "that will not decode falls back to that ceiling. Uses an undocumented "
-                    "register / dlugosc z pola L ramki, rejestr niezadokumentowany",
+      ESP_LOGW(TAG, LOG_TR("  lr1121_auto_length: ON -> the frame's own L-field sets where the packet "
+                           "engine stops, written into undocumented register 0x%08X [31:20] while the "
+                           "frame is still arriving. Lifts the %u-byte ceiling (max is %u), and a header "
+                           "that will not decode falls back to that ceiling. Uses an undocumented "
+                           "register",
+                           "  lr1121_auto_length: WL -> pole L ramki ustala, gdzie konczy sie odbior "
+                           "pakietu, zapis do niezadokumentowanego rejestru 0x%08X [31:20] jeszcze w "
+                           "trakcie odbioru. Znosi limit %u bajtow (maks. %u), a naglowek, ktory sie "
+                           "nie dekoduje, wraca do tego limitu. Uzywa niezadokumentowanego rejestru"),
                (unsigned) REG_EXPECTED_LEN, (unsigned) this->payload_length_,
                (unsigned) AUTO_LEN_CEILING);
     }
   }
 
   ESP_LOGI(TAG, "  rx_boosted: %s%s", this->rx_boosted_ ? "true" : "false",
-           this->rx_boosted_ ? " -> +2 dB for ~2 mA / +2 dB kosztem ~2 mA"
-                             : " -> 2 dB of sensitivity left on the table / oddane 2 dB czulosci");
+           this->rx_boosted_ ? LOG_TR(" -> +2 dB for ~2 mA", " -> +2 dB kosztem ~2 mA")
+                             : LOG_TR(" -> 2 dB of sensitivity left on the table", " -> oddane 2 dB czulosci"));
 
   if (this->listen_mode_ == LISTEN_MODE_S1) {
-    ESP_LOGI(TAG, "  listen_mode: s1 -> 32768 b/s, sync 0x54 0x76 0x96 (24 bit), 868.300 MHz. "
-                  "Measured working; margin sensitivity unknown / zmierzone jako dzialajace, "
-                  "czulosc na granicy niezbadana");
+    ESP_LOGI(TAG, LOG_TR("  listen_mode: s1 -> 32768 b/s, sync 0x54 0x76 0x96 (24 bit), 868.300 MHz. "
+                         "Measured working; margin sensitivity unknown",
+                         "  listen_mode: s1 -> 32768 b/s, sync 0x54 0x76 0x96 (24 bit), 868.300 MHz. "
+                         "Zmierzone jako dzialajace; czulosc na granicy niezbadana"));
   }
 
   // The known-benign signature, measured on this board: the flag latches while

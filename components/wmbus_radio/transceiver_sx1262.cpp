@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_sx1262.h"
+#include "log_lang.h"
 #include "decode3of6.h"
 #include "frame_length.h"
 
@@ -462,7 +463,7 @@ void SX1262::wait_while_busy_() {
   const uint32_t start = millis();
   while (this->busy_pin_->digital_read()) {
     if ((millis() - start) > 200) {
-      ESP_LOGW(TAG, "BUSY stuck high / linia BUSY utknela w stanie wysokim (>200ms)");
+      ESP_LOGW(TAG, LOG_TR("BUSY stuck high (>200ms)", "Linia BUSY utknela w stanie wysokim (>200ms)"));
       break;
     }
     delay(1);
@@ -1163,7 +1164,7 @@ void SX1262::setup() {
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                    : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only"
                    : "T1+C1 (both, 3:1 bias)";
-    ESP_LOGI(TAG, "Listen mode / tryb nasluchu: %s", lm);
+    ESP_LOGI(TAG, LOG_TR("Listen mode: %s", "Tryb nasluchu: %s"), lm);
   }
 
   // MUST be before any SPI transfers
@@ -1214,9 +1215,9 @@ void SX1262::setup() {
     this->rf_sw_pin_->digital_write(true);
     delay(1);  // let the switch settle before the radio is brought up
   }
-  ESP_LOGI(TAG, "RF switch gate / bramka przelacznika RF: %s",
-           (this->rf_sw_pin_ != nullptr) ? "driven high (rf_sw_pin) / sterowana"
-                                         : "not configured / nieskonfigurowana");
+  ESP_LOGI(TAG, LOG_TR("RF switch gate: %s", "Bramka przelacznika RF: %s"),
+           (this->rf_sw_pin_ != nullptr) ? LOG_TR("driven high (rf_sw_pin)", "sterowana stanem wysokim (rf_sw_pin)")
+                                         : LOG_TR("not configured", "nieskonfigurowana"));
 
   this->reset();
   delay(10);
@@ -1230,7 +1231,7 @@ void SX1262::setup() {
   const uint8_t gain =
       (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? RX_GAIN_POWER_SAVING : RX_GAIN_BOOSTED;
   this->write_register_(REG_RX_GAIN, {gain});
-  ESP_LOGI(TAG, "RX gain / wzmocnienie RX: %s", (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? "POWER_SAVING" : "BOOSTED");
+  ESP_LOGI(TAG, LOG_TR("RX gain: %s", "Wzmocnienie RX: %s"), (this->rx_gain_ == SX1262RxGain::POWER_SAVING) ? "POWER_SAVING" : "BOOSTED");
 
   // GFSK baseline fix, ported from RadioLib's fixGFSK() "reset" branch (see
   // REG_GFSK_FIX_1/3/4 and REG_RSSI_AVG_WINDOW comments above). This driver
@@ -1339,7 +1340,7 @@ void SX1262::setup() {
     this->boot_dev_err_after_ = u16be_(de);
     this->boot_dev_err_valid_ = true;
 
-    ESP_LOGI(TAG, "Device errors cleared on boot / bledy ukladu wyczyszczone przy starcie: 0x%04X -> 0x%04X",
+    ESP_LOGI(TAG, LOG_TR("Device errors cleared on boot: 0x%04X -> 0x%04X", "Bledy ukladu wyczyszczone przy starcie: 0x%04X -> 0x%04X"),
              this->boot_dev_err_before_, this->boot_dev_err_after_);
   }
 
@@ -1450,12 +1451,14 @@ void SX1262::setup() {
     const uint16_t errors = u16be_(de);
     if (errors & (DEV_ERR_XOSC_START | DEV_ERR_PLL_CALIB)) {
       ESP_LOGE(TAG,
-               "Device errors after setup / bledy ukladu po inicjalizacji: 0x%04X%s%s. "
-               "Reference or PLL did not come up - receive sensitivity is degraded.",
+               LOG_TR("Device errors after setup: 0x%04X%s%s. "
+                      "Reference or PLL did not come up - receive sensitivity is degraded.",
+                      "Bledy ukladu po inicjalizacji: 0x%04X%s%s. "
+                      "Wzorzec lub PLL nie wystartowal - czulosc odbioru jest obnizona."),
                errors, (errors & DEV_ERR_XOSC_START) ? " XOSC_START_ERR" : "",
                (errors & DEV_ERR_PLL_CALIB) ? " PLL_CALIB_ERR" : "");
     } else {
-      ESP_LOGI(TAG, "Device errors after setup / bledy ukladu po inicjalizacji: 0x%04X", errors);
+      ESP_LOGI(TAG, LOG_TR("Device errors after setup: 0x%04X", "Bledy ukladu po inicjalizacji: 0x%04X"), errors);
     }
   }
 
@@ -1537,12 +1540,13 @@ void SX1262::dump_debug_status(const char *reason) {
 
   if (!in_rx) {
     ESP_LOGW(TAG,
-             "SX1262 is not in RX (mode=%s) / SX1262 nie jest w trybie RX. "
-             "Nothing can be received in this state.",
+             LOG_TR("SX1262 is not in RX (mode=%s). Nothing can be received in this state.",
+                    "SX1262 nie jest w trybie RX (mode=%s). W tym stanie nic nie zostanie odebrane."),
              sx126x_chip_mode_name_(status));
   }
   if (errors & (DEV_ERR_XOSC_START | DEV_ERR_PLL_CALIB)) {
-    ESP_LOGE(TAG, "SX1262 device errors 0x%04X%s%s / bledy ukladu - receive sensitivity is degraded.",
+    ESP_LOGE(TAG, LOG_TR("SX1262 device errors 0x%04X%s%s - receive sensitivity is degraded.",
+                         "Bledy ukladu SX1262 0x%04X%s%s - czulosc odbioru jest obnizona."),
              errors, (errors & DEV_ERR_XOSC_START) ? " XOSC_START_ERR" : "",
              (errors & DEV_ERR_PLL_CALIB) ? " PLL_CALIB_ERR" : "");
   }
@@ -1589,8 +1593,8 @@ void SX1262::log_reg_status() {
            agc_tune78, agc_tune910, agc_tune1112, agc_tune13, agc_first);
 
   if (reg_rx_gain == 0x00 && reg_sync0 == 0x00 && reg_sync1 == 0x00 && reg_sync2 == 0x00) {
-    ESP_LOGE(TAG, "SX1262 not responding over SPI / SX1262 nie odpowiada po SPI. "
-                  "Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.");
+    ESP_LOGE(TAG, LOG_TR("SX1262 not responding over SPI. Check VCC/GND/SCK/MOSI/MISO/NSS/RESET.",
+                         "SX1262 nie odpowiada po SPI. Sprawdz VCC/GND/SCK/MOSI/MISO/NSS/RESET."));
   }
 }
 

@@ -7,6 +7,7 @@
 // payload structure, topics and thresholds are identical.
 
 #include "component.h"
+#include "log_lang.h"
 #include "wmbus_radio_internal.h"
 
 #include "esphome/core/log.h"
@@ -69,7 +70,7 @@ void Radio::publish_lr_pipeline_diag_(Packet *packet, bool valid) {
       (unsigned) this->lr_rx_outcomes_[2].load(), (unsigned) this->lr_rx_outcomes_[3].load(),
       (unsigned) this->lr_rx_outcomes_[4].load(), (unsigned) this->lr_rx_outcomes_[5].load(),
       (unsigned) this->lr_rx_outcomes_[6].load(), (unsigned) this->lr_rx_outcomes_[7].load());
-    client->publish(this->diag_topic_ + "/lr_pipeline", std::string(body), 1, true);
+    client->publish(this->diag_topic_ + "/lr_pipeline", std::string(body), 1, false);
     return;
   }
   if (valid || packet->raw_hex().empty() || (uint32_t) (now - this->lr_drop_sample_ms_) < 5000) return;
@@ -84,7 +85,7 @@ void Radio::publish_lr_pipeline_diag_(Packet *packet, bool valid) {
     (int) packet->get_rssi(), (unsigned) packet->want_len(), (unsigned) packet->got_len(),
     (unsigned) packet->raw_got_len(), (unsigned) packet->decoded_len(),
     (unsigned) packet->t1_symbols_total(), (unsigned) packet->t1_symbols_invalid(), packet->raw_hex().c_str());
-  client->publish(this->diag_topic_ + "/lr_drop/" + std::to_string((this->lr_drop_sample_seq_ - 1) % 8), std::string(body), 1, true);
+  client->publish(this->diag_topic_ + "/lr_drop/" + std::to_string((this->lr_drop_sample_seq_ - 1) % 8), std::string(body), 1, false);
 }
 
 Radio::DropBucket Radio::bucket_for_reason_(const std::string &reason) {
@@ -197,7 +198,7 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
            chip, code, yaml_key, suggested_value, yaml_snippet, hint_en, hint_pl);
 
   mqtt->publish(topic, std::string(payload), qos, false);
-  ESP_LOGI("wmbus", "SUGGESTION / SUGESTIA [%s]: %s", code, hint_en);
+  ESP_LOGI("wmbus", LOG_TR("SUGGESTION [%s]: %s", "SUGESTIA [%s]: %s"), code, LOG_TR(hint_en, hint_pl));
 }
 
 void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
@@ -868,7 +869,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, "DIAG summary / podsumowanie diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, LOG_TR("DIAG summary: ", "Podsumowanie diag: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_rx_path_.irq_fired,
            (unsigned) this->diag_rx_path_.irq_start_t1, (unsigned) this->diag_rx_path_.irq_start_c1a, (unsigned) this->diag_rx_path_.irq_start_c1b,
@@ -877,9 +878,9 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
 
   if (std::strcmp(hint_code, "OK") == 0 || std::strcmp(hint_code, "GOOD") == 0) {
-    ESP_LOGI(TAG, "DIAG hint: %s | %s / %s", hint_code, hint_en, hint_pl);
+    ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
   } else {
-    ESP_LOGW(TAG, "DIAG hint: %s | %s / %s", hint_code, hint_en, hint_pl);
+    ESP_LOGW(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
   }
 
   // Evaluate adaptive busy-ether state BEFORE resetting windowed counters —
@@ -1330,7 +1331,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_15min_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, "DIAG 15min summary / podsumowanie 15min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, LOG_TR("DIAG 15min summary: ", "Podsumowanie diag 15min: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_15m_rx_path_.irq_fired,
            (unsigned) this->diag_15m_rx_path_.irq_start_t1, (unsigned) this->diag_15m_rx_path_.irq_start_c1a, (unsigned) this->diag_15m_rx_path_.irq_start_c1b,
@@ -1339,9 +1340,9 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_15m_truncated_, (unsigned) this->diag_15m_dropped_, (unsigned) crc_failed);
 
   if (std::strcmp(hint_code, "OK") == 0 || std::strcmp(hint_code, "GOOD") == 0) {
-    ESP_LOGI(TAG, "DIAG hint: %s | %s / %s", hint_code, hint_en, hint_pl);
+    ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
   } else {
-    ESP_LOGW(TAG, "DIAG hint: %s | %s / %s", hint_code, hint_en, hint_pl);
+    ESP_LOGW(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
   }
 
   // Publish snapshot of all highlight meters alongside this summary (read-only, no window reset).
@@ -1805,7 +1806,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_60min_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, "DIAG 60min summary / podsumowanie 60min diag: topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, LOG_TR("DIAG 60min summary: ", "Podsumowanie diag 60min: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_60min_rx_path_.irq_fired,
            (unsigned) this->diag_60min_rx_path_.irq_start_t1, (unsigned) this->diag_60min_rx_path_.irq_start_c1a, (unsigned) this->diag_60min_rx_path_.irq_start_c1b,
@@ -1814,9 +1815,9 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_60min_truncated_, (unsigned) this->diag_60min_dropped_, (unsigned) crc_failed);
 
   if (std::strcmp(hint_code, "OK") == 0 || std::strcmp(hint_code, "GOOD") == 0) {
-    ESP_LOGI(TAG, "DIAG hint: %s | %s / %s", hint_code, hint_en, hint_pl);
+    ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
   } else {
-    ESP_LOGW(TAG, "DIAG hint: %s | %s / %s", hint_code, hint_en, hint_pl);
+    ESP_LOGW(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
   }
 
   // Publish snapshot of all highlight meters alongside this summary (read-only, no window reset).

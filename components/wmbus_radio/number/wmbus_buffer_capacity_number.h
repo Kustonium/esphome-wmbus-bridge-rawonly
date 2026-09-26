@@ -11,6 +11,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "../component.h"
+#include "../log_lang.h"
 
 namespace esphome {
 namespace wmbus_radio {
@@ -34,9 +35,9 @@ class WMBusBufferCapacityNumber : public number::Number, public Component {
     const uint32_t trimmed = this->radio_->get_mqtt_outbox_dropped_total() - dropped_before;
     if (trimmed > 0) {
       ESP_LOGW("wmbus",
-               "WMBus buffer_capacity lowered below what was queued: dropped %u message(s) / "
-               "zmniejszono buffer_capacity ponizej tego, co bylo w kolejce: odrzucono %u wiadomosci",
-               (unsigned) trimmed, (unsigned) trimmed);
+               LOG_TR("WMBus buffer_capacity lowered below what was queued: dropped %u message(s)",
+                      "WMBus: zmniejszono buffer_capacity ponizej tego, co bylo w kolejce: odrzucono %u wiadomosci"),
+               (unsigned) trimmed);
     }
     // Echo back the effective (possibly clamped to mqtt_buffer_size) value
     // rather than the raw slider position, so the UI never claims a capacity

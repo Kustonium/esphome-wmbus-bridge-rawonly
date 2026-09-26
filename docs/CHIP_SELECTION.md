@@ -10,6 +10,7 @@ Practical radio-selection guide for `wmbus_radio`. Four radios are supported:
 - **House / a few meters / quiet RF / mostly slow T1** → `SX1276` is often enough.
 - **Apartment block / many meters / frequent packets / larger packets** → choose `SX1262`.
 - **S1 meters you can barely hear** → use `SX1276`. See [S1 is a separate question](#s1-is-a-separate-question).
+- **C1 meters** → use `SX1276`. `SX1262` and `LR1121` hear only a few C1 transmitters. See [C1 is a separate question too](#c1-is-a-separate-question-too).
 - **Mixed T1 + C1 on one device** → works, but costs reception quality.
 - **Best mixed-mode setup** → use two dedicated devices: `T1-only` and `C1-only`.
 - **`CC1101`** → only if that is the hardware you already own. It is behind an
@@ -69,6 +70,7 @@ The number of meters alone is not the whole story. A few fast meters can hurt mo
 | Larger packets under time pressure | weak | weak | recommended | good |
 | `both` on one device | not recommended | not recommended in meaningful T1 traffic | possible, still a compromise | possible, untested over time |
 | S1 meters near the noise floor | raw sniffer only | **recommended** | weaker, see below | promising, single test |
+| C1 meters | untested here | **recommended** | hears few C1 transmitters, see below | hears few C1 transmitters, see below |
 | Need maximum reliability | no | limited | recommended | not yet provable |
 | Availability of a second opinion | wide | wide | wide | one board, one house |
 
@@ -106,6 +108,40 @@ not a receive path — the driver says so at startup. `LR1121` received S1
 correctly on the first attempt, but only from a workshop transmitter at −59 dBm,
 which proves the path works and says nothing about sensitivity.
 
+## C1 is a separate question too
+
+C1 does not rank the radios the way T1 does either. Measured on 2026-09-25/26
+against real Techem C1 meters, all boards in one room, 868.95 MHz:
+
+| receiver | C1 meters heard | notes |
+|---|---|---|
+| `SX1276` (LilyGO), default `sx1276_preamble_tolerance: 10` | **8–9** | 100 frames in 2.2 h, 487 in one night |
+| `SX1276` with `sx1276_preamble_tolerance: 0` | **1** | the same single meter as the chips below |
+| `SX1262` (Heltec V4.2, external LNA) | 1 | |
+| `SX1262` (LilyGO T-Beam, no LNA, different vendor and antenna) | 2 | the second one: 4 frames in a night |
+| `LR1121` | 1 | |
+
+What was ruled out along the way, each by direct measurement: receiver
+bandwidth (234, 312 and 467 kHz), transmitter frequency offset (all meters
+within ±4 kHz by the `SX1276` AFC), `min_preamble_bits` 16 / 8 / 0, and the
+deviation setting (`LR1121` runs C1 at 50 kHz and behaves the same). On the
+`SX1262` the weaker C1 meters do not even raise an interrupt - see
+`rx_path.irq_start` in [DIAGNOSTIC.md](DIAGNOSTIC.md).
+
+**The `SX1276` advantage on C1 is the error tolerance of its preamble
+detector.** With the tolerance set to 0 it hears exactly what the `SX1262` and
+`LR1121` hear. Neither of those chips has an equivalent field, so the
+difference cannot be closed in software. Two `SX1262` boards from different
+vendors agreeing rules out the board: it is the chip.
+
+This matters less than it sounds for some meters: Techem heat meters send
+their plain proprietary telegram on **T1** and a separate AES-encrypted OMS
+telegram on C1. The readable values arrive on T1, which the `SX1262` receives
+well; the C1 telegram is useless without the key anyway.
+
+Practical rule: **`SX1276` for C1.** Keep `SX1262` and `LR1121` on
+`listen_mode: t1`.
+
 ## `both` mode conclusion
 
 `both` is not just “T1 plus some C1”. It adds scheduling overhead even when real C1 traffic is light.
@@ -114,6 +150,12 @@ Practical takeaway:
 
 - on `SX1276`, `both` is generally a bad idea when T1 traffic matters,
 - on `SX1262`, `both` can make sense, but it still has a measurable cost,
+- measured over one night (2026-09-25/26, same hours as the night before in
+  `t1`): `both` cut the T1 meters heard from **118 to 64** on an `SX1262`
+  (LilyGO T-Beam) and from **62 to 40** on the `LR1121`, while the `SX1276`
+  went from 119 to 108. On these two chips that is far more than the time share
+  given to C1, and together with the C1 result above it means `both` buys them
+  almost nothing - one night, one building,
 - if you actually care about reliable mixed-mode reception, use **two devices**.
 
 `both` is T1/C1 only on every radio. **S1 never participates in `both`** and must

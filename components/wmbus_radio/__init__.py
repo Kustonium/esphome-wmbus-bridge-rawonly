@@ -4,6 +4,7 @@ import logging
 import re
 import esphome.codegen as cg
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome import pins, automation
 from esphome.components import spi
 from esphome.cpp_generator import LambdaExpression
@@ -106,6 +107,7 @@ CONF_HIGHLIGHT_PREFIX = "highlight_prefix"
 # Diagnostics
 CONF_DIAG_TOPIC = "diagnostic_topic"
 CONF_DIAGNOSTIC_MODE = "diagnostic_mode"
+CONF_LOG_LANGUAGE = "log_language"
 CONF_DIAG_VERBOSE = "diagnostic_verbose"
 CONF_DIAG_PUBLISH_RAW = "diagnostic_publish_raw"
 CONF_DIAG_SUMMARY_INTERVAL = "diagnostic_summary_interval"
@@ -586,6 +588,11 @@ BASE_CONFIG_SCHEMA = (
                 {_validate_meter_id: cv.int_range(min=1, max=1000)}
             ),
 
+            # Language of the device log text. Only the chosen one is compiled in
+            # (see log_lang.h); MQTT payloads are unaffected, the diag JSON keeps
+            # both hint_en and hint_pl.
+            cv.Optional(CONF_LOG_LANGUAGE, default="en"): cv.one_of("en", "pl", lower=True),
+
             # Diagnostics are opt-in by default. `diagnostic_mode` applies a preset
             # for MQTT publishing only; explicit detailed flags still override it.
             cv.Optional(CONF_DIAGNOSTIC_MODE, default="off"): cv.one_of(
@@ -974,9 +981,28 @@ def _validate_framework(config):
     return config
 
 
+def _validate_log_language_consistent(config):
+    # log_language becomes one build-wide define (WMBUS_LOG_LANG_PL), so two
+    # radios in one firmware cannot log in different languages. Refuse the
+    # mix instead of letting one instance silently decide for the other.
+    langs = {
+        c.get(CONF_LOG_LANGUAGE, "en")
+        for c in fv.full_config.get().get("wmbus_radio", [])
+        if isinstance(c, dict)
+    }
+    if len(langs) > 1:
+        raise cv.Invalid(
+            "log_language must be the same on every wmbus_radio instance - it applies "
+            "to the whole firmware / log_language musi byc takie samo we wszystkich "
+            "instancjach wmbus_radio - dotyczy calego firmware."
+        )
+    return config
+
+
 # Final validation: the target framework is only reliably known once every
-# component has been validated, so this cannot live in CONFIG_SCHEMA.
-FINAL_VALIDATE_SCHEMA = _validate_framework
+# component has been validated, so this cannot live in CONFIG_SCHEMA. The
+# language check needs every instance, which is also only known here.
+FINAL_VALIDATE_SCHEMA = cv.All(_validate_framework, _validate_log_language_consistent)
 
 
 async def to_code(config):
@@ -1148,29 +1174,40 @@ async def to_code(config):
 
     warnings = []
 
+    # Config warnings end up in the device log, so they follow log_language too.
+    log_lang = config[CONF_LOG_LANGUAGE]
+    if log_lang == "pl":
+        cg.add_define("WMBUS_LOG_LANG_PL")
+
+    def tr(en, pl):
+        return pl if log_lang == "pl" else en
+
     # All builds, examples and the 2026.7.0 day-one verification use esp-idf.
     # Arduino may compile, but nobody tests it — say so at compile time and in
     # the boot log instead of letting tutorial-style configs drift onto an
     # unverified path silently.
     if CORE.using_arduino:
-        arduino_warning = (
+        arduino_warning = tr(
             "framework arduino is untested for this component - all builds and tests use esp-idf, "
-            "see examples/ / framework arduino jest nieprzetestowany dla tego komponentu - "
-            "wszystkie buildy i testy uzywaja esp-idf, patrz examples/."
+            "see examples/.",
+            "framework arduino jest nieprzetestowany dla tego komponentu - "
+            "wszystkie buildy i testy uzywaja esp-idf, patrz examples/.",
         )
         _LOGGER.warning("[wmbus_radio] %s", arduino_warning)
         warnings.append(arduino_warning)
 
     if CONF_TELEGRAM_TOPIC in config and str(config.get(CONF_TELEGRAM_TOPIC, "")).strip():
         telegram_topic = config[CONF_TELEGRAM_TOPIC]
-        warnings.append("telegram_topic is a legacy/manual override / telegram_topic to reczne ustawienie legacy. Prefer topic_name / zalecane topic_name.")
+        warnings.append(tr("telegram_topic is a legacy/manual override. Prefer topic_name.",
+                           "telegram_topic to reczne ustawienie legacy. Zalecane topic_name."))
     else:
         telegram_topic = f"wmbus/{topic_name}/telegram"
 
     raw_diag_mode = config.get(CONF_DIAGNOSTIC_MODE, "off")
     diag_mode = _normalize_diagnostic_mode(raw_diag_mode)
     if raw_diag_mode != diag_mode:
-        warnings.append(f"diagnostic_mode: {raw_diag_mode} is deprecated / jest przestarzale. Use / uzyj diagnostic_mode: {diag_mode}.")
+        warnings.append(tr(f"diagnostic_mode: {raw_diag_mode} is deprecated. Use diagnostic_mode: {diag_mode}.",
+                           f"diagnostic_mode: {raw_diag_mode} jest przestarzale. Uzyj diagnostic_mode: {diag_mode}."))
 
     preset_map = {
         "off": {"verbose": False, "raw": False, "summary": False, "drop": False, "rx_path": False, "highlight_only": False, "suggestion": False, "summary_15min": False, "summary_60min": False, "meter_stats": "off"},
@@ -1196,10 +1233,12 @@ async def to_code(config):
     ]
     for opt in legacy_diag_options:
         if opt in config:
-            warnings.append(f"{opt} is deprecated/advanced / {opt} jest przestarzale/zaawansowane. Prefer diagnostic_mode presets / zalecane presety diagnostic_mode.")
+            warnings.append(tr(f"{opt} is deprecated/advanced. Prefer diagnostic_mode presets.",
+                               f"{opt} jest przestarzale/zaawansowane. Zalecane presety diagnostic_mode."))
 
     if CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY in config and CONF_DIAG_EVENTS_HIGHLIGHT_ONLY not in config:
-        warnings.append("diagnostic_publish_highlight_only is deprecated / jest przestarzale. Use diagnostic_events_highlight_only / uzyj diagnostic_events_highlight_only.")
+        warnings.append(tr("diagnostic_publish_highlight_only is deprecated. Use diagnostic_events_highlight_only.",
+                           "diagnostic_publish_highlight_only jest przestarzale. Uzyj diagnostic_events_highlight_only."))
 
     explicit_diag_enabled = any([
         config.get(CONF_DIAG_PUBLISH_SUMMARY, False),
@@ -1214,7 +1253,8 @@ async def to_code(config):
 
     if CONF_DIAG_TOPIC in config and str(config.get(CONF_DIAG_TOPIC, "")).strip():
         diag_topic = config[CONF_DIAG_TOPIC]
-        warnings.append("diagnostic_topic is a legacy/manual override / diagnostic_topic to reczne ustawienie legacy. Prefer topic_name / zalecane topic_name.")
+        warnings.append(tr("diagnostic_topic is a legacy/manual override. Prefer topic_name.",
+                           "diagnostic_topic to reczne ustawienie legacy. Zalecane topic_name."))
     elif diag_mode != "off" or explicit_diag_enabled:
         diag_topic = f"wmbus/{topic_name}/diag"
     else:
@@ -1268,11 +1308,12 @@ async def to_code(config):
         if not forward_meters_csv:
             # Filtering on an empty list would silence the whole RAW stream, so
             # fall back to forwarding everything and say so loudly.
-            warnings.append(
+            warnings.append(tr(
                 "forward_meters: true but highlight_meters is empty - no filtering applied, "
-                "every frame is forwarded / forward_meters: true, ale highlight_meters jest puste - "
-                "filtr nie dziala, przekazywane sa wszystkie ramki."
-            )
+                "every frame is forwarded.",
+                "forward_meters: true, ale highlight_meters jest puste - "
+                "filtr nie dziala, przekazywane sa wszystkie ramki.",
+            ))
             forward_meters_inherited = False
     elif forward_meters is False:
         forward_meters_csv = ""
@@ -1286,12 +1327,12 @@ async def to_code(config):
         # forward_meters_csv is the RESOLVED whitelist (after the true/false/
         # inherited handling above), so this also catches "forward_meters: true"
         # resolving to nothing because highlight_meters was empty too.
-        warnings.append(
+        warnings.append(tr(
             "buffer_priority is set but forward_meters resolves to an empty whitelist - "
-            "there is no per-meter whitelist to prioritise, ignoring / "
+            "there is no per-meter whitelist to prioritise, ignoring.",
             "ustawiono buffer_priority, ale forward_meters jest puste - brak whitelisty "
-            "do priorytetyzacji, ignorowanie."
-        )
+            "do priorytetyzacji, ignorowanie.",
+        ))
     cg.add(var.set_buffer_priority_csv(_priority_csv(buffer_priority)))
 
     diag_events_highlight_only = (
