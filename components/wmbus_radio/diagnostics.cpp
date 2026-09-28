@@ -235,7 +235,14 @@ bool Radio::front_end_hint_(const RxPathCounters &rp, const StrongestFrame &sf, 
              (int) sf.rssi, id);
     return true;
   }
-  if (rp.payload_read_failed >= 5 && rp.payload_read_failed > ok) {
+  // Reads that fail before the first bytes count too (irq_start.no_data). On the
+  // same R8 a later window had 614 of 640 interrupts deliver nothing at all and
+  // was still reported as OK, because only the payload stage was counted. Not
+  // on the SX1276: its preamble detector fires on noise by design, and those
+  // empty starts are normal there (SX1276_RX_NOISY covers the excess).
+  const bool is_sx1276 = (this->radio != nullptr && strcmp(this->radio->get_name(), "SX1276") == 0);
+  const uint32_t read_failures = rp.payload_read_failed + (is_sx1276 ? 0U : rp.irq_start_no_data);
+  if (read_failures >= 5 && read_failures > ok) {
     *code = "RX_READ_FAILURES";
     snprintf(en, en_n, "%s",
              "the receiver starts frames but cannot finish reading them; likely interference near the board "

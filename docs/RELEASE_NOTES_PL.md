@@ -2,6 +2,13 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Poprawka: `RX_READ_FAILURES` liczy też przerwania, które nie oddały żadnych bajtów
+
+- **Podpowiedź dodana w 1.26 liczyła tylko odczyty urwane w środku ramki.** Odczyty, które padły przed pierwszymi bajtami (`irq_start.no_data`), były pomijane, więc 15-minutowe okno na tym samym Heltecu V4-R8 - 614 z 640 przerwań bez danych, jedna zdekodowana ramka - nadal było raportowane jako `OK`.
+- **Teraz liczą się na SX1262, LR1121 i CC1101.** Nie na SX1276: jego detektor preambuły z założenia startuje na szumie, puste starty są tam normalne, a nadmiar zgłasza już `SX1276_RX_NOISY`.
+
+---
+
 ## Diagnostyka: informacja o przesterowaniu toru odbiorczego i o nieudanych odczytach
 
 - **Dwie nowe podpowiedzi w podsumowaniu, z pierwszeństwem przed pozostałymi.** Obie dotyczą błędów kończących się nieudanym odczytem jeszcze przed sprawdzeniem CRC, których istniejące podpowiedzi `*_OVERLOAD_OR_MULTIPATH` nie widziały - podsumowanie pokazywało wtedy `GOOD` albo `RX_NO_MATCH`, choć płytka traciła prawie wszystko.
