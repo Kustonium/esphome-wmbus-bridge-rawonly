@@ -1132,6 +1132,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     // is available for every meter, BCD or not.
     id_raw = ((uint32_t) d[base + 6] << 24) | ((uint32_t) d[base + 5] << 16) |
              ((uint32_t) d[base + 4] << 8) | (uint32_t) d[base + 3];
+    this->note_strongest_((int) frame->rssi(), id_str);
 
     ver = d[base + 7];
     dev = d[base + 8];
@@ -1606,6 +1607,10 @@ void Radio::receive_frame() {
       this->diag_rx_path_.payload_read_failed++;
       this->diag_15m_rx_path_.payload_read_failed++;
       this->diag_60min_rx_path_.payload_read_failed++;
+      // A transmitter close enough to saturate the front end often shows up
+      // only here: its frames never finish reading, so they never reach the
+      // decoded-frame path that records the strongest RSSI.
+      this->note_strongest_(this->radio->get_rssi(), "");
       char detail[112];
       snprintf(detail, sizeof(detail), "remaining=%u total_len=%u already_read=%u", (unsigned) remaining,
                (unsigned) total_len, (unsigned) already_read);

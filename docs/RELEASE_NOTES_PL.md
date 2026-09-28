@@ -2,6 +2,15 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Diagnostyka: informacja o przesterowaniu toru odbiorczego i o nieudanych odczytach
+
+- **Dwie nowe podpowiedzi w podsumowaniu, z pierwszeństwem przed pozostałymi.** Obie dotyczą błędów kończących się nieudanym odczytem jeszcze przed sprawdzeniem CRC, których istniejące podpowiedzi `*_OVERLOAD_OR_MULTIPATH` nie widziały - podsumowanie pokazywało wtedy `GOOD` albo `RX_NO_MATCH`, choć płytka traciła prawie wszystko.
+- **`SIGNAL_TOO_STRONG`** - ramka w oknie przyszła powyżej -20 dBm. Podpowiedź podaje licznik i jego RSSI i radzi odsunąć płytkę o kilka metrów (najlepiej około -30 do -60 dBm). Zaobserwowane na pierwszym Heltecu V4-R8 w terenie: licznik prądu przy -10 dBm zdekodował się raz, a każda następna ramka urywała się po 10 bajtach.
+- **`RX_READ_FAILURES`** - co najmniej 5 nieudanych odczytów w oknie i więcej niż zdekodowanych ramek. Ramki się zaczynają, ale nie kończą: zakłócenia przy płytce (zasilacze, ładowarki, komputer, sterowniki LED) albo nadajnik za blisko. Przy `long_gfsk_packets: true` porównaj z `false`.
+- Każde okno podsumowania (60 s, 15 min, 60 min) zapamiętuje w tym celu najsilniejszą ramkę, z ID licznika, jeśli ramka się zdekodowała. Opis w `DIAGNOSTIC_PL.md`.
+
+---
+
 ## Log urządzenia w jednym języku: domyślnie angielski, polski przez `log_language: pl`
 
 - **Log urządzenia nie wypisuje już każdego komunikatu dwa razy.** Linie wyglądały jak `DIAG summary / podsumowanie diag: ...`, z polską połową między angielską etykietą a danymi. Użytkownik budujący na ESP32-C3 z CC1101 zwrócił uwagę, że dla kogoś, kto nie zna polskiego, taki log trudniej się czyta.

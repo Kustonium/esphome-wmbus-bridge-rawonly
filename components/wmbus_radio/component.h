@@ -679,6 +679,21 @@ protected:
   std::array<uint32_t, DB_COUNT> diag_dropped_by_bucket_{};
   std::array<uint32_t, SB_COUNT> diag_dropped_by_stage_{};
   RxPathCounters diag_rx_path_{};
+  // Strongest frame of a summary window, for the SIGNAL_TOO_STRONG hint. id is
+  // empty when the strongest was a read that failed before the header decoded.
+  struct StrongestFrame {
+    int16_t rssi{-128};
+    char id[9]{};
+  };
+  StrongestFrame diag_strongest_{};
+  StrongestFrame diag_15m_strongest_{};
+  StrongestFrame diag_60min_strongest_{};
+  void note_strongest_(int rssi_dbm, const char *id);
+  // SIGNAL_TOO_STRONG / RX_READ_FAILURES: front-end problems that end in failed
+  // reads rather than CRC errors, so none of the CRC-based hints can see them.
+  // Returns true when one applies; the text is written into en/pl.
+  bool front_end_hint_(const RxPathCounters &rp, const StrongestFrame &sf, uint32_t ok,
+                       const char **code, char *en, size_t en_n, char *pl, size_t pl_n) const;
 
   // Independent 15-minute diagnostic counters (disabled when publish flag = false).
   uint32_t diag_15m_total_{0};
