@@ -2,6 +2,12 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Fix: `stale_wakeups_cleared` counts prevented wakeups, not notifications
+
+- **The counter added in the previous release summed pending notifications.** Those collapse into a single wakeup, and an SX1276 leaves hundreds a minute - one per DIO edge during a frame - so a LilyGO on T1 reported 250-325 a minute while only a handful of false wakeups were actually prevented. It now adds one per re-arm that found anything pending, which makes it comparable between radios. Reception is unchanged.
+
+---
+
 ## SX1262: receiver fixes after the Heltec V4-R8 case
 
 - **Stale interrupt notifications are discarded before the receiver is armed.** One left over from the previous arm used to wake the next wait at once, count as a trigger and read an empty FIFO - part of the `irq_start.no_data` storms seen on the V4-R8. They are now counted separately as `rx_path.stale_wakeups_cleared` and are not part of `irq_fired`. Applies to every radio.

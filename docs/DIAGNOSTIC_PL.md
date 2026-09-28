@@ -242,8 +242,12 @@ czekały w chwili ponownego uzbrajania odbiornika - zostały po poprzednim
 uzbrojeniu, a ich danych już nie ma. Są odrzucane przed uzbrojeniem. Przed
 28.09.2026 nie były: następne czekanie wracało od razu, liczyło `irq_fired`
 i czytało pustą FIFO, więc lądowały w `irq_start.no_data`. **Nie** wchodzą do
-`irq_fired`. Pojedyncze są normalne; stały strumień obok wielu `no_data`
-znaczy, że przerwania przychodzą już po obsłużeniu ramki.
+`irq_fired`. Licznik rośnie o jeden na każde uzbrojenie, które zastało coś
+zaległego - jedno zapobieżone fałszywe wybudzenie - a nie o liczbę powiadomień:
+te i tak zlewają się w jedno wybudzenie, a SX1276 zostawia ich setki na minutę
+(po jednym na zbocze DIO w trakcie ramki). Pojedyncze są normalne; stały
+strumień obok wielu `no_data` znaczy, że przerwania przychodzą już po
+obsłużeniu ramki.
 
 ## Stare szczegółowe opcje
 

@@ -243,9 +243,12 @@ pending when the receiver was about to be armed again - left over from the
 previous arm, whose data is already gone. They are discarded before arming.
 Before 2026-09-28 they were not: the next wait returned at once, counted an
 `irq_fired` and read an empty FIFO, so they showed up as `irq_start.no_data`.
-They are **not** part of `irq_fired`. An occasional one is normal; a steady
-stream next to many `no_data` means interrupts keep arriving after the frame
-was already handled.
+They are **not** part of `irq_fired`. The counter adds one per re-arm that
+found anything pending - one false wakeup prevented - not the number of
+notifications: those collapse into a single wakeup, and an SX1276 leaves
+hundreds a minute (one per DIO edge during a frame). An occasional one is
+normal; a steady stream next to many `no_data` means interrupts keep arriving
+after the frame was already handled.
 
 ## Legacy detailed options
 
