@@ -637,7 +637,9 @@ protected:
     // re-armed: left over from an interrupt of the previous arm, whose data is
     // already gone. They are cleared before arming; without that, the next
     // wait returned at once, counted an irq_fired and read an empty FIFO
-    // (seen as irq_start.no_data). NOT part of the irq_fired sum.
+    // (seen as irq_start.no_data). NOT part of the irq_fired sum. One per
+    // clear that found anything pending, i.e. per false wakeup prevented - not
+    // the number of notifications, which collapse into one wakeup anyway.
     uint32_t stale_wakeups_cleared{0};
     uint32_t irq_timeout{0};
     uint32_t preamble_read_failed{0};

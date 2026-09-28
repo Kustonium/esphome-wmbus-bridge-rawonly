@@ -1306,12 +1306,14 @@ void Radio::receive_frame() {
   bool got_irq = false;
   while (waited < total_wait_ms) {
     // Drop notifications left by the previous arm before arming again - see
-    // RxPathCounters::stale_wakeups_cleared.
-    const uint32_t stale = ulTaskNotifyTake(pdTRUE, 0);
-    if (stale) {
-      this->diag_rx_path_.stale_wakeups_cleared += stale;
-      this->diag_15m_rx_path_.stale_wakeups_cleared += stale;
-      this->diag_60min_rx_path_.stale_wakeups_cleared += stale;
+    // RxPathCounters::stale_wakeups_cleared. Counted once per clear, not by the
+    // notification count: pending notifications collapse into ONE wakeup, and
+    // the SX1276 leaves hundreds a minute (one per DIO edge during a frame),
+    // which would say nothing about how many false wakeups were prevented.
+    if (ulTaskNotifyTake(pdTRUE, 0) != 0) {
+      this->diag_rx_path_.stale_wakeups_cleared++;
+      this->diag_15m_rx_path_.stale_wakeups_cleared++;
+      this->diag_60min_rx_path_.stale_wakeups_cleared++;
     }
     this->radio->restart_rx();
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(hop_ms))) {

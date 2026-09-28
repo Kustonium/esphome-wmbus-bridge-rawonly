@@ -2,6 +2,12 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Poprawka: `stale_wakeups_cleared` liczy zapobieżone wybudzenia, a nie powiadomienia
+
+- **Licznik dodany w poprzednim wydaniu sumował zaległe powiadomienia.** Te zlewają się w jedno wybudzenie, a SX1276 zostawia ich setki na minutę - po jednym na zbocze DIO w trakcie ramki - więc LilyGO na T1 pokazywał 250-325 na minutę, choć zapobieżonych fałszywych wybudzeń było ledwie kilka. Teraz rośnie o jeden na każde uzbrojenie, które zastało coś zaległego, dzięki czemu jest porównywalny między radiami. Odbiór bez zmian.
+
+---
+
 ## SX1262: poprawki odbiornika po przypadku Heltec V4-R8
 
 - **Zaległe powiadomienia o przerwaniu są odrzucane przed uzbrojeniem odbiornika.** Takie, które zostało po poprzednim uzbrojeniu, budziło następne czekanie od razu, liczyło się jako wyzwolenie i czytało pustą FIFO - część burz `irq_start.no_data` na V4-R8. Teraz są liczone osobno jako `rx_path.stale_wakeups_cleared` i nie wchodzą do `irq_fired`. Dotyczy wszystkich radiów.
