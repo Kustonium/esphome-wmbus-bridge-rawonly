@@ -2,6 +2,17 @@
 
 [English version](RELEASE_NOTES.md)
 
+## SX1262: poprawki odbiornika po przypadku Heltec V4-R8
+
+- **Zaległe powiadomienia o przerwaniu są odrzucane przed uzbrojeniem odbiornika.** Takie, które zostało po poprzednim uzbrojeniu, budziło następne czekanie od razu, liczyło się jako wyzwolenie i czytało pustą FIFO - część burz `irq_start.no_data` na V4-R8. Teraz są liczone osobno jako `rx_path.stale_wakeups_cleared` i nie wchodzą do `irq_fired`. Dotyczy wszystkich radiów.
+- **Rejestr końca pakietu jest zerowany przed każdym uzbrojeniem T1/C1**, tak jak już robił S1. Po przerwanym długim przechwyceniu widziano go ustawionego na 10 bajtów obok odczytów urywanych dokładnie po 10 bajtach.
+- **Adaptacyjne podtrzymanie długiego strumienia trwa 150 s zamiast 45 s.** Licznik prądu wysyłający 353-bajtową ramkę co 60 s przeżywał stare podtrzymanie, więc jego ramki mogły trafić na ścieżkę FIFO 255 bajtów i zostać ucięte. Ma znaczenie przy `long_gfsk_packets: false`.
+- **Poprawione maski błędów układu.** `PLL_CALIB` był sprawdzany na bicie `IMG_CALIB`: błąd kalibracji obrazu raportowano jako błąd PLL, a prawdziwy błąd PLL nie dawał nic. Wszystkie błędy kalibracji, wzorca i zatrzaśnięcia PLL są teraz raportowane z nazwy.
+- **Nowa opcja `sx1262_tcxo_startup_ms` (domyślnie 1, zakres 1-20).** Czas startu TCXO był stały, 1 ms; własny sterownik Helteca używa 5 na V4. Ma znaczenie tylko z `has_tcxo: true`.
+- Zrzut po nieudanym odczycie, który zastaje chip w standby, mówi teraz, kiedy postawiło go tam samo przechwycenie strumienia, zamiast zgłaszać awarię odbiornika. Poprawione komentarze pinów FEM Helteca (trzeci pin to CPS na V4.2 i CTX na V4-R8).
+
+---
+
 ## Poprawka: `RX_READ_FAILURES` liczy też przerwania, które nie oddały żadnych bajtów
 
 - **Podpowiedź dodana w 1.26 liczyła tylko odczyty urwane w środku ramki.** Odczyty, które padły przed pierwszymi bajtami (`irq_start.no_data`), były pomijane, więc 15-minutowe okno na tym samym Heltecu V4-R8 - 614 z 640 przerwań bez danych, jedna zdekodowana ramka - nadal było raportowane jako `OK`.

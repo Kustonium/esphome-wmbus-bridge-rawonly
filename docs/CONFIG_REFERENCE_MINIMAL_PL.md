@@ -65,6 +65,7 @@ Poprawny telegram S1 jest publikowany na `wmbus/<topic_name>/telegram` tak samo 
 | `gdo0_pin`, `gdo2_pin` | `CC1101` | wymagane | publiczna | dual IRQ; single-IRQ CC1101 nie jest wspierany |
 | `spi_data_rate` | wszystkie | `2000000` (2 MHz) | zaawansowana | zegar SPI **tego urządzenia**, nie całej magistrali. Obniż, zanim zaczniesz podejrzewać układ: moduł na przewodach dupont potrafi gubić bity przy 2 MHz nawet na zdrowych 3,3 V, a objaw jest cichy — rejestry odczytują się jako wartości domyślne i radio zachowuje się jak źle skonfigurowane. Sprawdź `reg_write_retries` w linii `CC1101 debug status`: wartość > 0 potwierdza nieudaną weryfikację zapisu |
 | `lr1121_allow_experimental` | `LR1121` | `false` | wymaga jawnej zgody | wymagane do uruchomienia LR1121 |
+| `sx1262_tcxo_startup_ms` | `SX1262` | `1` | publiczna | 1-20 ms, przez które chip czeka na TCXO po każdym zasileniu go przez DIO3 (tylko z `has_tcxo: true`). Do 28.09.2026 stałe 1 ms; własny sterownik Helteca używa 5 na V4 |
 | `tcxo_voltage` | `LR1121`, `SX1262` | `3.0v` | publiczna | napięcie TCXO modułu; DIO3 w SX1262 to wyjście regulowane z chipu, więc złe napięcie to realne ryzyko dla TCXO, nie kosmetyka |
 | `tcxo_startup_ticks` | `LR1121` | `3000` | zaawansowana | czas rozruchu TCXO w taktach 32,768 kHz (~91,6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | zaawansowana | szerokość pasma RX w Hz |

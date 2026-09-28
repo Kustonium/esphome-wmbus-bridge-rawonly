@@ -235,6 +235,16 @@ szum), a nie C1, którego nie umie zdekodować. Taki, który ma wyzwolenia
 `c1a`/`c1b` i zero ramek, słyszy C1 i gubi je dalej. W `listen_mode: t1` jest
 odwrotnie: wyzwolenia `c1a`/`c1b` oznaczają licznik C1 w zasięgu.
 
+### Zaległe wybudzenia: `stale_wakeups_cleared`
+
+`rx_path.stale_wakeups_cleared` liczy powiadomienia o przerwaniu, które wciąż
+czekały w chwili ponownego uzbrajania odbiornika - zostały po poprzednim
+uzbrojeniu, a ich danych już nie ma. Są odrzucane przed uzbrojeniem. Przed
+28.09.2026 nie były: następne czekanie wracało od razu, liczyło `irq_fired`
+i czytało pustą FIFO, więc lądowały w `irq_start.no_data`. **Nie** wchodzą do
+`irq_fired`. Pojedyncze są normalne; stały strumień obok wielu `no_data`
+znaczy, że przerwania przychodzą już po obsłużeniu ramki.
+
 ## Stare szczegółowe opcje
 
 Te opcje nadal się kompilują dla kompatybilności, ale są deprecated/advanced:

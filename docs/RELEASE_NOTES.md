@@ -2,6 +2,17 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## SX1262: receiver fixes after the Heltec V4-R8 case
+
+- **Stale interrupt notifications are discarded before the receiver is armed.** One left over from the previous arm used to wake the next wait at once, count as a trigger and read an empty FIFO - part of the `irq_start.no_data` storms seen on the V4-R8. They are now counted separately as `rx_path.stale_wakeups_cleared` and are not part of `irq_fired`. Applies to every radio.
+- **The packet-end register is reset before every T1/C1 arm**, as S1 already did. After an interrupted long capture it was seen left at 10 bytes next to reads that broke off after exactly 10 bytes.
+- **The adaptive long-stream hold lasts 150 s instead of 45 s.** An electricity meter sending its 353-byte frame every 60 s outlived the old hold, so its frames could land in the 255-byte FIFO path and be cut off. Relevant with `long_gfsk_packets: false`.
+- **Device-error masks corrected.** `PLL_CALIB` was checked at the `IMG_CALIB` bit: an image-calibration failure was reported as a PLL one, and a real PLL failure raised nothing. All calibration, reference and PLL-lock errors are now reported by name.
+- **New option `sx1262_tcxo_startup_ms` (default 1, range 1-20).** The TCXO start-up time was fixed at 1 ms; Heltec's own driver uses 5 on the V4. Only matters with `has_tcxo: true`.
+- A failed-read dump that finds the chip in standby now says when the stream capture put it there itself, instead of reporting a receiver fault. Comments on the Heltec FEM pins corrected (the third pin is CPS on the V4.2 and CTX on the V4-R8).
+
+---
+
 ## Fix: `RX_READ_FAILURES` also counts interrupts that deliver no bytes
 
 - **The hint added in 1.26 only counted reads that broke off inside the payload.** Reads that failed before the first bytes (`irq_start.no_data`) were left out, so a 15-minute window on the same Heltec V4-R8 - 614 of 640 interrupts delivering nothing, one frame decoded - was still reported as `OK`.

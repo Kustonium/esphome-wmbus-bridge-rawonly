@@ -147,19 +147,26 @@ wmbus_radio:
   has_tcxo: true
   # EN: DIO3 is a REGULATED output from the SX1262 itself, not a pass-through -
   #     wrong tcxo_voltage means the chip actively overdrives (or underdrives)
-  #     whatever TCXO is wired to it. Heltec V4/XIAO both want 3.0V (the
-  #     default), so this line can stay commented on those boards. A board
+  #     whatever TCXO is wired to it. This project has run Heltec V4/XIAO on
+  #     3.0V (the default) from the start; note that Heltec's own driver sets
+  #     1.8V with a 5 ms start-up for the V4 - a comparison is under way. A board
   #     whose TCXO wants something else - e.g. LilyGO T-Beam v1.2 at 1.8V,
   #     per Meshtastic's own variant.h - MUST set this, or risks damaging a
   #     TCXO rated well below what this chip would otherwise push onto it.
   # PL: DIO3 to wyjscie REGULOWANE przez sam SX1262, nie przelot - zle
   #     tcxo_voltage oznacza, ze chip aktywnie prze- albo niedostarcza napiecia
-  #     do podlaczonego TCXO. Heltec V4/XIAO chca 3,0V (domyslne), wiec ta
-  #     linia moze zostac zakomentowana na tych plytkach. Plytka, ktorej TCXO
+  #     do podlaczonego TCXO. Projekt od poczatku puszcza Heltec V4/XIAO na
+  #     3,0V (domyslne); wlasny sterownik Helteca ustawia jednak dla V4 1,8V
+  #     i start 5 ms - porownanie trwa. Plytka, ktorej TCXO
   #     chce czegos innego - np. LilyGO T-Beam v1.2 na 1,8V, wg wlasnego
   #     variant.h Meshtastic - MUSI to ustawic, inaczej ryzykuje uszkodzenie
   #     TCXO ocenionego znacznie nizej niz to, co ten chip by mu inaczej dal.
   # tcxo_voltage: 3.0v  # default: 3.0v
+  # EN: How long the chip waits for the TCXO to settle each time it powers it
+  #     through DIO3, in ms (1-20). Heltec's own driver uses 5 on the V4.
+  # PL: Ile ms uklad czeka na ustabilizowanie TCXO po kazdym zasileniu go przez
+  #     DIO3 (1-20). Wlasny sterownik Helteca uzywa 5 na V4.
+  # sx1262_tcxo_startup_ms: 5  # default: 1
   # EN: A TCXO board sets XOSC_START_ERR on every power-up as a matter of course:
   #     the chip tries to start its own crystal before DIO3 has been told to
   #     power the TCXO, and DIO3 is configured after reset. Clearing the flag

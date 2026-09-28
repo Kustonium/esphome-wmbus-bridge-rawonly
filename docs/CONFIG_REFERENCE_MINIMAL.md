@@ -65,6 +65,7 @@ A valid S1 telegram is published on `wmbus/<topic_name>/telegram` just like vali
 | `gdo0_pin`, `gdo2_pin` | `CC1101` | required | public | dual IRQ; single-IRQ CC1101 is unsupported |
 | `spi_data_rate` | all | `2000000` (2 MHz) | advanced | SPI clock for **this device**, not the whole bus. Lower it before suspecting the chip: a module on jumper wires can lose bits at 2 MHz even with a healthy 3.3 V supply. Registers may read as defaults and the radio may appear misconfigured. Check `reg_write_retries` in `CC1101 debug status`: a value above zero shows failed write-back verification |
 | `lr1121_allow_experimental` | `LR1121` | `false` | safety gate | required to start LR1121 |
+| `sx1262_tcxo_startup_ms` | `SX1262` | `1` | public | 1-20 ms the chip waits for the TCXO each time it powers it through DIO3 (only with `has_tcxo: true`). Fixed at 1 ms before 2026-09-28; Heltec's own driver uses 5 on the V4 |
 | `tcxo_voltage` | `LR1121`, `SX1262` | `3.0v` | public | module TCXO voltage; SX1262 DIO3 is a regulated output, so the wrong voltage is a real TCXO risk |
 | `tcxo_startup_ticks` | `LR1121` | `3000` | advanced | TCXO startup delay in 32.768 kHz ticks (~91.6 ms) |
 | `rx_bandwidth` | `LR1121` | `234300` | advanced | RX bandwidth in Hz |
