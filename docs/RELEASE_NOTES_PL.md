@@ -2,6 +2,16 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Mniej diagnostyki poza `diagnostic_mode: dev`
+
+- **Przyrządy stanowiskowe nie działają już w `low` i `normal`.** To tryby zalecane użytkownikom; zostaje w nich podsumowanie, podpowiedzi i migawka liczników. Do `dev` przeniesione:
+  - LR1121: tematy `radio_runtime`, `lr_pipeline`, `lr_fifo/*` i `lr_drop/*`, przechwyt surowego hexa dla `lr_drop` oraz samo próbkowanie FIFO - 255-bajtowy odczyt SPI w zadaniu odbiorczym co 5 s (zostaje przy włączonym `lr1121_verify_buffer`);
+  - wszystkie radia: linie logu o tym, z którego rejestru pochodzi RSSI ramki, oraz zrzut rejestrów po pierwszym urwanym odczycie (WARN, który wyglądał jak awaria);
+  - rozbicie `(t1=… c1a=… …)` po `irq=` w liniach podsumowania, teraz osobna linia `irq_start:` w `dev`. Liczby zostają w JSON-ie (`rx_path.irq_start`) w każdym trybie.
+- Bez zmian w odbiorze, w JSON-ie podsumowania i w podpowiedziach. Sensory Home Assistant zbudowane na podsumowaniu działają dalej.
+
+---
+
 ## Poprawka: `stale_wakeups_cleared` liczy zapobieżone wybudzenia, a nie powiadomienia
 
 - **Licznik dodany w poprzednim wydaniu sumował zaległe powiadomienia.** Te zlewają się w jedno wybudzenie, a SX1276 zostawia ich setki na minutę - po jednym na zbocze DIO w trakcie ramki - więc LilyGO na T1 pokazywał 250-325 na minutę, choć zapobieżonych fałszywych wybudzeń było ledwie kilka. Teraz rośnie o jeden na każde uzbrojenie, które zastało coś zaległego, dzięki czemu jest porównywalny między radiami. Odbiór bez zmian.

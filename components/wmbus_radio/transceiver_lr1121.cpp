@@ -704,7 +704,9 @@ bool LR1121::load_rx_buffer_() {
   // drain from the previous frame would be indistinguishable from a decode
   // failure, so this must not depend on who called us or in what order.
   this->drain_ready_ = 0;
-  const bool sample_due = this->raw_sample_queue_ != nullptr &&
+  // Only in `dev` or with lr1121_verify_buffer: the sample is a 255-byte SPI
+  // read inside the receive task, which nothing outside bench work reads.
+  const bool sample_due = this->raw_sample_queue_ != nullptr && (this->diag_verbose_ || this->verify_buffer_) &&
       (uint32_t) (millis() - this->last_raw_sample_ms_) >= 5000;
   const bool verify_requested = this->verify_buffer_ && sample_due &&
       (this->last_irq_.load() & IRQ_RX_DONE) != 0;

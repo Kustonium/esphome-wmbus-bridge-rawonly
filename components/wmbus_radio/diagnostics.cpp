@@ -55,7 +55,9 @@ void Radio::publish_lr_pipeline_diag_(Packet *packet, bool valid) {
     else ++this->lr_pipeline_other_;
   }
   auto *client = mqtt::global_mqtt_client;
-  if (!this->diag_publish_summary_ || this->diag_topic_.empty() || client == nullptr || !client->is_connected()) return;
+  // `dev` only since 2026-09-28 (was every mode from `low`): LR1121 bench
+  // instrumentation. The counters above still run, they are cheap.
+  if (!this->diag_verbose_ || this->diag_topic_.empty() || client == nullptr || !client->is_connected()) return;
   if (packet == nullptr) {
     char body[1024];
     snprintf(body, sizeof(body),
@@ -935,13 +937,19 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, LOG_TR("DIAG summary: ", "Podsumowanie diag: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, LOG_TR("DIAG summary: ", "Podsumowanie diag: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_rx_path_.irq_fired,
-           (unsigned) this->diag_rx_path_.irq_start_t1, (unsigned) this->diag_rx_path_.irq_start_c1a, (unsigned) this->diag_rx_path_.irq_start_c1b,
-           (unsigned) this->diag_rx_path_.irq_start_c_other, (unsigned) this->diag_rx_path_.irq_start_s1, (unsigned) this->diag_rx_path_.irq_start_no_data,
            (unsigned) total, (unsigned) this->diag_ok_,
            (unsigned) this->diag_truncated_, (unsigned) this->diag_dropped_, (unsigned) crc_failed);
+  // The split of irq= by what each trigger started on: `dev` only since
+  // 2026-09-28 - it made the line too long to read, and rx_path.irq_start in
+  // the JSON carries the same numbers in every mode.
+  if (this->diag_verbose_) {
+    ESP_LOGI(TAG, "irq_start: t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u",
+             (unsigned) this->diag_rx_path_.irq_start_t1, (unsigned) this->diag_rx_path_.irq_start_c1a, (unsigned) this->diag_rx_path_.irq_start_c1b,
+             (unsigned) this->diag_rx_path_.irq_start_c_other, (unsigned) this->diag_rx_path_.irq_start_s1, (unsigned) this->diag_rx_path_.irq_start_no_data);
+  }
 
   if (std::strcmp(hint_code, "OK") == 0 || std::strcmp(hint_code, "GOOD") == 0) {
     ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
@@ -1408,13 +1416,19 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_15min_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, LOG_TR("DIAG 15min summary: ", "Podsumowanie diag 15min: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, LOG_TR("DIAG 15min summary: ", "Podsumowanie diag 15min: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_15m_rx_path_.irq_fired,
-           (unsigned) this->diag_15m_rx_path_.irq_start_t1, (unsigned) this->diag_15m_rx_path_.irq_start_c1a, (unsigned) this->diag_15m_rx_path_.irq_start_c1b,
-           (unsigned) this->diag_15m_rx_path_.irq_start_c_other, (unsigned) this->diag_15m_rx_path_.irq_start_s1, (unsigned) this->diag_15m_rx_path_.irq_start_no_data,
            (unsigned) total, (unsigned) this->diag_15m_ok_,
            (unsigned) this->diag_15m_truncated_, (unsigned) this->diag_15m_dropped_, (unsigned) crc_failed);
+  // The split of irq= by what each trigger started on: `dev` only since
+  // 2026-09-28 - it made the line too long to read, and rx_path.irq_start in
+  // the JSON carries the same numbers in every mode.
+  if (this->diag_verbose_) {
+    ESP_LOGI(TAG, "irq_start: t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u",
+             (unsigned) this->diag_15m_rx_path_.irq_start_t1, (unsigned) this->diag_15m_rx_path_.irq_start_c1a, (unsigned) this->diag_15m_rx_path_.irq_start_c1b,
+             (unsigned) this->diag_15m_rx_path_.irq_start_c_other, (unsigned) this->diag_15m_rx_path_.irq_start_s1, (unsigned) this->diag_15m_rx_path_.irq_start_no_data);
+  }
 
   if (std::strcmp(hint_code, "OK") == 0 || std::strcmp(hint_code, "GOOD") == 0) {
     ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));
@@ -1894,13 +1908,19 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
 
   const std::string summary_topic = this->diag_summary_60min_topic_();
   mqtt->publish(summary_topic, std::string(payload), this->diag_qos_, false);
-  ESP_LOGI(TAG, LOG_TR("DIAG 60min summary: ", "Podsumowanie diag 60min: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u (t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u) total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
+  ESP_LOGI(TAG, LOG_TR("DIAG 60min summary: ", "Podsumowanie diag 60min: ") "topic=%s interval=%us uptime_ms=%lu listen_mode=%s irq=%u total=%u ok=%u truncated=%u dropped=%u crc_failed=%u",
            summary_topic.c_str(), (unsigned) interval_s, (unsigned long) now_ms, listen_mode,
            (unsigned) this->diag_60min_rx_path_.irq_fired,
-           (unsigned) this->diag_60min_rx_path_.irq_start_t1, (unsigned) this->diag_60min_rx_path_.irq_start_c1a, (unsigned) this->diag_60min_rx_path_.irq_start_c1b,
-           (unsigned) this->diag_60min_rx_path_.irq_start_c_other, (unsigned) this->diag_60min_rx_path_.irq_start_s1, (unsigned) this->diag_60min_rx_path_.irq_start_no_data,
            (unsigned) total, (unsigned) this->diag_60min_ok_,
            (unsigned) this->diag_60min_truncated_, (unsigned) this->diag_60min_dropped_, (unsigned) crc_failed);
+  // The split of irq= by what each trigger started on: `dev` only since
+  // 2026-09-28 - it made the line too long to read, and rx_path.irq_start in
+  // the JSON carries the same numbers in every mode.
+  if (this->diag_verbose_) {
+    ESP_LOGI(TAG, "irq_start: t1=%u c1a=%u c1b=%u c_other=%u s1=%u no_data=%u",
+             (unsigned) this->diag_60min_rx_path_.irq_start_t1, (unsigned) this->diag_60min_rx_path_.irq_start_c1a, (unsigned) this->diag_60min_rx_path_.irq_start_c1b,
+             (unsigned) this->diag_60min_rx_path_.irq_start_c_other, (unsigned) this->diag_60min_rx_path_.irq_start_s1, (unsigned) this->diag_60min_rx_path_.irq_start_no_data);
+  }
 
   if (std::strcmp(hint_code, "OK") == 0 || std::strcmp(hint_code, "GOOD") == 0) {
     ESP_LOGI(TAG, "DIAG hint: %s | %s", hint_code, LOG_TR(hint_en, hint_pl));

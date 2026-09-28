@@ -7,8 +7,9 @@ BUSY i decyzje o restarcie RX pozostają bez zmian. Pozostałe sterowniki radiow
 nie zwracają diagnostyki czasu pracy.
 
 Co 60 sekund zadanie główne publikuje migawkę JSON (QoS 1, bez retained) na
-`<diagnostic_topic>/radio_runtime`, od `diagnostic_mode: low` w górę. Ta sama
-migawka trafia do logu **wyłącznie przy `diagnostic_mode: dev`**: zrzut
+`<diagnostic_topic>/radio_runtime`, **wyłącznie przy `diagnostic_mode: dev`**
+(do 28.09.2026 od `low` w górę). Ta sama migawka trafia do logu, również tylko
+przy `dev`: zrzut
 rejestrów i liczników raz na minutę to instrumentacja stanowiskowa, a na
 działającym węźle nie mówi nic, czego nie mówi podsumowanie.
 
@@ -54,7 +55,9 @@ w eksperymencie z tłumieniem.
 
 ## Ograniczony bufor FIFO i próbki odrzuceń
 
-Przy włączonej diagnostyce zbiorczej LR1121 publikuje dodatkowo wiadomości
+Przy `diagnostic_mode: dev` (do 28.09.2026 przy każdej diagnostyce zbiorczej)
+LR1121 publikuje dodatkowo wiadomości. Poniżej `dev` próbki FIFO nie są nawet
+pobierane, chyba że żąda ich `lr1121_verify_buffer`. Wiadomości
 z QoS 1 (bez retained — to były przyrządy stanowiskowe i broker nie powinien
 ich przechowywać):
 

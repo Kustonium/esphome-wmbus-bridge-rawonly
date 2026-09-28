@@ -216,7 +216,7 @@ Rozdziela też podpowiedź „brak ramek" na dwa stany:
 
 ### Na czym ruszyło każde wyzwolenie: `irq_start`
 
-`rx_path.irq_start` (oraz nawias po `irq=` w linii logu) dzieli `irq_fired`
+`rx_path.irq_start` (oraz, przy `diagnostic_mode: dev`, linia logu `irq_start:`) dzieli `irq_fired`
 według pierwszych bajtów, które radio oddało po sync wordzie, przed
 jakimkolwiek dekodowaniem. Sześć pól sumuje się do `irq_fired`:
 
