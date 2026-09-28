@@ -213,7 +213,7 @@ It also splits the "no frames" hint in two:
 | `NO_DATA` | no triggers at all - antenna, frequency or wiring |
 | `RX_NO_MATCH` | triggers but no frames - something IS transmitting; check `listen_mode`, `min_preamble_bits` and the meter's mode |
 | `SIGNAL_TOO_STRONG` | a frame in the window arrived above -20 dBm; the front end saturates - move the board a few metres away (the hint names the meter) |
-| `RX_READ_FAILURES` | at least 5 reads failed and more than decoded - frames start but never finish; interference near the board or a transmitter too close. These never reach a CRC check, so the CRC-based hints cannot report them |
+| `RX_READ_FAILURES` | at least 5 reads failed and more than decoded (on the SX1262, LR1121 and CC1101 including interrupts that delivered no bytes, `irq_start.no_data`) - frames start but never finish; interference near the board or a transmitter too close. These never reach a CRC check, so the CRC-based hints cannot report them |
 
 ### What each trigger started on: `irq_start`
 

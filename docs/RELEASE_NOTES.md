@@ -2,6 +2,13 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Fix: `RX_READ_FAILURES` also counts interrupts that deliver no bytes
+
+- **The hint added in 1.26 only counted reads that broke off inside the payload.** Reads that failed before the first bytes (`irq_start.no_data`) were left out, so a 15-minute window on the same Heltec V4-R8 - 614 of 640 interrupts delivering nothing, one frame decoded - was still reported as `OK`.
+- **They now count on the SX1262, LR1121 and CC1101.** Not on the SX1276: its preamble detector starts on noise by design, empty starts are normal there, and `SX1276_RX_NOISY` already reports the excess.
+
+---
+
 ## Diagnostics: say when the front end saturates or reads keep failing
 
 - **Two new summary hints, ahead of all the others.** Both cover failures that end in a failed read before any CRC check, which the existing `*_OVERLOAD_OR_MULTIPATH` hints could not see - so the summary used to report `GOOD` or `RX_NO_MATCH` while the board was losing almost everything.
