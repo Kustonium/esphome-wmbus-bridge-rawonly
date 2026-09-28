@@ -217,7 +217,7 @@ It also splits the "no frames" hint in two:
 
 ### What each trigger started on: `irq_start`
 
-`rx_path.irq_start` (and the bracket after `irq=` in the log line) splits
+`rx_path.irq_start` (and, at `diagnostic_mode: dev`, the `irq_start:` log line) splits
 `irq_fired` by the first bytes the radio delivered after the sync word, before
 any decoding. The six add up to `irq_fired`:
 

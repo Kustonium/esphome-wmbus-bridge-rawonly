@@ -2,6 +2,16 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Less diagnostics outside `diagnostic_mode: dev`
+
+- **Bench instruments no longer run in `low` and `normal`.** Those are the modes users are told to run; they keep the summary, the hints and the meter snapshot. Moved to `dev`:
+  - LR1121: the `radio_runtime`, `lr_pipeline`, `lr_fifo/*` and `lr_drop/*` topics, the raw-hex capture behind `lr_drop`, and the FIFO sampling itself - a 255-byte SPI read in the receive task every 5 s (kept when `lr1121_verify_buffer` is on);
+  - all radios: the log lines saying which register a frame's RSSI came from, and the register dump after the first short payload read (a WARN that looked like a fault);
+  - the `(t1=… c1a=… …)` split after `irq=` in the summary log lines, now a separate `irq_start:` line in `dev`. The numbers stay in the JSON (`rx_path.irq_start`) in every mode.
+- Nothing changes in reception, in the summary JSON or in the hints. Home Assistant sensors built on the summary keep working.
+
+---
+
 ## Fix: `stale_wakeups_cleared` counts prevented wakeups, not notifications
 
 - **The counter added in the previous release summed pending notifications.** Those collapse into a single wakeup, and an SX1276 leaves hundreds a minute - one per DIO edge during a frame - so a LilyGO on T1 reported 250-325 a minute while only a handful of false wakeups were actually prevented. It now adds one per re-arm that found anything pending, which makes it comparable between radios. Reception is unchanged.

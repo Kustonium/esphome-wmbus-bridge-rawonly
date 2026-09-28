@@ -6,8 +6,9 @@ Diagnostic-only change; modulation, IRQ masks, BUSY timeout policy and RX restar
 decisions are unchanged. Other radio drivers return no runtime diagnostic.
 
 Every 60 seconds the main task publishes a JSON snapshot (QoS 1, not retained) to
-`<diagnostic_topic>/radio_runtime`, from `diagnostic_mode: low` upward. The same
-snapshot is written to the log **only at `diagnostic_mode: dev`**: a register and
+`<diagnostic_topic>/radio_runtime`, **only at `diagnostic_mode: dev`** (until
+2026-09-28 from `low` upward). The same snapshot is written to the log, also
+only at `dev`: a register and
 counter dump once a minute is bench instrumentation, and on a working node it
 says nothing the summary does not.
 
@@ -46,7 +47,9 @@ This does not affect the T1 IRQ mask used in the attenuation experiment.
 
 ## Bounded FIFO and rejection samples
 
-With summary diagnostics enabled, LR1121 also publishes these QoS 1 messages
+At `diagnostic_mode: dev` (until 2026-09-28 with any summary diagnostics),
+LR1121 also publishes these QoS 1 messages. Below `dev` the FIFO samples are not
+even taken, unless `lr1121_verify_buffer` asks for them
 (not retained - they were bench instruments, and a broker should not keep them):
 
 - `<diagnostic_topic>/lr_pipeline`: cumulative main-task conversion counters,

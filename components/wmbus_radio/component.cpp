@@ -466,7 +466,11 @@ void Radio::loop() {
     // and on a working node it says nothing that the summary does not. It used
     // to print unconditionally, on every node, including ones with diagnostics
     // off entirely.
-    if (this->diag_publish_summary_) {
+    //
+    // 2026-09-28: the MQTT copy moved to `dev` as well. It is driver
+    // bookkeeping for bench work, and `low`/`normal` are what users are told
+    // to run - they should get the summary and the hint, not this.
+    if (this->diag_verbose_) {
       const auto diagnostic = this->radio->runtime_diag_json();
       if (!diagnostic.empty()) {
         if (this->diag_verbose_) ESP_LOGI(TAG, "Radio runtime: %s", diagnostic.c_str());
@@ -499,7 +503,7 @@ void Radio::loop() {
     }
     RadioTransceiver::RawRxSample raw_sample{};
     while (this->radio->take_raw_rx_sample(raw_sample)) {
-      if (!this->diag_publish_summary_ || this->diag_topic_.empty() || mqtt::global_mqtt_client == nullptr ||
+      if (!this->diag_verbose_ || this->diag_topic_.empty() || mqtt::global_mqtt_client == nullptr ||
           !mqtt::global_mqtt_client->is_connected()) continue;
       char hex[511];
       for (size_t i = 0; i < raw_sample.length; ++i)
@@ -549,6 +553,9 @@ void Radio::loop() {
     // receive path, and both can be waiting after a single busy stretch.
     RadioTransceiver::RssiDiag rssi_diag{};
     while (this->radio->take_rssi_diag(rssi_diag)) {
+      // Drained always, printed only in `dev` (2026-09-28): which register the
+      // RSSI came from is bench reading, not something a user acts on.
+      if (!this->diag_verbose_) continue;
       ESP_LOGI(TAG,
                LOG_TR("RSSI source: ", "Zrodlo RSSI: ") "%s (path=%s RssiSync=0x%02X RssiAvg=0x%02X inflight=%ddBm) -> %ddBm",
                rssi_diag.source, rssi_diag.path, (unsigned) rssi_diag.raw_sync,
@@ -835,7 +842,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   // The raw-hex capture inside convert_to_frame() is only ever read behind
   // diag_publish_raw_, so let the packet skip it when that's off.
   const bool lr_diagnostic = this->radio != nullptr && strcmp(this->radio->get_name(), "LR1121") == 0;
-  p->set_capture_raw_hex(this->diag_publish_raw_ || (lr_diagnostic && this->diag_publish_summary_ &&
+  p->set_capture_raw_hex(this->diag_publish_raw_ || (lr_diagnostic && this->diag_verbose_ &&
     (uint32_t) (loop_now_ms - this->lr_drop_sample_ms_) >= 5000));
   auto frame = p->convert_to_frame();
   if (lr_diagnostic) this->publish_lr_pipeline_diag_(p, frame.has_value());
@@ -1645,8 +1652,10 @@ void Radio::receive_frame() {
       // check another board or another day. Same convention the RX snapshots
       // already follow: report once per receive path, then go quiet.
       {
+        // `dev` only since 2026-09-28: a register dump in WARN on a user's node
+        // reads as a fault, and the counters already carry the event.
         static bool pld_dump_done = false;
-        if (!pld_dump_done) {
+        if (this->diag_verbose_ && !pld_dump_done) {
           pld_dump_done = true;
           ESP_LOGW(TAG, LOG_TR("payload read short: %s", "Urwany odczyt payloadu: %s"), detail);
           this->radio->dump_debug_status("payload_read_failed");
