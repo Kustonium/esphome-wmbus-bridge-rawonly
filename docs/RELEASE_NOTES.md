@@ -2,6 +2,15 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Diagnostics: say when the front end saturates or reads keep failing
+
+- **Two new summary hints, ahead of all the others.** Both cover failures that end in a failed read before any CRC check, which the existing `*_OVERLOAD_OR_MULTIPATH` hints could not see - so the summary used to report `GOOD` or `RX_NO_MATCH` while the board was losing almost everything.
+- **`SIGNAL_TOO_STRONG`** - a frame in the window arrived above -20 dBm. The hint names the meter and its RSSI and says to move the board a few metres away (about -30 to -60 dBm is ideal). Seen on the first Heltec V4-R8 in the field: an electricity meter at -10 dBm decoded once, then every following frame broke off after 10 bytes.
+- **`RX_READ_FAILURES`** - at least 5 failed reads in the window, and more than decoded frames. Frames start but never finish: interference near the board (power supplies, chargers, PCs, LED drivers) or a transmitter too close. With `long_gfsk_packets: true`, compare with `false`.
+- Each summary window (60 s, 15 min, 60 min) tracks its strongest frame for this, with the meter id when the frame decoded. Documented in `DIAGNOSTIC.md`.
+
+---
+
 ## Device log in one language: English by default, Polish with `log_language: pl`
 
 - **The device log no longer prints every message twice.** Lines used to read `DIAG summary / podsumowanie diag: ...`, with the Polish half between the English label and the data. A user building on an ESP32-C3 with a CC1101 pointed out that this makes the log harder to read for anyone who does not speak Polish.

@@ -211,6 +211,8 @@ Rozdziela też podpowiedź „brak ramek" na dwa stany:
 |---|---|
 | `NO_DATA` | zero wyzwoleń - antena, częstotliwość albo połączenia |
 | `RX_NO_MATCH` | wyzwolenia bez ramek - coś NADAJE; sprawdź `listen_mode`, `min_preamble_bits` i tryb licznika |
+| `SIGNAL_TOO_STRONG` | ramka w oknie przyszła powyżej -20 dBm; tor odbiorczy się przesterowuje - odsuń płytkę o kilka metrów (podpowiedź podaje licznik) |
+| `RX_READ_FAILURES` | co najmniej 5 nieudanych odczytów i więcej niż zdekodowanych ramek - ramki się zaczynają, ale nie kończą; zakłócenia przy płytce albo nadajnik za blisko. Nie dochodzą do sprawdzenia CRC, więc podpowiedzi oparte na CRC ich nie widzą |
 
 ### Na czym ruszyło każde wyzwolenie: `irq_start`
 

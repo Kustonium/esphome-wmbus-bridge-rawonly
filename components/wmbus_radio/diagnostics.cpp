@@ -201,6 +201,55 @@ static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
   ESP_LOGI("wmbus", LOG_TR("SUGGESTION [%s]: %s", "SUGESTIA [%s]: %s"), code, LOG_TR(hint_en, hint_pl));
 }
 
+void Radio::note_strongest_(int rssi_dbm, const char *id) {
+  if (rssi_dbm <= -126) return;  // unmeasured sentinel
+  for (StrongestFrame *sf : {&this->diag_strongest_, &this->diag_15m_strongest_, &this->diag_60min_strongest_}) {
+    if (rssi_dbm > sf->rssi) {
+      sf->rssi = (int16_t) rssi_dbm;
+      strlcpy(sf->id, id != nullptr ? id : "", sizeof(sf->id));
+    }
+  }
+}
+
+// Two front-end failures that the CRC-based hints above cannot see, because the
+// frames never get as far as a CRC check. Measured 2026-09-26/28 on the first
+// Heltec V4-R8 in the field: an electricity meter at -10 dBm and, later, a
+// minute with 43 triggers, 40 failed reads and zero frames were both reported
+// as GOOD / RX_NO_MATCH.
+//
+// -20 dBm: boards with an LNA in front of the radio (Heltec V4, V4-R8) read
+// about 10 dB high, so this is still a very strong signal there, not a quirk of
+// the scale. It takes precedence: it names the meter to move away from.
+bool Radio::front_end_hint_(const RxPathCounters &rp, const StrongestFrame &sf, uint32_t ok,
+                            const char **code, char *en, size_t en_n, char *pl, size_t pl_n) const {
+  if (sf.rssi > -20) {
+    const char *id = sf.id[0] != '\0' ? sf.id : "?";
+    *code = "SIGNAL_TOO_STRONG";
+    snprintf(en, en_n,
+             "a meter reaches the receiver at %d dBm (meter %s); the front end saturates and frames from this and "
+             "other meters get lost. Move the board a few metres away - around -30 to -60 dBm is ideal",
+             (int) sf.rssi, id);
+    snprintf(pl, pl_n,
+             "licznik dociera do odbiornika z %d dBm (licznik %s); tor odbiorczy się przesterowuje i giną ramki "
+             "tego i innych liczników. Odsuń płytkę o kilka metrów - najlepiej około -30 do -60 dBm",
+             (int) sf.rssi, id);
+    return true;
+  }
+  if (rp.payload_read_failed >= 5 && rp.payload_read_failed > ok) {
+    *code = "RX_READ_FAILURES";
+    snprintf(en, en_n, "%s",
+             "the receiver starts frames but cannot finish reading them; likely interference near the board "
+             "(power supplies, chargers, PCs, LED drivers) or a transmitter too close. With "
+             "long_gfsk_packets: true, compare with false");
+    snprintf(pl, pl_n, "%s",
+             "odbiornik zaczyna ramki, ale nie kończy ich odczytu; prawdopodobnie zakłócenia przy płytce "
+             "(zasilacze, ładowarki, komputer, sterowniki LED) albo nadajnik za blisko. Przy "
+             "long_gfsk_packets: true porównaj z false");
+    return true;
+  }
+  return false;
+}
+
 void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   if (!this->diag_publish_suggestion_) return;
   if (this->diag_topic_.empty()) return;
@@ -647,6 +696,14 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
     }
   }
 
+  char fe_en[224];
+  char fe_pl[224];
+  if (this->front_end_hint_(this->diag_rx_path_, this->diag_strongest_, this->diag_ok_, &hint_code,
+                            fe_en, sizeof(fe_en), fe_pl, sizeof(fe_pl))) {
+    hint_en = fe_en;
+    hint_pl = fe_pl;
+  }
+
   const int payload_len = snprintf(payload, sizeof(payload),
            "{"
            "\"event\":\"summary\"," 
@@ -911,6 +968,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   this->diag_t1_symbols_total_ = 0;
   this->diag_t1_symbols_invalid_ = 0;
   this->diag_rx_path_ = {};
+  this->diag_strongest_ = {};
 }
 
 
@@ -1122,6 +1180,14 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
       hint_en = "frames arrive but none decode; check that listen_mode matches what the meters transmit, otherwise the signal is too weak or colliding";
       hint_pl = "ramki docierają, ale żadna się nie dekoduje; sprawdź czy listen_mode pasuje do tego, co nadają liczniki, w przeciwnym razie sygnał jest za słaby lub kolidujący";
     }
+  }
+
+  char fe_en[224];
+  char fe_pl[224];
+  if (this->front_end_hint_(this->diag_15m_rx_path_, this->diag_15m_strongest_, this->diag_15m_ok_, &hint_code,
+                            fe_en, sizeof(fe_en), fe_pl, sizeof(fe_pl))) {
+    hint_en = fe_en;
+    hint_pl = fe_pl;
   }
 
   const int payload_len = snprintf(payload, sizeof(payload),
@@ -1386,6 +1452,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   this->diag_15m_t1_symbols_total_ = 0;
   this->diag_15m_t1_symbols_invalid_ = 0;
   this->diag_15m_rx_path_ = {};
+  this->diag_15m_strongest_ = {};
 }
 
 
@@ -1597,6 +1664,14 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
       hint_en = "frames arrive but none decode; check that listen_mode matches what the meters transmit, otherwise the signal is too weak or colliding";
       hint_pl = "ramki docierają, ale żadna się nie dekoduje; sprawdź czy listen_mode pasuje do tego, co nadają liczniki, w przeciwnym razie sygnał jest za słaby lub kolidujący";
     }
+  }
+
+  char fe_en[224];
+  char fe_pl[224];
+  if (this->front_end_hint_(this->diag_60min_rx_path_, this->diag_60min_strongest_, this->diag_60min_ok_, &hint_code,
+                            fe_en, sizeof(fe_en), fe_pl, sizeof(fe_pl))) {
+    hint_en = fe_en;
+    hint_pl = fe_pl;
   }
 
   const int payload_len = snprintf(payload, sizeof(payload),
@@ -1871,6 +1946,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   this->diag_60min_t1_symbols_total_ = 0;
   this->diag_60min_t1_symbols_invalid_ = 0;
   this->diag_60min_rx_path_ = {};
+  this->diag_60min_strongest_ = {};
 }
 
 }  // namespace wmbus_radio
