@@ -157,6 +157,11 @@ wmbus_radio:
 
   # dio2_rf_switch: true  # default: true
   has_tcxo: true
+  # EN: How long the chip waits for the TCXO to settle each time it powers it
+  #     through DIO3, in ms (1-20). Heltec's own driver uses 5 on the V4.
+  # PL: Ile ms uklad czeka na ustabilizowanie TCXO po kazdym zasileniu go przez
+  #     DIO3 (1-20). Wlasny sterownik Helteca uzywa 5 na V4.
+  # sx1262_tcxo_startup_ms: 5  # default: 1
   # EN: A TCXO board sets XOSC_START_ERR on every power-up as a matter of course:
   #     the chip tries to start its own crystal before DIO3 has been told to
   #     power the TCXO, and DIO3 is configured after reset. Clearing the flag

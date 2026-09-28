@@ -8,6 +8,7 @@
 #include "esphome/core/hal.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace esphome {
 namespace wmbus_radio {
@@ -95,10 +96,42 @@ static constexpr uint8_t GFSK_WHITENING_OFF = 0x00;
 // bit5 ADC bulk P, bit6 image. 0x7F therefore recalibrates every block.
 static constexpr uint8_t CALIBRATE_ALL = 0x7F;
 
-// Device-error bits (GetDeviceErrors), same datasheet. Only the two that say
-// "the reference or the PLL never came up" are named; the rest are TX-side.
-static constexpr uint16_t DEV_ERR_PLL_CALIB = 0x0010;
+// Device-error bits (GetDeviceErrors), SX1261/2 Rev 2.2 table 13-86. Until
+// 2026-09-28 PLL_CALIB was declared as 0x0010, which is IMG_CALIB: an image
+// calibration failure was reported as a PLL one, and a real PLL calibration
+// failure raised no alarm at all.
+static constexpr uint16_t DEV_ERR_RC64K_CALIB = 0x0001;
+static constexpr uint16_t DEV_ERR_RC13M_CALIB = 0x0002;
+static constexpr uint16_t DEV_ERR_PLL_CALIB = 0x0004;
+static constexpr uint16_t DEV_ERR_ADC_CALIB = 0x0008;
+static constexpr uint16_t DEV_ERR_IMG_CALIB = 0x0010;
 static constexpr uint16_t DEV_ERR_XOSC_START = 0x0020;
+static constexpr uint16_t DEV_ERR_PLL_LOCK = 0x0040;
+// Errors that degrade reception: any calibration, the reference, the PLL lock.
+// PA_RAMP (0x0100) is TX-only and this bridge never transmits.
+static constexpr uint16_t DEV_ERR_RX_RELEVANT = DEV_ERR_RC64K_CALIB | DEV_ERR_RC13M_CALIB | DEV_ERR_PLL_CALIB |
+                                                DEV_ERR_ADC_CALIB | DEV_ERR_IMG_CALIB | DEV_ERR_XOSC_START |
+                                                DEV_ERR_PLL_LOCK;
+
+// Names of the set RX-relevant bits, space-separated, for the error logs.
+static void dev_err_names_(uint16_t e, char *out, size_t n) {
+  out[0] = 0;
+  if (e & DEV_ERR_RC64K_CALIB) strlcat(out, " RC64K_CALIB_ERR", n);
+  if (e & DEV_ERR_RC13M_CALIB) strlcat(out, " RC13M_CALIB_ERR", n);
+  if (e & DEV_ERR_PLL_CALIB) strlcat(out, " PLL_CALIB_ERR", n);
+  if (e & DEV_ERR_ADC_CALIB) strlcat(out, " ADC_CALIB_ERR", n);
+  if (e & DEV_ERR_IMG_CALIB) strlcat(out, " IMG_CALIB_ERR", n);
+  if (e & DEV_ERR_XOSC_START) strlcat(out, " XOSC_START_ERR", n);
+  if (e & DEV_ERR_PLL_LOCK) strlcat(out, " PLL_LOCK_ERR", n);
+}
+
+// Adaptive long-stream hold. It used to be 45 s, sized for meters sending every
+// ~30 s; an electricity meter sending its 353-byte frame every 60 s (Apator
+// Otus, first Heltec V4-R8 in the field, 2026-09) outlived every hold, so each
+// of its frames could arrive in the 255-byte FIFO path and be truncated. 150 s
+// covers meters up to two minutes apart; the hold is renewed by every long
+// capture, so a steady long-frame meter keeps it alive indefinitely.
+static constexpr uint32_t LONG_STREAM_HOLD_MS = 150000UL;
 
 // ---------------------------------------------------------------------------
 // IRQ flag bits (GetIrqStatus register)
@@ -1119,6 +1152,8 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
 
   // Stop RX and clear IRQs.
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_RC});
+  this->rx_stopped_by_capture_ = true;
+  this->last_capture_exit_ = exit_reason;
 
   // The device-error snapshot used to live here, gated on the first captured
   // frame. It has moved to setup(), where "on boot" is actually true: gating it
@@ -1140,8 +1175,9 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
   // long-packet meter, causing the next frame to fall back to the FIFO path
   // (truncated) and re-trigger from scratch.
   if (this->long_gfsk_packets_ && this->rx_len_ >= 250) {
-    this->long_stream_hold_until_ms_ = millis() + 45000UL;
-    ESP_LOGD(TAG, "Long RX captured %u bytes (hold renewed for 45 s)", (unsigned) this->rx_len_);
+    this->long_stream_hold_until_ms_ = millis() + LONG_STREAM_HOLD_MS;
+    ESP_LOGD(TAG, "Long RX captured %u bytes (hold renewed for %u s)", (unsigned) this->rx_len_,
+             (unsigned) (LONG_STREAM_HOLD_MS / 1000U));
   } else {
     ESP_LOGD(TAG, "Long RX captured %u bytes", (unsigned) this->rx_len_);
   }
@@ -1180,8 +1216,13 @@ void SX1262::setup() {
   // POWER -> CSD -> CTX with a 1 ms settle; we mirror that here.
   //
   //   fem_ctrl -> POWER/VFEM (HIGH, enable supply)
-  //   fem_en   -> CSD        (HIGH, RX select)
-  //   fem_pa   -> CTX        (LOW,  TX disabled -> RX path)
+  //   fem_en   -> CSD        (HIGH, FEM on)
+  //   fem_pa   -> LOW. What it is depends on the board:
+  //                 V4.2 / GC1109:    GPIO46 = CPS; CTX comes from DIO2.
+  //                 V4-R8 / KCT8103L: GPIO5 = CTX; DIO2 drives CPS.
+  //               Either way LOW gives "receive with LNA". On the R8, CTX HIGH
+  //               is RX bypass (about 21 dB less gain), which `inverted: true`
+  //               selects there; the V4.2 has no RX bypass at all.
   if (this->fem_ctrl_pin_ != nullptr) {
     this->fem_ctrl_pin_->setup();
     this->fem_ctrl_pin_->digital_write(true);
@@ -1269,9 +1310,9 @@ void SX1262::setup() {
   // TCXO only if enabled.
   // SetDIO3AsTcxoCtrl(tcxoVoltage, timeout[23:0]) per SX1261/2 datasheet:
   // tcxo_voltage_ (default 3.0V, see SX1262TcxoVoltage) selects DIO3's
-  // regulated output, and the 24-bit timeout counts in 15.625 us steps, so
-  // 0x000040 = 64 steps = 1 ms of TCXO start-up time before the chip
-  // considers the reference stable.
+  // regulated output, and the 24-bit timeout counts in 15.625 us steps, i.e.
+  // 64 steps per millisecond. tcxo_startup_ms_ (default 1 ms, Heltec uses 5)
+  // is how long the chip waits for the reference each time it powers the TCXO.
   //
   // The recalibration below is not optional and not tuning. At power-on the
   // chip calibrates itself against whatever reference it has, which at that
@@ -1287,8 +1328,11 @@ void SX1262::setup() {
   // distinguishes that from a bad antenna, which is why the device-error
   // readback further down was added together with this call.
   if (this->has_tcxo_) {
-    this->cmd_write_(CMD_SET_DIO3_AS_TCXO_CTRL, {(uint8_t) this->tcxo_voltage_, 0x00, 0x00, 0x40});
-    delay(5);
+    const uint32_t tcxo_ticks = (uint32_t) this->tcxo_startup_ms_ * 64U;
+    this->cmd_write_(CMD_SET_DIO3_AS_TCXO_CTRL,
+                     {(uint8_t) this->tcxo_voltage_, (uint8_t) ((tcxo_ticks >> 16) & 0xFF),
+                      (uint8_t) ((tcxo_ticks >> 8) & 0xFF), (uint8_t) (tcxo_ticks & 0xFF)});
+    delay(this->tcxo_startup_ms_ + 4);
     this->cmd_write_(CMD_CALIBRATE, {CALIBRATE_ALL});
     // Calibrate holds BUSY for up to 3.5 ms per the datasheet. cmd_write_ already
     // waits on the pin; the delay covers boards that leave BUSY unconnected.
@@ -1449,14 +1493,15 @@ void SX1262::setup() {
     uint8_t de[2]{};
     this->cmd_read_(CMD_GET_DEVICE_ERRORS, {}, de, sizeof(de));
     const uint16_t errors = u16be_(de);
-    if (errors & (DEV_ERR_XOSC_START | DEV_ERR_PLL_CALIB)) {
+    if (errors & DEV_ERR_RX_RELEVANT) {
+      char names[128];
+      dev_err_names_(errors, names, sizeof(names));
       ESP_LOGE(TAG,
-               LOG_TR("Device errors after setup: 0x%04X%s%s. "
-                      "Reference or PLL did not come up - receive sensitivity is degraded.",
-                      "Bledy ukladu po inicjalizacji: 0x%04X%s%s. "
-                      "Wzorzec lub PLL nie wystartowal - czulosc odbioru jest obnizona."),
-               errors, (errors & DEV_ERR_XOSC_START) ? " XOSC_START_ERR" : "",
-               (errors & DEV_ERR_PLL_CALIB) ? " PLL_CALIB_ERR" : "");
+               LOG_TR("Device errors after setup: 0x%04X%s. "
+                      "Calibration, reference or PLL did not come up - receive sensitivity is degraded.",
+                      "Bledy ukladu po inicjalizacji: 0x%04X%s. "
+                      "Kalibracja, wzorzec lub PLL nie wystartowaly - czulosc odbioru jest obnizona."),
+               errors, names);
     } else {
       ESP_LOGI(TAG, LOG_TR("Device errors after setup: 0x%04X", "Bledy ukladu po inicjalizacji: 0x%04X"), errors);
     }
@@ -1538,17 +1583,23 @@ void SX1262::dump_debug_status(const char *reason) {
            reason != nullptr ? reason : "?",
            (irq & IRQ_SYNC_WORD_VALID) ? "yes" : "no", in_rx ? "yes" : "NO");
 
-  if (!in_rx) {
+  if (!in_rx && this->rx_stopped_by_capture_) {
+    // capture_rx_stream_() always ends with SetStandby(RC), so standby here is
+    // the driver's own doing, not the receiver dropping out.
+    ESP_LOGI(TAG, "DEBUG [%s]: standby set by the stream capture itself (exit=%s), not a receiver fault",
+             reason != nullptr ? reason : "?", this->last_capture_exit_);
+  } else if (!in_rx) {
     ESP_LOGW(TAG,
              LOG_TR("SX1262 is not in RX (mode=%s). Nothing can be received in this state.",
                     "SX1262 nie jest w trybie RX (mode=%s). W tym stanie nic nie zostanie odebrane."),
              sx126x_chip_mode_name_(status));
   }
-  if (errors & (DEV_ERR_XOSC_START | DEV_ERR_PLL_CALIB)) {
-    ESP_LOGE(TAG, LOG_TR("SX1262 device errors 0x%04X%s%s - receive sensitivity is degraded.",
-                         "Bledy ukladu SX1262 0x%04X%s%s - czulosc odbioru jest obnizona."),
-             errors, (errors & DEV_ERR_XOSC_START) ? " XOSC_START_ERR" : "",
-             (errors & DEV_ERR_PLL_CALIB) ? " PLL_CALIB_ERR" : "");
+  if (errors & DEV_ERR_RX_RELEVANT) {
+    char names[128];
+    dev_err_names_(errors, names, sizeof(names));
+    ESP_LOGE(TAG, LOG_TR("SX1262 device errors 0x%04X%s - receive sensitivity is degraded.",
+                         "Bledy ukladu SX1262 0x%04X%s - czulosc odbioru jest obnizona."),
+             errors, names);
   }
 }
 
@@ -1653,12 +1704,21 @@ void SX1262::restart_rx() {
   this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
   this->cmd_write_(CMD_SET_STANDBY, {STANDBY_XOSC});
 
+  // Reset the packet-end register before every arm, as the S1 branch above
+  // already does (AN1200.53 initialises it before SetRx). The stream capture
+  // moves it along behind the write pointer; after an interrupted capture it
+  // was seen left at 0x0A (dump 2026-09-28, R8) next to reads that broke off
+  // after exactly 10 bytes. SetRx is documented to reload it in fixed-length
+  // mode, so this may be redundant - but it is cheap and removes one unknown.
+  this->write_register_(REG_RXTX_PAYLOAD_LEN, {0xFF});
+
   // Adaptive long-packet mode may switch IRQ routing between fast RX_DONE-only
   // and long-stream SYNC_WORD_VALID+RX_DONE. Re-apply it each time RX is armed.
   this->configure_irq_params_();
 
   // RX continuous
   this->cmd_write_(CMD_SET_RX, {0xFF, 0xFF, 0xFF});
+  this->rx_stopped_by_capture_ = false;
 
   this->rx_loaded_ = false;
   this->rx_idx_ = 0;
@@ -1701,12 +1761,12 @@ optional<uint8_t> SX1262::read() {
         return {};
 
       if (this->long_gfsk_packets_ && this->rx_len_ >= 250) {
-       // Hold must exceed the meter TX interval so the next transmission lands inside
-       // the streaming window. Typical fast T1 meters transmit every ~30s; 45s gives margin.
-	   this->long_stream_hold_until_ms_ = millis() + 45000UL;  // 45 seconds
+        // Hold must exceed the meter TX interval so the next transmission lands
+        // inside the streaming window - see LONG_STREAM_HOLD_MS.
+        this->long_stream_hold_until_ms_ = millis() + LONG_STREAM_HOLD_MS;
         ESP_LOGW(TAG,
-                 "SX1262 long-frame edge detected (payload_len=%u) -> enabling adaptive long-stream hold for 45 s",
-                 (unsigned) this->rx_len_);
+                 "SX1262 long-frame edge detected (payload_len=%u) -> enabling adaptive long-stream hold for %u s",
+                 (unsigned) this->rx_len_, (unsigned) (LONG_STREAM_HOLD_MS / 1000U));
       }
     }
   }

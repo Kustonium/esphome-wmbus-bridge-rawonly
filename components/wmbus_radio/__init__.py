@@ -141,6 +141,9 @@ SX1262_PREAMBLE_DETECTORS = {
 }
 
 CONF_SX1262_RX_BANDWIDTH = "sx1262_rx_bandwidth"
+# How long the SX1262 waits for its TCXO after powering it through DIO3.
+# Fixed at 1 ms until 2026-09-28; Heltec's own driver uses 5 ms on the V4.
+CONF_SX1262_TCXO_STARTUP_MS = "sx1262_tcxo_startup_ms"
 SX1262_T1_RX_BANDWIDTHS = {
     "312khz": "T1_BW_312",
     "234khz": "T1_BW_234",
@@ -636,6 +639,7 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_SX1262_RX_BANDWIDTH, default="312khz"): cv.one_of(
                 *SX1262_T1_RX_BANDWIDTHS, lower=True
             ),
+            cv.Optional(CONF_SX1262_TCXO_STARTUP_MS, default=1): cv.int_range(min=1, max=20),
 
             # Optional log highlighting for selected meter IDs
             cv.Optional(CONF_HIGHLIGHT_METERS, default=[]): cv.ensure_list(_validate_meter_id),
@@ -724,7 +728,7 @@ _REPORT_CORE = (CONF_RADIO_TYPE, CONF_LISTEN_MODE, CONF_LISTEN_MODE_FILTER_AFTER
 _REPORT_RADIO = {
     "SX1262": (CONF_HAS_TCXO, CONF_TCXO_VOLTAGE, CONF_DIO2_RF_SWITCH, CONF_RF_SWITCH, CONF_RX_GAIN,
                CONF_LONG_GFSK_PACKETS, CONF_CLEAR_DEVICE_ERRORS_ON_BOOT,
-               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH,
+               CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH, CONF_SX1262_TCXO_STARTUP_MS,
                CONF_MIN_PREAMBLE_BITS),
     "SX1276": (CONF_SX1276_BUSY_ETHER_MODE, CONF_MIN_PREAMBLE_BITS,
                CONF_SX1276_PREAMBLE_TOLERANCE),
@@ -1027,6 +1031,7 @@ async def to_code(config):
         cg.add(radio_var.set_tcxo_voltage(
             getattr(SX1262TcxoVoltage, SX1262_TCXO_VOLTAGES[config[CONF_TCXO_VOLTAGE]])
         ))
+        cg.add(radio_var.set_tcxo_startup_ms(config[CONF_SX1262_TCXO_STARTUP_MS]))
 
         SX1262RxGain = radio_ns.enum("SX1262RxGain")
         gain = config.get(CONF_RX_GAIN, "boosted")

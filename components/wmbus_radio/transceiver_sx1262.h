@@ -46,10 +46,11 @@ enum SX1262T1RxBandwidth : uint8_t {
 };
 
 // Datasheet (SX1261/2 Rev 2.2, section 13.3.6): SetDIO3AsTCXOCtrl tcxoVoltage
-// byte. This value was hardcoded to 3.0V until 2026-08-26 - fine for the
-// boards this project had (Heltec V4, XIAO both take a TCXO-less crystal
-// path, so has_tcxo is false there and the value was never applied). It
-// stopped being fine the moment a board showed up whose TCXO wants 1.8V
+// byte. This value was hardcoded to 3.0V until 2026-08-26. Correction
+// 2026-09-28: the Heltec V4.2 and V4-R8 schematics both show a 32 MHz TCXO
+// powered from DIO3 (the examples run has_tcxo: true), and Heltec's own
+// driver sets it to 1.8V with a 5 ms start-up - so 3.0V was applied to them
+// all along, not skipped. It became visibly wrong when a board showed up whose TCXO wants 1.8V
 // (LilyGO T-Beam v1.2, per Meshtastic's own variant.h and confirmed against
 // this datasheet table): DIO3 is a REGULATED supply out of the SX1262 itself,
 // so feeding a 1.8V-rated TCXO a 3.0V rail is a 67% overvoltage on real
@@ -83,6 +84,10 @@ class SX1262 : public RadioTransceiver {
   void set_dio2_rf_switch(bool v) { this->dio2_rf_switch_ = v; }
   void set_has_tcxo(bool v) { this->has_tcxo_ = v; }
   void set_tcxo_voltage(SX1262TcxoVoltage v) { this->tcxo_voltage_ = v; }
+  // Start-up time the chip waits for the TCXO after powering it through DIO3
+  // (SetDIO3AsTcxoCtrl timeout). 1 ms was the fixed value until 2026-09-28;
+  // Heltec's driver uses 5 ms for the V4 boards.
+  void set_tcxo_startup_ms(uint8_t ms) { this->tcxo_startup_ms_ = ms; }
 
   // Enable Semtech AN1200.53 long GFSK RX path.
   // This bypasses the 255-byte internal data-buffer limitation by streaming
@@ -102,6 +107,9 @@ class SX1262 : public RadioTransceiver {
   }
 
   // Optional Heltec V4 front-end (FEM/LNA/PA). If configured, we force RX path.
+  // The third pin is NOT the same FEM signal on both boards: on the V4.2
+  // (GC1109) GPIO46 is CPS and CTX comes from DIO2; on the V4-R8 (KCT8103L)
+  // GPIO5 is CTX and DIO2 drives CPS. Held low, both give "receive with LNA".
   void set_fem_ctrl_pin(InternalGPIOPin *pin) { this->fem_ctrl_pin_ = pin; }
   void set_fem_en_pin(InternalGPIOPin *pin) { this->fem_en_pin_ = pin; }
   void set_fem_pa_pin(InternalGPIOPin *pin) { this->fem_pa_pin_ = pin; }
@@ -195,6 +203,12 @@ class SX1262 : public RadioTransceiver {
   SX1262T1RxBandwidth t1_rx_bandwidth_{T1_BW_312};
   SX1262PreambleDetector preamble_detector_{PREAMBLE_DETECT_16};
   SX1262TcxoVoltage tcxo_voltage_{SX1262_TCXO_3_0V};
+  uint8_t tcxo_startup_ms_{1};
+  // Set when capture_rx_stream_() ends RX itself (it always sends SetStandby),
+  // cleared when restart_rx() arms again. Lets the failed-read dump tell a
+  // standby the driver chose from a receiver that dropped out on its own.
+  bool rx_stopped_by_capture_{false};
+  const char *last_capture_exit_{"none"};
   bool long_gfsk_packets_{false};
   bool clear_device_errors_on_boot_{false};
 

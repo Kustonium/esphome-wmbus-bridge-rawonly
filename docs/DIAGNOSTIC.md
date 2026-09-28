@@ -236,6 +236,17 @@ The sync word alone cannot tell T1 from C1: both share `0x543D`. So a
 frames is hearing C1 and losing it downstream. In `listen_mode: t1` the reverse
 holds: `c1a`/`c1b` triggers mean a C1 meter is in range.
 
+### Stale wakeups: `stale_wakeups_cleared`
+
+`rx_path.stale_wakeups_cleared` counts interrupt notifications that were still
+pending when the receiver was about to be armed again - left over from the
+previous arm, whose data is already gone. They are discarded before arming.
+Before 2026-09-28 they were not: the next wait returned at once, counted an
+`irq_fired` and read an empty FIFO, so they showed up as `irq_start.no_data`.
+They are **not** part of `irq_fired`. An occasional one is normal; a steady
+stream next to many `no_data` means interrupts keep arriving after the frame
+was already handled.
+
 ## Legacy detailed options
 
 These still compile for compatibility, but are deprecated/advanced:

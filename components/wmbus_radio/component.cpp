@@ -1305,6 +1305,14 @@ void Radio::receive_frame() {
   uint32_t waited = 0;
   bool got_irq = false;
   while (waited < total_wait_ms) {
+    // Drop notifications left by the previous arm before arming again - see
+    // RxPathCounters::stale_wakeups_cleared.
+    const uint32_t stale = ulTaskNotifyTake(pdTRUE, 0);
+    if (stale) {
+      this->diag_rx_path_.stale_wakeups_cleared += stale;
+      this->diag_15m_rx_path_.stale_wakeups_cleared += stale;
+      this->diag_60min_rx_path_.stale_wakeups_cleared += stale;
+    }
     this->radio->restart_rx();
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(hop_ms))) {
       got_irq = true;

@@ -778,6 +778,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            "\"rx_path\":{"
              "\"irq_fired\":%u,"
              "\"irq_start\":{\"t1\":%u,\"c1a\":%u,\"c1b\":%u,\"c_other\":%u,\"s1\":%u,\"no_data\":%u},"
+             "\"stale_wakeups_cleared\":%u,"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -885,6 +886,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
            (unsigned) this->diag_rx_path_.irq_start_c_other,
            (unsigned) this->diag_rx_path_.irq_start_s1,
            (unsigned) this->diag_rx_path_.irq_start_no_data,
+           (unsigned) this->diag_rx_path_.stale_wakeups_cleared,
            (unsigned) this->diag_rx_path_.irq_timeout,
            (unsigned) this->diag_rx_path_.preamble_read_failed,
            (unsigned) this->diag_rx_path_.preamble_retry_recovered,
@@ -1262,6 +1264,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            "\"rx_path\":{"
              "\"irq_fired\":%u,"
              "\"irq_start\":{\"t1\":%u,\"c1a\":%u,\"c1b\":%u,\"c_other\":%u,\"s1\":%u,\"no_data\":%u},"
+             "\"stale_wakeups_cleared\":%u,"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -1363,6 +1366,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_15m_rx_path_.irq_start_c_other,
            (unsigned) this->diag_15m_rx_path_.irq_start_s1,
            (unsigned) this->diag_15m_rx_path_.irq_start_no_data,
+           (unsigned) this->diag_15m_rx_path_.stale_wakeups_cleared,
            (unsigned) this->diag_15m_rx_path_.irq_timeout,
            (unsigned) this->diag_15m_rx_path_.preamble_read_failed,
            (unsigned) this->diag_15m_rx_path_.preamble_retry_recovered,
@@ -1746,6 +1750,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            "\"rx_path\":{"
              "\"irq_fired\":%u,"
              "\"irq_start\":{\"t1\":%u,\"c1a\":%u,\"c1b\":%u,\"c_other\":%u,\"s1\":%u,\"no_data\":%u},"
+             "\"stale_wakeups_cleared\":%u,"
              "\"irq_timeout\":%u,"
              "\"preamble_read_failed\":%u,"
              "\"preamble_retry_recovered\":%u,"
@@ -1847,6 +1852,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
            (unsigned) this->diag_60min_rx_path_.irq_start_c_other,
            (unsigned) this->diag_60min_rx_path_.irq_start_s1,
            (unsigned) this->diag_60min_rx_path_.irq_start_no_data,
+           (unsigned) this->diag_60min_rx_path_.stale_wakeups_cleared,
            (unsigned) this->diag_60min_rx_path_.irq_timeout,
            (unsigned) this->diag_60min_rx_path_.preamble_read_failed,
            (unsigned) this->diag_60min_rx_path_.preamble_retry_recovered,

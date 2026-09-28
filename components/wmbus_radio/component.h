@@ -633,6 +633,12 @@ protected:
     uint32_t irq_start_c_other{0};
     uint32_t irq_start_s1{0};
     uint32_t irq_start_no_data{0};
+    // Task notifications still pending when the receiver was about to be
+    // re-armed: left over from an interrupt of the previous arm, whose data is
+    // already gone. They are cleared before arming; without that, the next
+    // wait returned at once, counted an irq_fired and read an empty FIFO
+    // (seen as irq_start.no_data). NOT part of the irq_fired sum.
+    uint32_t stale_wakeups_cleared{0};
     uint32_t irq_timeout{0};
     uint32_t preamble_read_failed{0};
     uint32_t preamble_retry_recovered{0};
