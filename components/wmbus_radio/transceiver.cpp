@@ -121,7 +121,7 @@ void RadioTransceiver::dump_config() {
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                        : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                        : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only"
-                       : "T1+C1 (both, 3:1 bias)";
+                       : "T1+C1 (both)";
   ESP_LOGCONFIG(TAG, "  Listen mode: %s", mode_str);
 }
 } // namespace wmbus_radio

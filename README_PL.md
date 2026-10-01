@@ -38,6 +38,11 @@ licznik -> SX1262 / SX1276 / CC1101 / LR1121 -> ESPHome wmbus_radio -> MQTT RAW 
 
 Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na SX1262 i SX1276, z eksperymentalną obsługą CC1101 i LR1121.
 
+> 🚀 **Masz kilka liczników i chcesz je w Home Assistant?** Zacznij od
+> [**Szybkiego startu — liczniki w HA w 15 minut**](docs/QUICKSTART_PL.md): broker, dodatek,
+> gotowy YAML płytki i dodanie liczników kliknięciem. Reszta tego README jest dla tych, którzy
+> chcą wiedzieć więcej.
+
 > ✅ **Zweryfikowano na ESPHome 2026.7.0** — czyste kompilacje na wszystkich trzech płytkach testowych w CI.
 
 ## Czym jest ten projekt

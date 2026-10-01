@@ -10,9 +10,9 @@ radia: `CC1101`, `SX1276`, `SX1262` i `LR1121`.
 - **Dom / kilka liczników / spokojny eter / głównie wolne T1** → `SX1276` zwykle wystarczy.
 - **Blok / dużo liczników / częste pakiety / większe pakiety** → wybierz `SX1262`.
 - **Liczniki S1 na granicy słyszalności** → `SX1276`. Patrz [S1 to osobne pytanie](#s1-to-osobne-pytanie).
-- **Liczniki C1** → `SX1276`. `SX1262` i `LR1121` słyszą tylko nieliczne nadajniki C1. Patrz [C1 też jest osobnym pytaniem](#c1-też-jest-osobnym-pytaniem).
-- **Mieszane T1 + C1 na jednym urządzeniu** → działa, ale kosztuje skuteczność odbioru.
-- **Najlepszy układ dla środowiska mieszanego** → dwa osobne urządzenia: `T1-only` i `C1-only`.
+- **Liczniki C1** → `SX1262` w `listen_mode: both` teraz je słyszy (10 liczników C1 na T-Beamie, ponowny pomiar 01.10.2026 po poprawce słowa synchronizacji). `SX1276` nie był ponownie mierzony po poprawce. Patrz [C1 też jest osobnym pytaniem](#c1-też-jest-osobnym-pytaniem).
+- **Mieszane T1 + C1 na jednym urządzeniu** → na `SX1262` i `LR1121` od poprawki z 30.09.2026 brak mierzalnego kosztu dla T1; `SX1276` jeszcze nie zmierzony ponownie.
+- **Dwa osobne urządzenia** (`T1-only` i `C1-only`) → nadal bezpieczny wybór na `SX1276`; na `SX1262` wystarczy jedno urządzenie w `both`.
 - **`CC1101`** → tylko jeśli już masz taki sprzęt. Stoi za jawną bramką
   bezpieczeństwa i nie jest układem, który warto kupić pod ten projekt.
 - **`LR1121`** → najnowszy i najlepszy odbiornik z dotąd zmierzonych tutaj, ale
@@ -69,9 +69,9 @@ Sama liczba liczników nie mówi wszystkiego. Kilka szybkich liczników może sz
 | Blok z wieloma licznikami w pobliżu | słaby | akceptowalny tylko w łatwiejszych przypadkach | zalecany | dobry, najsłabiej sprawdzony |
 | Szybkie liczniki rzędu 30–60 s | słaby | często słaby | zalecany | dobry |
 | Duże pakiety pod presją czasu | słaby | słaby | zalecany | dobry |
-| `both` na jednym urządzeniu | niezalecane | niezalecane przy istotnym ruchu T1 | możliwe, ale nadal kompromis | możliwe, niesprawdzone w czasie |
+| `both` na jednym urządzeniu | niezalecane | nie zmierzony ponownie po poprawce | **w porządku** - brak mierzalnego kosztu T1 | w porządku - brak mierzalnego kosztu T1 |
 | Liczniki S1 przy progu szumu | tylko surowy sniffer | **zalecany** | słabszy, patrz niżej | obiecujący, jeden test |
-| Liczniki C1 | niesprawdzony tutaj | **zalecany** | słyszy nieliczne nadajniki C1, patrz niżej | słyszy nieliczne nadajniki C1, patrz niżej |
+| Liczniki C1 | niesprawdzony tutaj | dobry, nie zmierzony ponownie po poprawce | **dobry** w `both`, patrz niżej | słyszy liczniki C1 w swoim (krótszym) zasięgu T1 |
 | Maksymalna niezawodność | nie | ograniczony | zalecany | jeszcze nie do udowodnienia |
 | Dostępność drugiej opinii | szeroka | szeroka | szeroka | jedna płytka, jeden dom |
 
@@ -112,8 +112,25 @@ przy −59 dBm, co dowodzi działania toru i nie mówi nic o czułości.
 
 ## C1 też jest osobnym pytaniem
 
-C1 również nie układa radiów tak jak T1. Zmierzone 25–26.09.2026 na prawdziwych
-licznikach Techem C1, wszystkie płytki w jednym pokoju, 868,95 MHz:
+**Zmierzone ponownie 30.09–01.10.2026, po poprawce słowa synchronizacji** (jedno
+słowo, 0x543D, w `c1` i `both`; patrz `RELEASE_NOTES_PL.md`), to samo mieszkanie
+i płytki, prawdziwe liczniki, dzień roboczy 07:00–16:00:
+
+| odbiornik, `listen_mode: both` | słyszane liczniki C1 | uwagi |
+|---|---|---|
+| `SX1262` (LilyGO T-Beam) | **10** | 56 ramek C1/h; z błędem było 2 |
+| `LR1121` | 1 | najsilniejszy Techem, odbierany w pełni; pozostałe liczniki C1 są poza jego zasięgiem także w T1 |
+| `SX1276` | nie zmierzony ponownie | na stanowisku chodzi w `t1` |
+
+**Niskie liczby C1 poniżej wynikały głównie z błędu słowa synchronizacji, nie
+z układów.** Wycofany jest wyciągnięty z nich wniosek, że różnicy do `SX1276`
+nie da się nadrobić programowo. Zostają niżej jako zapis tego, co zmierzono z
+błędem.
+
+### Przed poprawką (25–26.09.2026)
+
+Zmierzone na prawdziwych licznikach Techem C1, wszystkie płytki w jednym pokoju,
+868,95 MHz:
 
 | odbiornik | słyszane liczniki C1 | uwagi |
 |---|---|---|
@@ -130,35 +147,44 @@ według AFC `SX1276`), `min_preamble_bits` 16 / 8 / 0 oraz ustawienie dewiacji
 liczniki C1 nie wywołują nawet przerwania - patrz `rx_path.irq_start` w
 [DIAGNOSTIC_PL.md](DIAGNOSTIC_PL.md).
 
-**Przewagę `SX1276` w C1 daje tolerancja błędów jego detektora preambuły.** Przy
-tolerancji 0 słyszy dokładnie to samo co `SX1262` i `LR1121`. Żaden z tych
-układów nie ma odpowiednika tego pola, więc różnicy nie da się nadrobić
-programowo. Dwie płytki `SX1262` różnych producentów dały ten sam wynik, co
-wyklucza płytkę: decyduje układ.
+Przy aktywnym błędzie przewaga `SX1276` w C1 szła za tolerancją błędów jego
+detektora preambuły: przy tolerancji 0 słyszał dokładnie to samo co `SX1262`
+i `LR1121`. Ta część jest zmierzona i obowiązuje, ale wniosek, że decyduje
+układ, już nie: po poprawce T-Beam przeszedł z 2 na 10 liczników C1.
 
 Dla części liczników ma to mniejsze znaczenie, niż się wydaje: ciepłomierze
 Techem wysyłają jawny telegram we własnym formacie w **T1** i osobny,
 zaszyfrowany AES telegram OMS w C1. Czytelne wartości przychodzą w T1, które
 `SX1262` odbiera dobrze; telegram C1 bez klucza i tak jest bezużyteczny.
 
-Zasada praktyczna: **`SX1276` do C1.** `SX1262` i `LR1121` zostaw na
-`listen_mode: t1`.
+Zasada praktyczna: **jeśli masz liczniki C1, ustaw `SX1262` w `listen_mode: both`.**
+`SX1276` był zaleceniem dla C1 przed poprawką i od tego czasu nie był ponownie
+mierzony; dla najsłabszych liczników C1 może nadal słyszeć lepiej.
 
 ## Wniosek dla trybu `both`
 
-`both` to nie jest po prostu „T1 plus trochę C1”. To dodatkowy koszt harmonogramu nawet wtedy, gdy realny ruch C1 jest mały.
+**Zmierzone ponownie po poprawce słowa synchronizacji z 30.09.2026: na `SX1262`
+i `LR1121` `both` nie kosztuje już T1.** Dzień roboczy 07:00–16:00, ta sama płytka
+porównana sama ze sobą:
+
+| płytka | `t1` (przed) | `both` po poprawce |
+|---|---|---|
+| `SX1262` LilyGO T-Beam | 152 liczniki T1, RSSI p1/p5 −98/−96 dBm | **161** liczników T1, p1/p5 **−98/−96** dBm |
+| `LR1121` | 55 liczników T1 | 51 liczników T1 |
+| `SX1262` XIAO, `both` z błędem → `both` po poprawce, ten sam dzień | 496 ramek T1/h, 29% ramek płytki odniesienia | **805** ramek/h, **47%** |
+
+W dwóch pierwszych wierszach to różne dni (dzień z `both` był bardziej
+zatłoczony), więc kilka liczników w jedną czy drugą stronę to szum; wyraźniejszym
+sygnałem jest identyczny ogon RSSI.
 
 Praktyczny wniosek:
 
-- na `SX1276` `both` jest z reguły złym pomysłem, jeśli zależy Ci na T1,
-- na `SX1262` `both` ma sens, ale nadal ma mierzalny koszt,
-- zmierzone przez jedną noc (25–26.09.2026, te same godziny co noc wcześniej w
-  `t1`): `both` zmniejszył liczbę słyszanych liczników T1 z **118 do 64** na
-  `SX1262` (LilyGO T-Beam) i z **62 do 40** na `LR1121`, a `SX1276` spadł ze
-  119 do 108. Na tych dwóch układach to dużo więcej niż udział czasu oddany C1, a
-  razem z wynikiem C1 powyżej oznacza, że `both` prawie nic im nie daje - jedna
-  noc, jeden budynek,
-- jeśli naprawdę zależy Ci na niezawodnym odbiorze mieszanym, użyj **dwóch urządzeń**.
+- na `SX1262` i `LR1121` **`both` jest w porządku** - włącz go, jeśli masz liczniki C1,
+- na `SX1276` `both` nie był ponownie mierzony po poprawce. Przed nią jedna noc
+  dała spadek ze 119 do 108 liczników T1, zmierzony z błędem,
+- wcześniejsze liczby (118 → 64 na T-Beamie, 62 → 40 na `LR1121`, jedna noc
+  25–26.09.2026) to był błąd słowa synchronizacji plus sąsiednia antena na
+  stanowisku, a nie koszt trybu `both`.
 
 `both` na każdym radiu obejmuje wyłącznie T1/C1. **S1 nigdy nie bierze udziału
 w `both`** i trzeba go wybrać jawnie przez `listen_mode: s1`, co zmienia też

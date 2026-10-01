@@ -215,7 +215,6 @@ class LR1121 : public RadioTransceiver {
   uint32_t tcxo_startup_ticks_{3000};  // ~91.6 ms at 32.768 kHz
 
   // --- state ---------------------------------------------------------------
-  uint8_t sync_cycle_{0};
   std::vector<uint8_t> rx_buffer_{};
   size_t rx_idx_{0};
   size_t rx_len_{0};

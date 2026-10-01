@@ -47,7 +47,7 @@ static inline const char *listen_mode_to_string_(ListenMode mode) {
       return "S1 only";
     case LISTEN_MODE_BOTH:
     default:
-      return "T1+C1 (both, 3:1 bias)";
+      return "T1+C1 (both)";
   }
 }
 

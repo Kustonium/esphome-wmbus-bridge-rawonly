@@ -2,6 +2,15 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Poprawka: `c1` i `both` słuchają na jednym słowie synchronizacji, 0x543D
+
+- **Każdy sterownik (SX1262, SX1276, LR1121, CC1101) w `listen_mode: c1` i `both` - czyli w trybie domyślnym - co czwarte uzbrojenie ustawiał synchronizację na 0x54CD.** Według EN 13757-4 nagłówek trybu C to 0x543D, a po nim 0x54CD (format A) albo 0x543D (format B); nagłówek trybu T też kończy się na 0x543D. Samo 0x543D łapie więc T1 i oba formaty C1, a rozróżniają je dopiero bajty za nim. Uzbrojenie na 0x54CD nie słyszało ani T1, ani C1 formatu B, a ramka formatu A złapana na drugim słowie była potem brana za T1 i ginęła.
+- Na SX1262 i LR1121, które wyzwalają się tylko na prawdziwej preambule, takie uzbrojenie zwykle czekało całe 5 s, więc głucha część czasu była wyraźnie większa niż ćwierć. To najbardziej prawdopodobna przyczyna, dla której `both` kosztował te układy 40-50% liczników T1, i część powodu, dla którego słyszały tak mało C1. Tryby `t1` i `s1` nigdy nie były dotknięte.
+- **Zmierzone ponownie na trzech płytkach (30.09–01.10.2026):** `SX1262` XIAO w `both` przeszedł z 496 na 805 ramek T1 na godzinę tego samego dnia; T-Beam w `both` usłyszał 161 liczników T1 wobec 152 w `t1`, z tym samym ogonem słabych sygnałów, oraz 10 liczników C1 tam, gdzie wcześniej słyszał 2; `LR1121` w `both` nie stracił liczników T1 i odbiera najsilniejszy licznik C1 w pełni. Na `SX1262` i `LR1121` **`both` nie kosztuje już T1** - włącz go, jeśli masz liczniki C1. `SX1276` i `CC1101` mają tę samą zmianę, ale nie były ponownie mierzone; użytkowników `t1` zmiana w ogóle nie dotyczy.
+- `CHIP_SELECTION_PL.md` zaktualizowany o nowe liczby; stare zostają, oznaczone jako zmierzone z błędem.
+
+---
+
 ## Mniej diagnostyki poza `diagnostic_mode: dev`
 
 - **Przyrządy stanowiskowe nie działają już w `low` i `normal`.** To tryby zalecane użytkownikom; zostaje w nich podsumowanie, podpowiedzi i migawka liczników. Do `dev` przeniesione:
@@ -22,7 +31,7 @@
 
 - **Zaległe powiadomienia o przerwaniu są odrzucane przed uzbrojeniem odbiornika.** Takie, które zostało po poprzednim uzbrojeniu, budziło następne czekanie od razu, liczyło się jako wyzwolenie i czytało pustą FIFO - część burz `irq_start.no_data` na V4-R8. Teraz są liczone osobno jako `rx_path.stale_wakeups_cleared` i nie wchodzą do `irq_fired`. Dotyczy wszystkich radiów.
 - **Rejestr końca pakietu jest zerowany przed każdym uzbrojeniem T1/C1**, tak jak już robił S1. Po przerwanym długim przechwyceniu widziano go ustawionego na 10 bajtów obok odczytów urywanych dokładnie po 10 bajtach.
-- **Adaptacyjne podtrzymanie długiego strumienia trwa 150 s zamiast 45 s.** Licznik prądu wysyłający 353-bajtową ramkę co 60 s przeżywał stare podtrzymanie, więc jego ramki mogły trafić na ścieżkę FIFO 255 bajtów i zostać ucięte. Ma znaczenie przy `long_gfsk_packets: false`.
+- **Adaptacyjne podtrzymanie długiego strumienia trwa 150 s zamiast 45 s.** Licznik prądu wysyłający 353-bajtową ramkę co 60 s przeżywał stare podtrzymanie, więc jego ramki mogły trafić na ścieżkę FIFO 255 bajtów i zostać ucięte. Dotyczy wyłącznie `long_gfsk_packets: true` - przy `false` podtrzymanie w ogóle się nie włącza.
 - **Poprawione maski błędów układu.** `PLL_CALIB` był sprawdzany na bicie `IMG_CALIB`: błąd kalibracji obrazu raportowano jako błąd PLL, a prawdziwy błąd PLL nie dawał nic. Wszystkie błędy kalibracji, wzorca i zatrzaśnięcia PLL są teraz raportowane z nazwy.
 - **Nowa opcja `sx1262_tcxo_startup_ms` (domyślnie 1, zakres 1-20).** Czas startu TCXO był stały, 1 ms; własny sterownik Helteca używa 5 na V4. Ma znaczenie tylko z `has_tcxo: true`.
 - Zrzut po nieudanym odczycie, który zastaje chip w standby, mówi teraz, kiedy postawiło go tam samo przechwycenie strumienia, zamiast zgłaszać awarię odbiornika. Poprawione komentarze pinów FEM Helteca (trzeci pin to CPS na V4.2 i CTX na V4-R8).
