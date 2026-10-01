@@ -38,6 +38,10 @@ meter -> SX1262 / SX1276 / CC1101 / LR1121 -> ESPHome wmbus_radio -> MQTT RAW HE
 
 RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262 and SX1276, with experimental CC1101 and LR1121 support.
 
+> 🚀 **A few meters and you want them in Home Assistant?** Start with the
+> [**Quick start — meters in HA in 15 minutes**](docs/QUICKSTART.md): broker, add-on, a ready
+> board YAML and adding meters with a click. The rest of this README is for when you want more.
+
 > ✅ **Verified on ESPHome 2026.7.0** — clean builds on all three test boards in CI.
 
 ## What this project is

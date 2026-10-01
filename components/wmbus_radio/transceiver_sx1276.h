@@ -59,7 +59,6 @@ class SX1276 : public RadioTransceiver {
   InternalGPIOPin *tcxo_pin_{nullptr};
   uint8_t min_preamble_bits_{16};
   uint8_t preamble_tolerance_{0x0A};
-  uint8_t sync_cycle_{0};
 
   // Burst chunk buffered in ESP32 RAM and served byte-by-byte to upper layer.
   std::array<uint8_t, SX1276_CHUNK_SIZE> chunk_buffer_{};

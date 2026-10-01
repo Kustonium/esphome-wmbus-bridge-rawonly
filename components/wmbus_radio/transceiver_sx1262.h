@@ -192,8 +192,6 @@ class SX1262 : public RadioTransceiver {
   bool long_stream_active_() const;
   void configure_irq_params_();
 
-  // Bias towards Block B (0x3D). Every 4th hop switches to Block A (0xCD).
-  uint8_t sync_cycle_{0};
 
   // Config
   uint32_t configured_frequency_hz_{868950000UL};

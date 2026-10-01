@@ -2,6 +2,15 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Fix: `c1` and `both` listen on one sync word, 0x543D
+
+- **Every driver (SX1262, SX1276, LR1121, CC1101) armed on 0x54CD every fourth time in `listen_mode: c1` and `both`** - the default mode. Per EN 13757-4 the C-mode header is 0x543D followed by 0x54CD (format A) or 0x543D (format B), and the T-mode header ends in 0x543D too, so 0x543D alone catches T1 and both C1 formats; the bytes after it tell them apart. An arm on 0x54CD heard no T1 and no C1 format B at all, and a format-A frame caught on its second word was then parsed as T1 and lost.
+- On the SX1262 and LR1121, which trigger only on real preamble, such an arm usually waited out its whole 5 s window, so the deaf share was well above a quarter. This is the most likely reason `both` cost those chips 40-50% of their T1 meters, and part of why they heard so little C1. `t1` and `s1` were never affected.
+- **Re-measured on three boards (2026-09-30 / 10-01):** an `SX1262` XIAO in `both` went from 496 to 805 T1 frames an hour on the same day; a T-Beam in `both` heard 161 T1 meters against 152 in `t1`, with the same weak-signal tail, and 10 C1 meters where it heard 2 before; the `LR1121` in `both` lost no T1 meters and receives the strongest C1 meter in full. On `SX1262` and `LR1121`, **`both` no longer costs T1** - turn it on if you have C1 meters. `SX1276` and `CC1101` carry the same change but were not re-measured; `t1` users are not affected at all.
+- `CHIP_SELECTION.md` updated with the new figures; the old ones are kept, marked as measured with the bug.
+
+---
+
 ## Less diagnostics outside `diagnostic_mode: dev`
 
 - **Bench instruments no longer run in `low` and `normal`.** Those are the modes users are told to run; they keep the summary, the hints and the meter snapshot. Moved to `dev`:
@@ -22,7 +31,7 @@
 
 - **Stale interrupt notifications are discarded before the receiver is armed.** One left over from the previous arm used to wake the next wait at once, count as a trigger and read an empty FIFO - part of the `irq_start.no_data` storms seen on the V4-R8. They are now counted separately as `rx_path.stale_wakeups_cleared` and are not part of `irq_fired`. Applies to every radio.
 - **The packet-end register is reset before every T1/C1 arm**, as S1 already did. After an interrupted long capture it was seen left at 10 bytes next to reads that broke off after exactly 10 bytes.
-- **The adaptive long-stream hold lasts 150 s instead of 45 s.** An electricity meter sending its 353-byte frame every 60 s outlived the old hold, so its frames could land in the 255-byte FIFO path and be cut off. Relevant with `long_gfsk_packets: false`.
+- **The adaptive long-stream hold lasts 150 s instead of 45 s.** An electricity meter sending its 353-byte frame every 60 s outlived the old hold, so its frames could land in the 255-byte FIFO path and be cut off. Applies only with `long_gfsk_packets: true` - with `false` the hold never engages.
 - **Device-error masks corrected.** `PLL_CALIB` was checked at the `IMG_CALIB` bit: an image-calibration failure was reported as a PLL one, and a real PLL failure raised nothing. All calibration, reference and PLL-lock errors are now reported by name.
 - **New option `sx1262_tcxo_startup_ms` (default 1, range 1-20).** The TCXO start-up time was fixed at 1 ms; Heltec's own driver uses 5 on the V4. Only matters with `has_tcxo: true`.
 - A failed-read dump that finds the chip in standby now says when the stream capture put it there itself, instead of reporting a receiver fault. Comments on the Heltec FEM pins corrected (the third pin is CPS on the V4.2 and CTX on the V4-R8).

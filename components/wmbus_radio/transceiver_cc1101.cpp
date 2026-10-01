@@ -932,7 +932,7 @@ void CC1101::dump_config() {
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                        : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                        : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only (experimental sync only)"
-                       : "T1+C1 (both, 3:1 sync-cycle bias)";
+                       : "T1+C1 (both)";
   ESP_LOGCONFIG(TAG, "  Listen mode: %s", mode_str);
 }
 
@@ -953,29 +953,21 @@ void CC1101::restart_rx() {
     this->strobe_(CC1101_SRX);
     return;
   }
-  // The 3:1 cycle onto 0x54CD is kept deliberately, and it is NOT settled.
+  // One sync word for t1, c1 and both: 0x543D. Per EN 13757-4 the C-mode header
+  // is 0x543D followed by 0x54CD (format A) or 0x543D (format B), and the last
+  // 16 chips of the T-mode header also read 0x543D. Arming on 0x543D therefore
+  // catches all three; the two bytes after it tell them apart (0x54 0xCD = C1-A,
+  // 0x54 0x3D = C1-B, anything else = T1), which is what receive_frame() and
+  // packet.cpp already expect. Until 2026-09-30 c1/both armed on 0x54CD every
+  // 4th time: those arms missed T1 and C1-B outright, and a C1-A frame caught on
+  // its second word lost its 0x54 0xCD marker and was parsed as T1. On a radio
+  // that triggers only on real preamble such an arm also sat out its whole 5 s
+  // hop, so the deaf share was well above a quarter.
   //
-  // Argument for removing it: mode T and mode C share the sync word 0x543D, and
-  // in the one C1 capture we have (issue #22) the 0x54CD that follows arrives as
-  // DATA - which is exactly why packet.cpp strips it as WMBUS_MODE_C_SUFIX_LEN.
-  // On that reading, arming on 0x54CD cannot catch a C1 frame from its start and
-  // only spends listening windows. Neither reference CC1101 driver
-  // (SzczepanLeon, alex-icesoft) cycles this register.
-  //
-  // Why it stays anyway: that capture came from a board whose RF profile does
-  // not apply correctly, so it is not evidence about what a healthy receiver
-  // sees. The sibling drivers cycle for a documented reason (transceiver_sx1262
-  // .cpp), and CC1101 reports "3:1 bias" in its own dump_config. Changing this
-  // one driver on a hypothesis would break that consistency for users it
-  // currently works for.
-  //
-  // Settle it with a measurement from a working CC1101, not by reasoning.
-  if (this->listen_mode_ == LISTEN_MODE_T1) {
-    sync2 = 0x3D;
-  } else {
-    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-  }
+  // CC1101 had this settled in the same direction by its own C1 capture (issue
+  // #22), where 0x54CD arrived as data; the cycle was kept only for consistency
+  // with the sibling drivers, which are now fixed too.
+  sync2 = 0x3D;
 
   this->flush_rx_();
   this->set_sync_word_(sync2);

@@ -189,7 +189,7 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
 //   0x24       RegOsc                CLKOUT divider (0b111 = CLKOUT off)
 //   0x25,0x26  RegPreambleMsb/Lsb    preamble length
 //   0x27       RegSyncConfig         sync on/off, fill condition, sync size
-//   0x28..0x2F RegSyncValue1..8      sync word bytes (0x54 0x3D T1, 0x54 0xCD C1)
+//   0x28..0x2F RegSyncValue1..8      sync word bytes (0x54 0x3D: T1 and C1, see restart_rx())
 //   0x30       RegPacketConfig1      packet format, CRC, whitening (0 = raw)
 //   0x32       RegPayloadLength      0 with fixed-length = unlimited packet mode
 //   0x35       RegFifoThresh         FIFO level threshold driving DIO1
@@ -219,7 +219,7 @@ void SX1276::setup() {
     const char *lm = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                    : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only"
-                   : "T1+C1 (both, 3:1 bias)";
+                   : "T1+C1 (both)";
     ESP_LOGI(TAG, LOG_TR("Listen mode: %s", "Tryb nasluchu: %s"), lm);
   }
   this->reset();
@@ -506,19 +506,17 @@ void SX1276::restart_rx() {
     return;
   }
 
-  uint8_t sync2;
-  if (this->listen_mode_ == LISTEN_MODE_T1) {
-    sync2 = 0x3D;
-  } else if (this->listen_mode_ == LISTEN_MODE_C1) {
-    // C1 exists with both second sync-byte variants (0x3D / 0xCD).
-    // Bias 3:1 towards 0x3D, same as LISTEN_MODE_BOTH, so C1-only
-    // does not accidentally exclude the more common variant.
-    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-  } else {
-    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-  }
+  // One sync word for t1, c1 and both: 0x543D. Per EN 13757-4 the C-mode header
+  // is 0x543D followed by 0x54CD (format A) or 0x543D (format B), and the last
+  // 16 chips of the T-mode header also read 0x543D. Arming on 0x543D therefore
+  // catches all three; the two bytes after it tell them apart (0x54 0xCD = C1-A,
+  // 0x54 0x3D = C1-B, anything else = T1), which is what receive_frame() and
+  // packet.cpp already expect. Until 2026-09-30 c1/both armed on 0x54CD every
+  // 4th time: those arms missed T1 and C1-B outright, and a C1-A frame caught on
+  // its second word lost its 0x54 0xCD marker and was parsed as T1. On a radio
+  // that triggers only on real preamble such an arm also sat out its whole 5 s
+  // hop, so the deaf share was well above a quarter.
+  const uint8_t sync2 = 0x3D;
 
   this->spi_write(REG_OP_MODE, (uint8_t) 0b001);  // standby
   this->spi_write(0x28, {0x54, sync2});

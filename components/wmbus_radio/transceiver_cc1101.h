@@ -39,7 +39,6 @@ class CC1101 : public RadioTransceiver {
   InternalGPIOPin *gdo0_pin_{nullptr};
   InternalGPIOPin *gdo2_pin_{nullptr};
 
-  uint8_t sync_cycle_{0};
   std::array<uint8_t, CC1101_CHUNK_SIZE> chunk_buffer_{};
   size_t chunk_len_{0};
   size_t chunk_idx_{0};

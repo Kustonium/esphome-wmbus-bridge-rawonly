@@ -646,10 +646,6 @@ void LR1121::configure_gfsk_() {
 // ---------------------------------------------------------------------------
 
 void LR1121::restart_rx() {
-  // Same sync-word cycling as the SX1262 driver, and for the same reason:
-  // C-mode exists in two format variants that differ only in the second sync
-  // byte (A = 0x3D, B = 0xCD). Listening on one of them silently drops the
-  // other, so `both` and `c1` rotate 3:1 in favour of A.
   // S1 returns early because its sync word is three bytes rather than two. Every
   // other step below has to be repeated here by hand, which is exactly how the
   // expected-length register came to be skipped in this mode until 2026-09-23:
@@ -676,13 +672,17 @@ void LR1121::restart_rx() {
     return;
   }
 
-  uint8_t sync2;
-  if (this->listen_mode_ == LISTEN_MODE_T1) {
-    sync2 = 0x3D;
-  } else {
-    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-  }
+  // One sync word for t1, c1 and both: 0x543D. Per EN 13757-4 the C-mode header
+  // is 0x543D followed by 0x54CD (format A) or 0x543D (format B), and the last
+  // 16 chips of the T-mode header also read 0x543D. Arming on 0x543D therefore
+  // catches all three; the two bytes after it tell them apart (0x54 0xCD = C1-A,
+  // 0x54 0x3D = C1-B, anything else = T1), which is what receive_frame() and
+  // packet.cpp already expect. Until 2026-09-30 c1/both armed on 0x54CD every
+  // 4th time: those arms missed T1 and C1-B outright, and a C1-A frame caught on
+  // its second word lost its 0x54 0xCD marker and was parsed as T1. On a radio
+  // that triggers only on real preamble such an arm also sat out its whole 5 s
+  // hop, so the deaf share was well above a quarter.
+  const uint8_t sync2 = 0x3D;
   this->set_sync_word_(sync2);
 
   this->cmd_write_(OC_CLEAR_IRQ, {(uint8_t) (IRQ_ALL >> 24), (uint8_t) (IRQ_ALL >> 16), (uint8_t) (IRQ_ALL >> 8),

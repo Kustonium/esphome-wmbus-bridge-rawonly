@@ -781,8 +781,8 @@ void SX1262::set_rf_frequency_(uint32_t freq_hz) {
 
 // ---------------------------------------------------------------------------
 // set_sync_word_: program the 16-bit WMBus sync word into the register bank.
-//   Byte 0 = 0x54 (WMBus constant), sync2 selects format:
-//     0x3D = C-mode Format B (most common), 0xCD = C-mode Format A.
+//   Byte 0 = 0x54, byte 1 = sync2; 0x543D serves T1 and both C1 formats
+//   (see restart_rx()).
 // ---------------------------------------------------------------------------
 void SX1262::set_sync_word_(uint8_t sync2) {
   this->write_register_(REG_SYNC_WORD_0, {0x54, sync2, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
@@ -1199,7 +1199,7 @@ void SX1262::setup() {
     const char *lm = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                    : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                    : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only"
-                   : "T1+C1 (both, 3:1 bias)";
+                   : "T1+C1 (both)";
     ESP_LOGI(TAG, LOG_TR("Listen mode: %s", "Tryb nasluchu: %s"), lm);
   }
 
@@ -1651,21 +1651,8 @@ void SX1262::log_reg_status() {
 
 // ---------------------------------------------------------------------------
 // restart_rx: re-arm the receiver for the next WMBus frame.
-//
-// WMBus C-mode has two formats differing only in the second sync byte.
-// We cycle 3:1 towards Format B (0x3D) as it is more common in practice,
-// so both formats are caught without any user configuration.
 // ---------------------------------------------------------------------------
 void SX1262::restart_rx() {
-  // Ping-pong between C-mode Block B (0x3D) and Block A (0xCD)
-  // WMBus C-mode exists in two Format variants that differ only in the second
-  // sync byte: Format A uses 0x3D, Format B uses 0xCD. Both are valid C1
-  // transmissions and real devices may transmit Format A.
-  // C1-only MUST cycle through both sync bytes exactly like `both` mode —
-  // otherwise Format A packets are silently missed.
-  // Bug: previous code hardcoded 0xCD (Format B only) in C1-only mode.
-  // Fix: apply the same 3:1 (A:B) cycling used in `both` mode.
-  // NOTE: do NOT revert C1-only to a fixed 0xCD; that breaks Format A.
   if (this->listen_mode_ == LISTEN_MODE_S1) {
     this->set_s1_sync_word_();
     this->cmd_write_(CMD_CLEAR_IRQ_STATUS, {0xFF, 0xFF});
@@ -1687,17 +1674,17 @@ void SX1262::restart_rx() {
     return;
   }
 
-  uint8_t sync2;
-  if (this->listen_mode_ == LISTEN_MODE_T1) {
-    sync2 = 0x3D;
-  } else if (this->listen_mode_ == LISTEN_MODE_C1) {
-    // Cycle 3:1 (A:B) — same ratio as `both` mode.
-    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-  } else {
-    sync2 = (this->sync_cycle_ == 3) ? 0xCD : 0x3D;
-    this->sync_cycle_ = (uint8_t) ((this->sync_cycle_ + 1) & 0x03);
-  }
+  // One sync word for t1, c1 and both: 0x543D. Per EN 13757-4 the C-mode header
+  // is 0x543D followed by 0x54CD (format A) or 0x543D (format B), and the last
+  // 16 chips of the T-mode header also read 0x543D. Arming on 0x543D therefore
+  // catches all three; the two bytes after it tell them apart (0x54 0xCD = C1-A,
+  // 0x54 0x3D = C1-B, anything else = T1), which is what receive_frame() and
+  // packet.cpp already expect. Until 2026-09-30 c1/both armed on 0x54CD every
+  // 4th time: those arms missed T1 and C1-B outright, and a C1-A frame caught on
+  // its second word lost its 0x54 0xCD marker and was parsed as T1. On a radio
+  // that triggers only on real preamble such an arm also sat out its whole 5 s
+  // hop, so the deaf share was well above a quarter.
+  const uint8_t sync2 = 0x3D;
 
   this->set_sync_word_(sync2);
 
