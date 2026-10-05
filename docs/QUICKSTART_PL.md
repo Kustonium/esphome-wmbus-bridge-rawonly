@@ -26,9 +26,46 @@ klucza to kliknięcie, bez ponownego wgrywania firmware.
 | Heltec WiFi LoRa 32 V4-R8 | [`examples/SX1262/Heltec V4-R8/`](../examples/SX1262/Heltec%20V4-R8/) |
 | Heltec WiFi LoRa 32 V3 | [`examples/SX1262/Heltec V3/`](../examples/SX1262/Heltec%20V3/) |
 | Heltec V2 / LilyGO T3 (SX1276) | [`examples/SX1276/`](../examples/SX1276/) |
+| ESP32 + moduł CC1101 (eksperymentalnie, patrz niżej) | [`examples/CC1101/CC1101_clean.yaml`](../examples/CC1101/CC1101_clean.yaml) |
 
 Piny, przełączniki RF i zasilanie modułu są w przykładach już ustawione. Nie przepisuj ich z innej
 płytki — Heltec V4 to nie V3.
+
+### CC1101: tani, działa, eksperymentalny
+
+Moduł CC1101 na dowolnym ESP32 działa z tym projektem, a reszta tego przewodnika jest dla niego
+taka sama. Przed zakupem albo podłączeniem trzeba wiedzieć trzy rzeczy:
+
+1. **Kup wersję 868 MHz.** Wiele tanich modułów CC1101 jest zrobionych na 433 MHz - sam układ
+   dostroi się do 868 MHz, ale antena i elementy dopasowania już nie, i płytka jest prawie głucha.
+   Szukaj „868 MHz” na samym module, nie tylko w tytule ogłoszenia.
+2. **Podłącz GDO0 i GDO2**, do tego SPI i CS, zasilanie 3,3 V. Przykład używa ESP32-C3:
+
+   | CC1101 | ESP32-C3 (przykład) |
+   |---|---|
+   | SCK | GPIO5 |
+   | MOSI (SI) | GPIO6 |
+   | MISO (SO) | GPIO7 |
+   | CSN | GPIO4 |
+   | GDO0 | GPIO3 |
+   | GDO2 | GPIO2 |
+   | VCC / GND | 3,3 V / GND |
+
+   Inne warianty ESP32 powinny działać po zmianie pinów w YAML-u, ale w CI budowany jest tylko
+   ESP32-C3. Zapewnij modułowi stabilne 3,3 V: moduł pracujący na 2,93 V gubił większość zapisów
+   rejestrów, dopóki sterownik nie zaczął ich powtarzać.
+3. **Sterownik trzeba włączyć jawnie** przez `cc1101_allow_experimental: true` (jest już
+   w przykładzie). Jest eksperymentalny, bo nie był mierzony na stanowisku tego projektu: dowody
+   sprzętowe pochodzą dotąd z logów użytkowników. Znaleziony w ten sposób problem z zapisem
+   rejestrów został naprawiony.
+
+Czego się spodziewać: użytkownicy używają go na **T1**, ale nie ma tu porównania CC1101 z innymi
+radiami, więc nie ma liczb do obiecania. To najwolniejsze z czterech radiów przy odczycie ramek
+(termin FIFO 1800 µs wobec 1000 µs na SX1276), co ma największe znaczenie przy wielu szybkich
+licznikach, a S1 na CC1101 to surowy sniffer, nie ścieżka odbiorcza. Raport z wynikami
+w Discussions pomoże bardziej niż cokolwiek innego. Jeśli i tak
+kupujesz nowy sprzęt, najpierw zajrzyj do [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md); jeśli
+CC1101 już masz, używaj go.
 
 ## 1. Broker MQTT
 

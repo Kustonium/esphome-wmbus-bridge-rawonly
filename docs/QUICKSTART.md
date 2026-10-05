@@ -26,9 +26,46 @@ changing a key is a click, with no firmware reflash.
 | Heltec WiFi LoRa 32 V4-R8 | [`examples/SX1262/Heltec V4-R8/`](../examples/SX1262/Heltec%20V4-R8/) |
 | Heltec WiFi LoRa 32 V3 | [`examples/SX1262/Heltec V3/`](../examples/SX1262/Heltec%20V3/) |
 | Heltec V2 / LilyGO T3 (SX1276) | [`examples/SX1276/`](../examples/SX1276/) |
+| ESP32 + CC1101 module (experimental, see below) | [`examples/CC1101/CC1101_clean.yaml`](../examples/CC1101/CC1101_clean.yaml) |
 
 Pins, RF switches and module power are already set in the examples. Do not copy them from another
 board — a Heltec V4 is not a V3.
+
+### CC1101: cheap, works, experimental
+
+A CC1101 module on any ESP32 works with this project, and the rest of this guide is the same for it.
+Know three things before you buy or wire one:
+
+1. **Buy the 868 MHz version.** Many cheap CC1101 modules are built for 433 MHz - the chip tunes to
+   868 MHz, but their antenna and matching parts do not, and the board ends up nearly deaf. Look
+   for "868 MHz" on the module itself, not only in the listing title.
+2. **Wire both GDO0 and GDO2**, plus SPI and CS, at 3.3 V. The example uses an ESP32-C3:
+
+   | CC1101 | ESP32-C3 (example) |
+   |---|---|
+   | SCK | GPIO5 |
+   | MOSI (SI) | GPIO6 |
+   | MISO (SO) | GPIO7 |
+   | CSN | GPIO4 |
+   | GDO0 | GPIO3 |
+   | GDO2 | GPIO2 |
+   | VCC / GND | 3.3 V / GND |
+
+   Other ESP32 variants should work with the pins changed in the YAML, but only the ESP32-C3 build
+   is checked in CI. Give the module a solid 3.3 V: a module running at 2.93 V lost most of its
+   register writes until the driver learned to retry them.
+3. **The driver has to be enabled explicitly** with `cc1101_allow_experimental: true` (already in
+   the example). It is experimental because it has not been measured on this project's bench: the
+   hardware evidence so far comes from users' logs. A register-write problem found that way has
+   been fixed.
+
+What to expect: users run it on **T1**, but there is no benchmark of the CC1101 against the other
+radios here, so there are no numbers to promise. It is the slowest of the four radios at reading
+frames (1800 µs FIFO deadline against 1000 µs on the SX1276), which matters most with many fast
+meters, and S1 on CC1101 is a raw sniffer rather than a receive path. A report with your results
+in Discussions helps more than anything else. If you are buying new
+hardware anyway, see [`CHIP_SELECTION.md`](CHIP_SELECTION.md) first; if you already have a CC1101,
+use it.
 
 ## 1. MQTT broker
 

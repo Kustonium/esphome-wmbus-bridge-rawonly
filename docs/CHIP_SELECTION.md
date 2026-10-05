@@ -10,9 +10,9 @@ Practical radio-selection guide for `wmbus_radio`. Four radios are supported:
 - **House / a few meters / quiet RF / mostly slow T1** → `SX1276` is often enough.
 - **Apartment block / many meters / frequent packets / larger packets** → choose `SX1262`.
 - **S1 meters you can barely hear** → use `SX1276`. See [S1 is a separate question](#s1-is-a-separate-question).
-- **C1 meters** → `SX1262` in `listen_mode: both` now hears them (10 C1 meters on a T-Beam, re-measured 2026-10-01 after the sync-word fix). `SX1276` has not been re-measured since the fix. See [C1 is a separate question too](#c1-is-a-separate-question-too).
-- **Mixed T1 + C1 on one device** → on `SX1262` and `LR1121` no measurable T1 cost since the 2026-09-30 fix; `SX1276` not re-measured yet.
-- **Two dedicated devices** (`T1-only` and `C1-only`) → still the safe choice on `SX1276`; on `SX1262` one device in `both` is enough.
+- **C1 meters** → `SX1262` in `listen_mode: both` now hears them (10 C1 meters on a T-Beam, re-measured 2026-10-01 after the sync-word fix). `SX1276` in `both` heard 14. See [C1 is a separate question too](#c1-is-a-separate-question-too).
+- **Mixed T1 + C1 on one device** → no measurable T1 cost on `SX1262`, `LR1121` or `SX1276` since the 2026-09-30 fix; `CC1101` not re-measured.
+- **Two dedicated devices** (`T1-only` and `C1-only`) → no longer needed: one device in `both` is enough on `SX1262`, `LR1121` and `SX1276`.
 - **`CC1101`** → only if that is the hardware you already own. It is behind an
   explicit safety gate and is not the chip to buy for this project.
 - **`LR1121`** → newest and the strongest receiver measured here so far, but the
@@ -68,9 +68,9 @@ The number of meters alone is not the whole story. A few fast meters can hurt mo
 | Apartment block with many nearby meters | weak | acceptable only in easier cases | recommended | good, least proven |
 | Fast meters around 30–60 s | weak | often weak | recommended | good |
 | Larger packets under time pressure | weak | weak | recommended | good |
-| `both` on one device | not recommended | not re-measured since the fix | **fine** - no measurable T1 cost | fine - no measurable T1 cost |
+| `both` on one device | not recommended | **fine** - no measurable T1 cost | **fine** - no measurable T1 cost | fine - no measurable T1 cost |
 | S1 meters near the noise floor | raw sniffer only | **recommended** | weaker, see below | promising, single test |
-| C1 meters | untested here | good, not re-measured since the fix | **good** in `both`, see below | hears the C1 meters within its (shorter) T1 range |
+| C1 meters | untested here | **best** in `both` (14 C1 meters) | **good** in `both`, see below | hears the C1 meters within its (shorter) T1 range |
 | Need maximum reliability | no | limited | recommended | not yet provable |
 | Availability of a second opinion | wide | wide | wide | one board, one house |
 
@@ -118,7 +118,7 @@ meters, working day 07:00-16:00:
 |---|---|---|
 | `SX1262` (LilyGO T-Beam) | **10** | 56 C1 frames/h; was 2 with the bug |
 | `LR1121` | 1 | the strongest Techem, received in full; the other C1 meters are beyond its range on T1 too |
-| `SX1276` | not re-measured | runs `t1` on the bench |
+| `SX1276` (LilyGO) | **14** | 2026-10-01/02, 18.5 h; the strong ones at 8-9 frames/h, the weakest (−94…−98 dBm) now and then |
 
 **The low C1 figures below were mostly the sync-word bug, not the chips.** The
 conclusion drawn from them - that the gap to the `SX1276` cannot be closed in
@@ -156,8 +156,8 @@ telegram on C1. The readable values arrive on T1, which the `SX1262` receives
 well; the C1 telegram is useless without the key anyway.
 
 Practical rule: **if you have C1 meters, run `SX1262` in `listen_mode: both`.**
-`SX1276` was the C1 recommendation before the fix and has not been re-measured
-since; for the weakest C1 meters it may still be the better ear.
+`SX1276` in `both` heard the most C1 meters (14 against 10 on the T-Beam) and
+remains the better ear for the weakest ones.
 
 ## `both` mode conclusion
 
@@ -177,8 +177,10 @@ meters either way is noise; the RSSI tail being identical is the clearer signal.
 Practical takeaway:
 
 - on `SX1262` and `LR1121`, **`both` is fine** - turn it on if you have C1 meters,
-- on `SX1276`, `both` has not been re-measured since the fix. Before it, one
-  night took it from 119 to 108 T1 meters, measured with the bug,
+- on `SX1276`, **`both` is fine as well**: a LilyGO in `both` heard 143 T1 meters
+  over 07:00-11:00 against 131 and 132 on the same hours in `t1`, with the
+  control boards flat (T-Beam 141 → 142). The earlier 119 → 108 was measured
+  with the bug,
 - the earlier figures (118 → 64 on the T-Beam, 62 → 40 on the `LR1121`, one night
   2026-09-25/26) were the sync-word bug plus a neighbouring antenna on the bench,
   not the cost of `both`.
