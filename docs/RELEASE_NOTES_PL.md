@@ -2,6 +2,15 @@
 
 [English version](RELEASE_NOTES.md)
 
+## SX1262: `long_gfsk_packets: true` gubi mniej słabych ramek
+
+- **Strumień długich ramek nie czyta już radia po SPI bez przerwy, gdy ramka napływa.** Sprawdza wskaźnik odbioru co 15 ms. To ciągły ruch na SPI w trakcie odbioru odbierał tej ścieżce słabe sygnały - owe „około 7 dB” z dokumentacji.
+- **Zmierzone na jednym T-Beamie, w tym samym miejscu, w tych samych dniach (2026-10-12..14):** ze starą ciasną pętlą płytka słyszała ok. 25% liczników mniej i ok. 3,5 raza mniej najsłabszych ramek niż przy `long_gfsk_packets: false`. Odczyt co 15 ms przywrócił liczbę liczników do poziomu `false` i ok. dwie trzecie utraconych słabych ramek. Najsłabsze liczniki nadal docierają rzadziej niż przy `false`, więc opcja pozostaje wymianą - włączaj ją tylko dla ramek powyżej ok. 150 bajtów zdekodowanych.
+- **Długie ramki na tym nie tracą:** na stanowisku tłumikowym (2026-10-16) ramki 326 i 435 bajtów, które zawijają 256-bajtowy bufor radia raz i dwa razy, były odbierane tak samo w całości jak przy ciasnej pętli, od -50 do ok. -83 dBm.
+- `long_gfsk_packets: false` - ustawienie domyślne - nie zmienia się wcale.
+
+---
+
 ## Poprawka: `c1` i `both` słuchają na jednym słowie synchronizacji, 0x543D
 
 - **Każdy sterownik (SX1262, SX1276, LR1121, CC1101) w `listen_mode: c1` i `both` - czyli w trybie domyślnym - co czwarte uzbrojenie ustawiał synchronizację na 0x54CD.** Według EN 13757-4 nagłówek trybu C to 0x543D, a po nim 0x54CD (format A) albo 0x543D (format B); nagłówek trybu T też kończy się na 0x543D. Samo 0x543D łapie więc T1 i oba formaty C1, a rozróżniają je dopiero bajty za nim. Uzbrojenie na 0x54CD nie słyszało ani T1, ani C1 formatu B, a ramka formatu A złapana na drugim słowie była potem brana za T1 i ginęła.

@@ -38,7 +38,7 @@ S1 używa innego profilu RF niż T1/C1, dlatego nie jest łączony z `both`.
 | `has_tcxo` | `false` | włącz dla modułów z TCXO, np. część Heltec |
 | `dio2_rf_switch` / `rf_switch` | `true` | sterowanie RF switch przez DIO2 |
 | `rx_gain` | `boosted` | `boosted` albo `power_saving` |
-| `long_gfsk_packets` | `false` | tryb długich pakietów GFSK; **kosztuje ok. 7 dB przy słabym sygnale** — włączać tylko, gdy realnie odbierasz ramki powyżej ~150 bajtów zdekodowanych |
+| `long_gfsk_packets` | `false` | tryb długich pakietów GFSK; **najsłabsze liczniki docierają rzadziej** (kosztował ok. 7 dB; odczyt co 15 ms odzyskał większość) — włączać tylko, gdy realnie odbierasz ramki powyżej ~150 bajtów zdekodowanych |
 | `min_preamble_bits` | `16` | próg detektora preambuły; dla T1 **16 to maksimum**, `8` kosztuje ok. 16% liczników (patrz `CONFIG_REFERENCE_MINIMAL_PL.md`) |
 | `clear_device_errors_on_boot` | `false` | czyści latched device errors po starcie |
 | `publish_dev_err_after_clear` | `false` | publikuje wynik czyszczenia błędów |

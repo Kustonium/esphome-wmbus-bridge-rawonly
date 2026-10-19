@@ -127,7 +127,7 @@ wmbus_radio:
   long_gfsk_packets: false
 ```
 
-At boot, the component prints a multiline SX1262 YAML sanity report. Missing `has_tcxo: true` on TCXO-based boards can still allow the radio to initialize, but RX may be completely silent. The default `long_gfsk_packets: false` preserves sensitivity; enable it only for frames above about 150 decoded bytes. Streaming cost about 7 dB with weak signals in the documented measurements.
+At boot, the component prints a multiline SX1262 YAML sanity report. Missing `has_tcxo: true` on TCXO-based boards can still allow the radio to initialize, but RX may be completely silent. The default `long_gfsk_packets: false` preserves sensitivity; enable it only for frames above about 150 decoded bytes. Streaming used to cost about 7 dB with weak signals; since it reads the radio every 15 ms instead of non-stop it keeps the meter count of `false`, but the weakest meters still arrive less often.
 
 Some modules gate their antenna path behind an external pin and stay roughly 30 dB deaf without it. The Seeed Wio-SX1262 is one of them - on the XIAO ESP32S3 kit that pin is `GPIO38`:
 

@@ -38,7 +38,7 @@ S1 uses a different RF profile from T1/C1 and is therefore not included in `both
 | `has_tcxo` | `false` | enable for TCXO modules, including some Heltec boards |
 | `dio2_rf_switch` / `rf_switch` | `true` | RF-switch control through DIO2 |
 | `rx_gain` | `boosted` | `boosted` or `power_saving` |
-| `long_gfsk_packets` | `false` | long GFSK packet mode; **costs about 7 dB with weak signals** — enable only when receiving frames above ~150 decoded bytes |
+| `long_gfsk_packets` | `false` | long GFSK packet mode; **the weakest meters arrive less often** (it used to cost about 7 dB; reading every 15 ms recovered most of it) — enable only when receiving frames above ~150 decoded bytes |
 | `min_preamble_bits` | `16` | preamble detector threshold; **16 is the maximum for T1**; `8` costs about 16% of meters heard (see `CONFIG_REFERENCE_MINIMAL.md`) |
 | `clear_device_errors_on_boot` | `false` | clear latched device errors after startup |
 | `publish_dev_err_after_clear` | `false` | publish the error-clear result |
