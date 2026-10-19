@@ -94,6 +94,9 @@ class SX1262 : public RadioTransceiver {
   // from the radio buffer while RX is still running (rxAddrPtr wrap + RxTxPldLen).
   // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
   void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
+  void set_stream_poll_ms(uint8_t v) { this->stream_poll_ms_ = v; }
+  void set_force_long_stream(bool v) { this->force_long_stream_ = v; }
+  void set_use_dcdc(bool v) { this->use_dcdc_ = v; }
   // FIFO path: SetPacketParams fixes the payload at 255 bytes.
   size_t fixed_capture_limit() const override { return this->long_gfsk_packets_ ? 0 : 255; }
 
@@ -208,6 +211,11 @@ class SX1262 : public RadioTransceiver {
   bool rx_stopped_by_capture_{false};
   const char *last_capture_exit_{"none"};
   bool long_gfsk_packets_{false};
+  // Stream path options, see sx1262_stream_poll_ms in __init__.py.
+  uint8_t stream_poll_ms_{15};
+  bool force_long_stream_{false};
+  // Bench option, see sx1262_regulator in __init__.py. false = LDO (reset default).
+  bool use_dcdc_{false};
   bool clear_device_errors_on_boot_{false};
 
   // Adaptive long-stream hold. Only meaningful when long_gfsk_packets_ is true.

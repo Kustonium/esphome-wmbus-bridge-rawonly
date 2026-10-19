@@ -128,7 +128,7 @@ wmbus_radio:
   long_gfsk_packets: false
 ```
 
-Podczas startu komponent wypisuje wieloliniowy raport sanity YAML dla SX1262. Brak `has_tcxo: true` na płytkach z TCXO może nadal pozwolić na inicjalizację radia, ale RX może być całkowicie martwy. Domyślne `long_gfsk_packets: false` zachowuje czułość; włącz tę opcję tylko dla ramek powyżej około 150 bajtów zdekodowanych. Tryb strumieniowy kosztował w opisanych pomiarach około 7 dB przy słabym sygnale.
+Podczas startu komponent wypisuje wieloliniowy raport sanity YAML dla SX1262. Brak `has_tcxo: true` na płytkach z TCXO może nadal pozwolić na inicjalizację radia, ale RX może być całkowicie martwy. Domyślne `long_gfsk_packets: false` zachowuje czułość; włącz tę opcję tylko dla ramek powyżej około 150 bajtów zdekodowanych. Tryb strumieniowy kosztował około 7 dB przy słabym sygnale; odkąd czyta radio co 15 ms zamiast bez przerwy, słyszy tyle liczników co przy `false`, ale najsłabsze docierają rzadziej.
 
 Część modułów bramkuje swój tor antenowy zewnętrznym wyprowadzeniem i bez niego pracuje z czułością niższą o około 30 dB. Moduł Seeed Wio-SX1262 jest jednym z nich — w zestawie z XIAO ESP32-S3 tym wyprowadzeniem jest `GPIO38`:
 

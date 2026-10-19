@@ -2,6 +2,15 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## SX1262: `long_gfsk_packets: true` loses fewer weak frames
+
+- **The long-frame stream no longer reads the radio over SPI non-stop while a frame is arriving.** It checks the receive pointer every 15 ms instead. The constant SPI traffic during reception was what cost this path its weak-signal tail, the "about 7 dB" in the docs.
+- **Measured on one T-Beam, same site, same days (2026-10-12..14):** with the old tight loop the board heard about 25% fewer meters and about 3.5 times fewer of the weakest frames than with `long_gfsk_packets: false`. Reading every 15 ms brought the meter count back to that of `false` and about two thirds of the lost weak frames. The very weakest meters still arrive less often than with `false`, so the option remains a trade - enable it only for frames above about 150 decoded bytes.
+- **Long frames are not affected:** on an attenuator bench (2026-10-16) 326- and 435-byte frames, which wrap the radio's 256-byte buffer once and twice, were received as fully as with the tight loop from -50 down to about -83 dBm.
+- `long_gfsk_packets: false` - the default - is not affected at all.
+
+---
+
 ## Fix: `c1` and `both` listen on one sync word, 0x543D
 
 - **Every driver (SX1262, SX1276, LR1121, CC1101) armed on 0x54CD every fourth time in `listen_mode: c1` and `both`** - the default mode. Per EN 13757-4 the C-mode header is 0x543D followed by 0x54CD (format A) or 0x543D (format B), and the T-mode header ends in 0x543D too, so 0x543D alone catches T1 and both C1 formats; the bytes after it tell them apart. An arm on 0x54CD heard no T1 and no C1 format B at all, and a format-A frame caught on its second word was then parsed as T1 and lost.
