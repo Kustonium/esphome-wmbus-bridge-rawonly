@@ -430,3 +430,28 @@ add-on session: the radio always starts faster than NTP answers, so the
 first few frames go out unstamped and stay in the session counter until it
 resets. On the next add-on restart (with SNTP already running on the board)
 you should see `synced`.
+
+## 19. A weak meter comes and goes, or one board hears it and another does not
+
+Before blaming the board or buying another, move the antenna. At 868 MHz the
+wavelength is 34.5 cm; a meter's signal reaches you over several paths (walls,
+floors, neighbouring buildings, windows) and they cancel every ~17 cm. Each meter
+has its own pattern of such spots, so a few centimetres can bring one meter in
+and drop another. Only weak meters notice: a meter with margin to spare still
+gets through in a cancellation spot. Weak usually means far away, but a meter a
+few floors down behind concrete can be just as weak.
+
+Measured on 2026-10-20/21: one board's antenna moved 30-50 cm along the same wall
+heard about 11% more frames from most meters and lost a whole group of meters it
+had heard every day before.
+
+What to do:
+
+- move the antenna in steps of a few centimetres and watch the meter you care
+  about for a few transmission intervals at each spot (`meter_window`);
+- keep the antenna away from cables - power, USB, Ethernet - and higher rather
+  than lower;
+- if two groups of meters need different spots, two receivers in two places hear
+  more together than either alone;
+- when comparing two boards, put them on the same antenna in the same spot, one
+  after the other. Otherwise you are comparing the spots.

@@ -624,7 +624,9 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
         hint_en = "C1 frames fail DLL CRC despite decent RSSI; check interference/RX settings";
         hint_pl = "C1: CRC DLL nie przechodzi mimo niezłego RSSI; sprawdź zakłócenia/ustawienia RX";
       }
-    } else if (c1_total > 0 && c1_crc > 0 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+    } else if (c1_total > 0 && c1_crc >= 3 && c1_crc_pct >= 5 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+      // Needs a real share of failures, not one bad frame: a user's CC1101 with five strong
+      // C1 meters (1 % CRC loss over 15 h) got this hint 58 times from single drops.
       hint_code = "C1_OVERLOAD_OR_MULTIPATH";
       hint_en = "C1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move antenna 0.5-2m, change polarization, or attenuate.";
       hint_pl = "C1: CRC pada mimo dobrego RSSI; możliwy przester odbiornika lub wielodrogowość. Odsuń antenę 0,5-2m, zmień polaryzację lub stłum sygnał.";
@@ -1118,7 +1120,9 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
         hint_en = "C1 frames fail DLL CRC despite decent RSSI; check interference/RX settings";
         hint_pl = "C1: CRC DLL nie przechodzi mimo niezłego RSSI; sprawdź zakłócenia/ustawienia RX";
       }
-    } else if (c1_total > 0 && c1_crc > 0 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+    } else if (c1_total > 0 && c1_crc >= 3 && c1_crc_pct >= 5 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+      // Needs a real share of failures, not one bad frame: a user's CC1101 with five strong
+      // C1 meters (1 % CRC loss over 15 h) got this hint 58 times from single drops.
       hint_code = "C1_OVERLOAD_OR_MULTIPATH";
       hint_en = "C1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move antenna 0.5-2m, change polarization, or attenuate.";
       hint_pl = "C1: CRC pada mimo dobrego RSSI; możliwy przester odbiornika lub wielodrogowość. Odsuń antenę 0,5-2m, zmień polaryzację lub stłum sygnał.";
@@ -1610,7 +1614,9 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
         hint_en = "C1 frames fail DLL CRC despite decent RSSI; check interference/RX settings";
         hint_pl = "C1: CRC DLL nie przechodzi mimo niezłego RSSI; sprawdź zakłócenia/ustawienia RX";
       }
-    } else if (c1_total > 0 && c1_crc > 0 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+    } else if (c1_total > 0 && c1_crc >= 3 && c1_crc_pct >= 5 && c1_avg_ok_rssi >= -65 && c1_avg_drop_rssi >= -80) {
+      // Needs a real share of failures, not one bad frame: a user's CC1101 with five strong
+      // C1 meters (1 % CRC loss over 15 h) got this hint 58 times from single drops.
       hint_code = "C1_OVERLOAD_OR_MULTIPATH";
       hint_en = "C1 CRC fails despite strong RSSI; possible receiver overload or multipath. Move antenna 0.5-2m, change polarization, or attenuate.";
       hint_pl = "C1: CRC pada mimo dobrego RSSI; możliwy przester odbiornika lub wielodrogowość. Odsuń antenę 0,5-2m, zmień polaryzację lub stłum sygnał.";

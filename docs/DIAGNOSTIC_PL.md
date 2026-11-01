@@ -326,6 +326,7 @@ Znaczniki:
 | `(default)` | obecne i równe domyślnej ze schematu |
 | `(CHANGED, default: X)` | ustawione przez Ciebie i różne od `X` |
 | `not set (default: X)` | nieobecne; obowiązuje `X` |
+| `(from diagnostic_mode: X)` | nie ustawione przez Ciebie; wartość pochodzi z presetu `diagnostic_mode` `X` (przełączniki w `[diagnostics]`, np. `diagnostic_verbose`) |
 
 Lista powstaje przy kompilacji **ze schematu**, więc domyślna nie może rozjechać
 się z tym, czego naprawdę używa sterownik. Wypisywane są wyłącznie opcje

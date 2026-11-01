@@ -327,6 +327,7 @@ Markers:
 | `(default)` | present, and equal to the schema default |
 | `(CHANGED, default: X)` | you set it, and it differs from `X` |
 | `not set (default: X)` | absent; `X` applies |
+| `(from diagnostic_mode: X)` | not set by you; the value comes from the `diagnostic_mode` preset `X` (the `[diagnostics]` switches such as `diagnostic_verbose`) |
 
 The list is built at compile time from the schema, so a default can never drift
 away from what the driver actually uses. Only options that apply to the selected

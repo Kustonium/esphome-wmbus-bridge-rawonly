@@ -242,4 +242,10 @@ go do tej klamry), ale skala efektu w innych warunkach jest nieznana.
   dBm z dwóch różnych płytek mierzy front end, a nie odbiór.
 - **Liczby ramek są porównywalne tylko wtedy, gdy płytki stoją w tym samym
   miejscu.** W żadnym z cytowanych tu testów tak nie było, więc każda liczba
-  „międzyukładowa" opisuje płytkę w danym położeniu, a nie sam układ.
+  „międzyukładowa" opisuje płytkę w danym położeniu, a nie sam układ. Ile waży
+  położenie, zmierzono 2026-10-20/21: przesunięcie anteny jednej płytki SX1262
+  o 30-50 cm wzdłuż tej samej ściany dało jej ok. 11% więcej ramek od większości
+  liczników i zabrało całą grupę liczników, którą wcześniej słyszała codziennie -
+  ta sama płytka, te same ustawienia, ta sama antena, kontrola bez zmian. Na
+  868 MHz odbicia wygaszają się co ~17 cm (pół długości fali), a każdy licznik ma
+  własny układ takich miejsc. Zobacz TROUBLESHOOTING, punkt 19.
