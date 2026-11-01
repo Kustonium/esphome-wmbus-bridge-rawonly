@@ -2,6 +2,22 @@
 
 [English version](RELEASE_NOTES.md)
 
+## CC1101: bez fałszywych alarmów przy starcie; podpowiedź o przesterowaniu C1 tylko przy realnych stratach
+
+- **Autotest CC1101 przy starcie nie ostrzega już `RADIO_NOT_IN_RX`, gdy układ kalibruje się w drodze do RX** (`MARCSTATE` STARTCAL..ENDCAL, odczyt tuż po komendzie RX). Wcześniej zdrowe radio dostawało komunikat, że „RX powinien zostać uruchomiony ponownie”.
+- **Opóźniony raport startowy mówi `RX_LISTENING` zamiast `RADIO_OK_NO_RF_SYNC`**, gdy w tej chwili nie leci żadna ramka. Stary tekst twierdził, że nie wykryto sync ani danych, i odsyłał do modułu i anteny, kilka sekund po zdekodowaniu pierwszych ramek. `RADIO_OK_NO_RF_SYNC` zostaje dla przekroczenia czasu oczekiwania na ramkę, gdzie znaczy to, co mówi.
+- **Linie ocena / po ludzku / status debug / zrzut konfiguracji CC1101 mają teraz poziom werdyktu**: info przy zdrowym radiu, ostrzeżenie lub błąd tylko wtedy, gdy werdykt nim jest.
+- **`C1_OVERLOAD_OR_MULTIPATH` wymaga co najmniej 3 błędów CRC w C1 i co najmniej 5% ramek C1 w oknie** (podsumowania 60 s, 15 min i 60 min). Wcześniej wystarczała jedna zła ramka przy mocnym liczniku: CC1101 użytkownika z pięcioma licznikami Kamstrup przy 1% strat CRC przez 15 godzin dostał tę podpowiedź 58 razy.
+
+---
+
+## Raport startowy pokazuje przełączniki diagnostyki; opisane położenie anteny
+
+- **Część `[diagnostics]` raportu konfiguracji przy starcie wymienia teraz każdy przełącznik ustawiany przez `diagnostic_mode`** - `diagnostic_verbose`, `diagnostic_publish_raw`, `diagnostic_publish_summary`, przełączniki zdarzeń i podsumowań oraz `diagnostic_meter_stats` - z wartością faktyczną i znacznikiem `(from diagnostic_mode: X)`. Nie mają domyślnej w schemacie, więc raport w ogóle je pomijał: płytka na `diagnostic_mode: dev` nie pokazywała `diagnostic_verbose`, co raz zostało odczytane jako „verbose wyłączone" i skończyło się niepotrzebnym wgrywaniem. Odbiór i to, co jest publikowane, nie zmieniają się.
+- **Nowe: TROUBLESHOOTING, punkt 19** o słabym liczniku, który raz jest, a raz go nie ma. Na 868 MHz odbicia wygaszają się co ~17 cm, a każdy licznik ma własny układ takich miejsc; przesunięcie anteny jednej płytki o 30-50 cm dało jej ok. 11% więcej ramek od większości liczników i zabrało całą grupę liczników, którą słyszała codziennie. Zanim wymienisz płytkę, przesuwaj antenę o centymetry. CHIP_SELECTION i BENCHMARKS mówią teraz, ile położenie waży w liczbach porównujących płytki.
+
+---
+
 ## SX1262: `long_gfsk_packets: true` gubi mniej słabych ramek
 
 - **Strumień długich ramek nie czyta już radia po SPI bez przerwy, gdy ramka napływa.** Sprawdza wskaźnik odbioru co 15 ms. To ciągły ruch na SPI w trakcie odbioru odbierał tej ścieżce słabe sygnały - owe „około 7 dB” z dokumentacji.

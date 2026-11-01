@@ -41,6 +41,12 @@ Nie porównuj `summary` i `meter_window` tak, jakby mierzyły to samo.
 
 To była główna pułapka diagnostyczna w tych testach.
 
+Druga pułapka to położenie. Dwa odbiorniki oddalone o 30-50 cm nie słyszą tych
+samych liczników: na 868 MHz odbicia wygaszają się co ~17 cm, a każdy licznik ma
+inny układ takich miejsc. Różnica między dwiema płytkami stojącymi w różnych
+miejscach jest po części różnicą między miejscami (zmierzone 2026-10-20/21, zob.
+CHIP_SELECTION, „Ograniczenia").
+
 ---
 
 ## 1. T1-only

@@ -770,9 +770,24 @@ _REPORT_OUTPUT = (CONF_TOPIC_NAME, CONF_TELEGRAM_TOPIC, CONF_PUBLISH_RSSI,
 _REPORT_DIAG = (CONF_DIAGNOSTIC_MODE, CONF_DIAG_SUMMARY_INTERVAL, CONF_DIAG_TOPIC,
                 CONF_HIGHLIGHT_METERS, CONF_DIAG_METER_STATS, CONF_DIAG_VERBOSE)
 
+# Settings whose effective value normally comes from the diagnostic_mode preset.
+# They have no schema default, so the generic filter below dropped every one of
+# them from the report: a board on diagnostic_mode: dev showed no
+# diagnostic_verbose at all, and on 2026-09-05 that read as "verbose is off" and
+# cost a needless reflash. They are now printed with their effective value.
+_REPORT_DIAG_PRESET = (CONF_DIAG_METER_STATS, CONF_DIAG_VERBOSE, CONF_DIAG_PUBLISH_RAW,
+                       CONF_DIAG_PUBLISH_SUMMARY, CONF_DIAG_PUBLISH_DROP_EVENTS,
+                       CONF_DIAG_PUBLISH_RX_PATH_EVENTS, CONF_DIAG_EVENTS_HIGHLIGHT_ONLY,
+                       CONF_DIAG_PUBLISH_SUGGESTION, CONF_DIAG_PUBLISH_SUMMARY_15MIN,
+                       CONF_DIAG_PUBLISH_SUMMARY_60MIN)
 
-def _config_report_lines(config):
-    """Every effective setting, marked (default) or (changed)."""
+
+def _config_report_lines(config, diag_effective=None, diag_mode=None):
+    """Every effective setting, marked (default) or (changed).
+
+    diag_effective maps the _REPORT_DIAG_PRESET keys to the values to_code()
+    resolved; keys the user did not set are reported as coming from the preset.
+    """
     defaults = _schema_defaults()
     radio_type = str(config[CONF_RADIO_TYPE]).upper()
     lines = []
@@ -815,10 +830,21 @@ def _config_report_lines(config):
         if title == "pins":
             # A pin that does not exist on this radio is noise, not information.
             reported = [k for k in keys if k in config]
+        if title == "diagnostics" and diag_effective:
+            reported = [k for k in keys if k not in _REPORT_DIAG_PRESET and k in reported]
+            reported += [k for k in _REPORT_DIAG_PRESET if k in diag_effective]
         if not reported:
             continue
         lines.append(f"  [{title}]")
         for key in reported:
+            if title == "diagnostics" and diag_effective and key in diag_effective and key not in config:
+                value = _report_value(diag_effective[key], key)
+                if key == CONF_DIAG_EVENTS_HIGHLIGHT_ONLY and CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY in config:
+                    source = f"set via {CONF_DIAG_PUBLISH_HIGHLIGHT_ONLY}"
+                else:
+                    source = f"from diagnostic_mode: {diag_mode}"
+                lines.append(f"  {key}: {value} ({source})")
+                continue
             emit(key)
     return lines
 
@@ -1435,7 +1461,19 @@ async def to_code(config):
             CONF_GDO2_PIN in config,
         ))
 
-    for _line in _config_report_lines(config):
+    diag_effective = {
+        CONF_DIAG_METER_STATS: meter_stats,
+        CONF_DIAG_VERBOSE: config.get(CONF_DIAG_VERBOSE, diag_preset["verbose"]),
+        CONF_DIAG_PUBLISH_RAW: config.get(CONF_DIAG_PUBLISH_RAW, diag_preset["raw"]),
+        CONF_DIAG_PUBLISH_SUMMARY: config.get(CONF_DIAG_PUBLISH_SUMMARY, diag_preset["summary"]),
+        CONF_DIAG_PUBLISH_DROP_EVENTS: config.get(CONF_DIAG_PUBLISH_DROP_EVENTS, diag_preset["drop"]),
+        CONF_DIAG_PUBLISH_RX_PATH_EVENTS: config.get(CONF_DIAG_PUBLISH_RX_PATH_EVENTS, diag_preset["rx_path"]),
+        CONF_DIAG_EVENTS_HIGHLIGHT_ONLY: diag_events_highlight_only,
+        CONF_DIAG_PUBLISH_SUGGESTION: config.get(CONF_DIAG_PUBLISH_SUGGESTION, diag_preset["suggestion"]),
+        CONF_DIAG_PUBLISH_SUMMARY_15MIN: config.get(CONF_DIAG_PUBLISH_SUMMARY_15MIN, diag_preset["summary_15min"]),
+        CONF_DIAG_PUBLISH_SUMMARY_60MIN: config.get(CONF_DIAG_PUBLISH_SUMMARY_60MIN, diag_preset["summary_60min"]),
+    }
+    for _line in _config_report_lines(config, diag_effective, diag_mode):
         cg.add(var.add_config_report_line(_line))
 
     # Log highlight config

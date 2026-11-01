@@ -704,12 +704,19 @@ void CC1101::dump_debug_status(const char *reason) {
   const int gdo2 = this->gdo2_pin_ != nullptr ? (int) this->gdo2_pin_->digital_read() : -1;
 
   const bool after_setup = reason != nullptr && std::strcmp(reason, "after_setup") == 0;
+  // boot_log and after_setup look at one instant. "No sync right now" is the normal
+  // state between transmissions there, not a fault; only a receive-wait timeout says
+  // that nothing has arrived for a while.
+  const bool snapshot = after_setup || (reason != nullptr && std::strcmp(reason, "boot_log") == 0);
 
   const bool spi_ok = version_responds_(version);
   const bool chip_id_known = version_known_(version) && partnum == EXP_PARTNUM;
   const bool rx_running = marc == 0x0D;
   const bool rx_recovering = marc == 0x0E || marc == 0x0F;
-  const bool rx_state_ok = rx_running || rx_recovering;
+  // STARTCAL..ENDCAL (0x08-0x0C) is the calibration the chip runs on its way into RX;
+  // after_setup reads MARCSTATE right after SRX and usually lands in it.
+  const bool rx_entering = marc >= 0x08 && marc <= 0x0C;
+  const bool rx_state_ok = rx_running || rx_recovering || rx_entering;
   const bool rx_overflow_state = marc == 0x11 || overflow;
   const bool sync_seen_now = gdo2 > 0;
   const bool fifo_threshold_now = gdo0 > 0;
@@ -787,6 +794,11 @@ void CC1101::dump_debug_status(const char *reason) {
     diag_en = "Startup configuration is valid. SPI, GDO mapping, packet mode and RF profile look correct.";
     diag_pl = "Konfiguracja startowa jest poprawna. SPI, GDO, tryb pakietu i profil RF wygladaja dobrze.";
     warning = false;
+  } else if (snapshot && rx_running && !has_fifo_data && !sync_seen_now && !fifo_threshold_now) {
+    diag_code = "RX_LISTENING";
+    diag_en = "CC1101 is listening. No frame is in flight at this instant, which is normal between transmissions; received frames appear as 'Have data' lines.";
+    diag_pl = "CC1101 slucha. W tej chwili zadna ramka nie leci, co jest normalne miedzy transmisjami; odebrane ramki widac w liniach 'Have data'.";
+    warning = false;
   } else if (rx_running && !has_fifo_data && !sync_seen_now && !fifo_threshold_now) {
     diag_code = "RADIO_OK_NO_RF_SYNC";
     diag_en = "CC1101 is alive and listening, but no T1/C1 sync or data was detected. This is not a decoder problem. Check 868 MHz module, antenna, RF signal, transmitter presence or RF profile.";
@@ -833,13 +845,24 @@ void CC1101::dump_debug_status(const char *reason) {
              partnum, version);
   }
 
+  // The four detail lines below take the verdict's level, so a healthy radio does not
+  // print a block of warnings at every boot.
+#define CC1101_DETAIL_LOG(...) \
+  do { \
+    if (severe || warning) { \
+      ESP_LOGW(TAG, __VA_ARGS__); \
+    } else { \
+      ESP_LOGI(TAG, __VA_ARGS__); \
+    } \
+  } while (0)
+
   const char *rx_summary = rx_running ? "LISTENING" : (rx_overflow_state ? "FIFO_OVERFLOW" : marc_state_name_(marc));
   const char *data_summary = has_fifo_data ? "DATA_IN_FIFO" : "FIFO_EMPTY";
   const char *event_summary = sync_seen_now ? "SYNC_ACTIVE" : (fifo_threshold_now ? "FIFO_THRESHOLD_ACTIVE" : "NO_RF_EVENT_NOW");
   const bool gdo2_inverted = (iocfg2 & 0x40) != 0;
   const bool gdo0_inverted = (iocfg0 & 0x40) != 0;
 
-  ESP_LOGW(TAG,
+  CC1101_DETAIL_LOG(
            LOG_TR("CC1101 health: ", "CC1101 ocena: ") "SPI=%s config=%s RX=%s(%s) FIFO=%s overflow=%s event=%s "
            "GDO0=%s/%s%s GDO2=%s/%s%s packet=%s sync=%s",
            ok_bad_(spi_ok), ok_bad_(config_ok), rx_summary, marc_state_name_(marc),
@@ -849,7 +872,7 @@ void CC1101::dump_debug_status(const char *reason) {
            pkt_length_mode_name_(pktctrl0),
            sync_t1 ? "T1(0x543D)" : (sync_c1 ? "C1(0x54CD)" : "UNKNOWN"));
 
-  ESP_LOGW(TAG,
+  CC1101_DETAIL_LOG(
            LOG_TR("CC1101 plain status: ", "CC1101 po ludzku: ") "chip=%s, config=%s, radio=%s, fifo_bytes=%u, "
            "sync_pin=%s, fifo_pin=%s, packet_mode=%s, rf_profile=%s",
            spi_ok ? "responds" : "NOT_RESPONDING",
@@ -861,7 +884,7 @@ void CC1101::dump_debug_status(const char *reason) {
            pkt_infinite ? "OK(infinite)" : "BAD(not infinite)",
            rf_profile_ok ? "OK" : "BAD");
 
-  ESP_LOGW(TAG,
+  CC1101_DETAIL_LOG(
            LOG_TR("CC1101 debug status: ", "CC1101 status debug: ") "reason=%s PARTNUM=0x%02X VERSION=0x%02X "
            "MARCSTATE=0x%02X(%u) RXBYTES=0x%02X(count=%u overflow=%s) "
            "GDO0=%d GDO2=%d chip_not_ready=%u reg_write_failed=%u reg_write_retries=%u",
@@ -871,7 +894,7 @@ void CC1101::dump_debug_status(const char *reason) {
            (unsigned) this->chip_not_ready_count_, (unsigned) this->reg_failed_count_,
            (unsigned) this->reg_retry_count_);
 
-  ESP_LOGW(TAG,
+  CC1101_DETAIL_LOG(
            LOG_TR("CC1101 config snapshot: ", "CC1101 zrzut konfiguracji: ") "IOCFG2=0x%02X IOCFG0=0x%02X "
            "FIFOTHR=0x%02X PKTCTRL1=0x%02X PKTCTRL0=0x%02X FSCTRL1=0x%02X "
            "MDMCFG4=0x%02X MDMCFG3=0x%02X MDMCFG2=0x%02X DEVIATN=0x%02X "
@@ -880,6 +903,7 @@ void CC1101::dump_debug_status(const char *reason) {
            iocfg2, iocfg0, fifothr, pktctrl1, pktctrl0, fsctrl1,
            mdmcfg4, mdmcfg3, mdmcfg2, deviatn, foccfg, bscfg, agc2, agc1, agc0,
            frend1, fscal3, sync1, sync0);
+#undef CC1101_DETAIL_LOG
 }
 
 void CC1101::log_reg_status() {

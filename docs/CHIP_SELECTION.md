@@ -240,4 +240,10 @@ clamp) but the size of the effect elsewhere is unknown.
   across two different boards measures the front end, not the reception.
 - **Frame counts are only comparable when the boards stand in the same place.**
   They do not, in any of the tests quoted here, so every cross-chip number above
-  describes a board in a position, not a chip in isolation.
+  describes a board in a position, not a chip in isolation. How much the position
+  weighs was measured on 2026-10-20/21: moving one SX1262 board's antenna 30-50 cm
+  along the same wall gave it about 11% more frames from most meters and cost it
+  a whole group of meters it had heard every day before - same board, same
+  settings, same antenna, a quiet control board unchanged. At 868 MHz reflections
+  cancel every ~17 cm (half a wavelength), and every meter has its own pattern of
+  such spots. See TROUBLESHOOTING, section 19.

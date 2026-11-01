@@ -41,6 +41,12 @@ Do not compare `summary` and `meter_window` as if they measured the same thing.
 
 This is the main diagnostic trap in these tests.
 
+The second trap is placement. Two receivers 30-50 cm apart do not hear the same
+meters: at 868 MHz reflections cancel every ~17 cm, and each meter's pattern is
+different. A difference between two boards that stand in different spots is
+partly a difference between the spots (measured 2026-10-20/21, see
+CHIP_SELECTION, "Known limits").
+
 ---
 
 ## 1. T1-only
