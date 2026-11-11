@@ -286,8 +286,10 @@ jobs:
           # FUNDING.yml sits in the same tree.
           # The _PL twins were missing from this list, so the Polish README
           # and SUPPORT never followed dev: a section added to both READMEs
-          # reached stable in English only.
+          # reached stable in English only. CONTRIBUTING*: the READMEs link to
+          # them, so without them those links were 404 on stable.
           for item in README.md README_PL.md NOTICE SUPPORT.md SUPPORT_PL.md \
+                      CONTRIBUTING.md CONTRIBUTING_PL.md \
                       .github/workflows/ci.yml \
                       .github/ISSUE_TEMPLATE/bug_report.yml; do
             if [[ -e "_dev/${item}" ]]; then
