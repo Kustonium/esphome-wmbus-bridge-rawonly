@@ -202,6 +202,7 @@ optional<uint8_t> SX1276::drain_fifo_once_() {
 // touched outside setup(); everything else is listed here rather than duplicated.
 // ---------------------------------------------------------------------------
 void SX1276::setup() {
+  this->apply_stored_settings_();
   // Original driver used DIO1=FifoEmpty with falling edge.
   // Here DIO1 is remapped to FifoLevel, which is active-high, so wake on rising edge.
   this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE;

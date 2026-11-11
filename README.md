@@ -247,3 +247,5 @@ Before opening an issue, read [`SUPPORT.md`](SUPPORT.md).
 ## Contributing
 
 This repository publishes from a separate development tree, so a contribution does not land through the pull request branch itself — it is ported there first and arrives here as one squashed sync commit. That means your commits will not appear in this repository's history even though the code is yours. Authorship is recorded in two other places instead: the port commit in the development tree names your original commits, and the comment that closes your pull request states explicitly that the code is yours.
+
+How to start, how to run the tests and how to measure a change to the radio: [CONTRIBUTING.md](CONTRIBUTING.md).

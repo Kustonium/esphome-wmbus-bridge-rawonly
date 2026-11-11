@@ -155,7 +155,34 @@ CONF_SX1262_TCXO_STARTUP_MS = "sx1262_tcxo_startup_ms"
 # force_long_stream: stream every frame, since a bench without long frames
 # never trips the adaptive hold.
 CONF_SX1262_STREAM_POLL_MS = "sx1262_stream_poll_ms"
+# Bench option (2026-11-03): stream_quiet_ms: N > 0 keeps SPI off the radio for
+# the first N ms after the sync word, so a frame of up to ~12.5*N raw bytes has
+# arrived before the first access, as on the FIFO path. Another SX1262 driver
+# fixed lost weak IZAR frames this way (8 ms, then 1 ms polling); here the open
+# question is whether it recovers the part of the stream path's weak-frame loss
+# that 15 ms polling did not. 0 keeps today's behaviour. Capped at 12 ms: the
+# window plus task latency must stay below the ~20 ms the 256-byte ring takes.
+CONF_SX1262_STREAM_QUIET_MS = "sx1262_stream_quiet_ms"
 CONF_SX1262_FORCE_LONG_STREAM = "sx1262_force_long_stream"
+# Bench options (2026-11-09), CC1101 only. Both default to the modem profile
+# every CC1101 wM-Bus driver uses (MDMCFG2 0x06, AGCCTRL2 0x43), so leaving
+# them out changes nothing. On the bench the CC1101 (E07 module) decodes half
+# its frames at about -88 dBm where an SX1262 next to it still decodes most,
+# while TI measured the chip at -96..-97 dBm (PER 1 %, AN067): these test two
+# software reasons for part of that gap, one at a time.
+#   cc1101_agc_full_gain (REMOVED 2026-11-11 after the measurement below):
+#     AGCCTRL2 0x43 -> 0x03. MAX_DVGA_GAIN 01 forbids the highest DVGA gain
+#     step; 00 allows every step.
+#     MEASURED 2026-11-10/11, harmful: against a T-Beam (SX1262) next to
+#     it, the CC1101 caught ~30% fewer frames than with 0x43, day, evening and
+#     night alike (frame ratio CC1101/T-Beam 0.96-0.98 day and 0.88-0.94 night
+#     before, 0.67 day and 0.70 night after). The loss is in strong and middle
+#     frames (-81..-88 dBm on the LilyGO scale: 6% vs 31% at night) and nothing
+#     is gained on the weakest (-93 dBm and below: 5% vs 8%). 0x43 stays.
+#   cc1101_sync_15_16: MDMCFG2 0x06 -> 0x05. 16 of 16 sync bits plus carrier
+#     sense, versus 15 of 16 without it: one wrong sync bit no longer loses a
+#     weak frame. Expect more false starts (no carrier-sense gate).
+CONF_CC1101_SYNC_15_16 = "cc1101_sync_15_16"
 # Bench option: SX1262 regulator. The driver never sent SetRegulatorMode, so the
 # chip has always run on its reset default, the LDO. RadioLib and Semtech's
 # reference drivers switch to DC-DC at init, and another SX1262 driver that does
@@ -418,6 +445,7 @@ BASE_CONFIG_SCHEMA = (
             cv.Optional(CONF_GDO0_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_GDO2_PIN): pins.internal_gpio_input_pin_schema,
             cv.Optional(CONF_CC1101_ALLOW_EXPERIMENTAL, default=False): cv.boolean,
+            cv.Optional(CONF_CC1101_SYNC_15_16, default=False): cv.boolean,
             # SPI clock for the radio device only, not for the whole bus.
             #
             # The driver defaults to 2 MHz, which is well inside every supported
@@ -659,6 +687,7 @@ BASE_CONFIG_SCHEMA = (
             ),
             cv.Optional(CONF_SX1262_TCXO_STARTUP_MS, default=1): cv.int_range(min=1, max=20),
             cv.Optional(CONF_SX1262_STREAM_POLL_MS, default=15): cv.int_range(min=0, max=15),
+            cv.Optional(CONF_SX1262_STREAM_QUIET_MS, default=0): cv.int_range(min=0, max=12),
             cv.Optional(CONF_SX1262_FORCE_LONG_STREAM, default=False): cv.boolean,
             cv.Optional(CONF_SX1262_REGULATOR, default="ldo"): cv.one_of("ldo", "dcdc", lower=True),
 
@@ -750,11 +779,12 @@ _REPORT_RADIO = {
     "SX1262": (CONF_HAS_TCXO, CONF_TCXO_VOLTAGE, CONF_DIO2_RF_SWITCH, CONF_RF_SWITCH, CONF_RX_GAIN,
                CONF_LONG_GFSK_PACKETS, CONF_CLEAR_DEVICE_ERRORS_ON_BOOT,
                CONF_PUBLISH_DEV_ERR_AFTER_CLEAR, CONF_SX1262_RX_BANDWIDTH, CONF_SX1262_TCXO_STARTUP_MS,
-               CONF_MIN_PREAMBLE_BITS, CONF_SX1262_STREAM_POLL_MS, CONF_SX1262_FORCE_LONG_STREAM,
+               CONF_MIN_PREAMBLE_BITS, CONF_SX1262_STREAM_POLL_MS, CONF_SX1262_STREAM_QUIET_MS,
+               CONF_SX1262_FORCE_LONG_STREAM,
                CONF_SX1262_REGULATOR),
     "SX1276": (CONF_SX1276_BUSY_ETHER_MODE, CONF_MIN_PREAMBLE_BITS,
                CONF_SX1276_PREAMBLE_TOLERANCE),
-    "CC1101": (CONF_CC1101_ALLOW_EXPERIMENTAL,),
+    "CC1101": (CONF_CC1101_ALLOW_EXPERIMENTAL, CONF_CC1101_SYNC_15_16),
     "LR1121": (CONF_LR1121_ALLOW_EXPERIMENTAL, CONF_TCXO_VOLTAGE, CONF_TCXO_STARTUP_TICKS,
                CONF_RX_BANDWIDTH, CONF_MIN_PREAMBLE_BITS, CONF_PAYLOAD_LENGTH,
                CONF_RX_BOOSTED, CONF_BITRATE, CONF_DEVIATION,
@@ -855,7 +885,8 @@ def _validate_radio_pins(config):
     if CONF_TCXO_PIN in config and radio_type != "SX1276":
         raise cv.Invalid("tcxo_pin is only valid for radio_type: SX1276. For SX1262 use has_tcxo instead.")
 
-    for opt, default in ((CONF_SX1262_STREAM_POLL_MS, 15), (CONF_SX1262_FORCE_LONG_STREAM, False)):
+    for opt, default in ((CONF_SX1262_STREAM_POLL_MS, 15), (CONF_SX1262_STREAM_QUIET_MS, 0),
+                         (CONF_SX1262_FORCE_LONG_STREAM, False)):
         if config.get(opt, default) != default:
             if radio_type != "SX1262":
                 raise cv.Invalid(f"{opt} is only valid for radio_type: SX1262.")
@@ -890,6 +921,9 @@ def _validate_radio_pins(config):
             raise cv.Invalid("gdo0_pin/gdo2_pin are only valid for CC1101. Use irq_pin for SX1262/SX1276.")
         if CONF_CC1101_ALLOW_EXPERIMENTAL in config and config.get(CONF_CC1101_ALLOW_EXPERIMENTAL, False):
             raise cv.Invalid("cc1101_allow_experimental is only valid for radio_type: CC1101.")
+        for opt in (CONF_CC1101_SYNC_15_16,):
+            if config.get(opt, False):
+                raise cv.Invalid(f"{opt} is only valid for radio_type: CC1101.")
 
     if radio_type == "LR1121":
         if not config.get(CONF_LR1121_ALLOW_EXPERIMENTAL, False):
@@ -1091,6 +1125,7 @@ async def to_code(config):
         ))
         cg.add(radio_var.set_tcxo_startup_ms(config[CONF_SX1262_TCXO_STARTUP_MS]))
         cg.add(radio_var.set_stream_poll_ms(config[CONF_SX1262_STREAM_POLL_MS]))
+        cg.add(radio_var.set_stream_quiet_ms(config[CONF_SX1262_STREAM_QUIET_MS]))
         cg.add(radio_var.set_force_long_stream(config[CONF_SX1262_FORCE_LONG_STREAM]))
         cg.add(radio_var.set_use_dcdc(config[CONF_SX1262_REGULATOR] == "dcdc"))
 
@@ -1208,12 +1243,16 @@ async def to_code(config):
         cg.add(radio_var.set_gdo0_pin(gdo0_pin))
         cg.add(radio_var.set_gdo2_pin(gdo2_pin))
         cg.add(radio_var.set_frequency_mhz(frequency_mhz))
+        cg.add(radio_var.set_sync_15_16(config[CONF_CC1101_SYNC_15_16]))
         # Receiver task wake-up interrupt is the sync-detect line.
         cg.add(radio_var.set_irq_pin(gdo2_pin))
     else:
         cg.add(radio_var.set_frequency_mhz(frequency_mhz))
 
     cg.add(radio_var.set_listen_mode(listen_mode_map[effective_listen_mode]))
+    # A listen_mode stored by the add-on moves the default frequency with it
+    # (S1 868.30 / T1-C1 868.95) unless frequency: was written in YAML.
+    cg.add(radio_var.set_frequency_explicit(CONF_FREQUENCY in config))
 
     if config[CONF_RADIO_TYPE] != "CC1101":
         irq_pin = await cg.gpio_pin_expression(config[CONF_IRQ_PIN])

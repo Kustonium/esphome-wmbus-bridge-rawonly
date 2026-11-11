@@ -1006,7 +1006,11 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
       // afterwards can already fall past the end of the transmission.
       // With sx1262_stream_poll_ms set, sample once, on the first bytes: every
       // extra SPI transaction during reception is what that option removes.
-      if (this->stream_poll_ms_ == 0 || rssi_inflight == RSSI_NOT_MEASURED) {
+      // After a quiet window a short frame has already ended by the first read,
+      // so an in-flight sample would measure the channel; packet status
+      // (RssiSync, latched at the sync word) is used instead.
+      if (this->stream_quiet_ms_ == 0 &&
+          (this->stream_poll_ms_ == 0 || rssi_inflight == RSSI_NOT_MEASURED)) {
         const int8_t inst = this->read_rssi_inst_dbm_();
         if (inst != RSSI_NOT_MEASURED && inst > rssi_inflight)
           rssi_inflight = inst;
@@ -1208,6 +1212,7 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
 // static RF / modulation / packet parameters.
 // ---------------------------------------------------------------------------
 void SX1262::setup() {
+  this->apply_stored_settings_();
   this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE;
   this->common_setup();
   ESP_LOGV(TAG, "Setup");
@@ -1756,6 +1761,14 @@ optional<uint8_t> SX1262::read() {
     if (use_long_stream) {
       // Long stream is used only while adaptive hold is active (or S1, which is
       // always handled as a stream). Do not use it for normal short T1 packets.
+      // Bench option sx1262_stream_quiet_ms: no SPI at all for the first N ms
+      // after the sync word. A frame up to ~12 raw bytes per ms of the window
+      // is then complete before the radio is touched, as on the FIFO path; a
+      // longer one is streamed from there. The very first access used to be
+      // this IRQ read, right as the frame starts. Not for S1 (32.768 kchip/s).
+      if (this->stream_quiet_ms_ != 0 && this->listen_mode_ != LISTEN_MODE_S1 &&
+          this->irq_pin_->digital_read())
+        delay(this->stream_quiet_ms_);
       const uint16_t irq = this->get_irq_status_();
       if ((irq & (IRQ_SYNC_WORD_VALID | IRQ_RX_DONE | IRQ_TIMEOUT | IRQ_CRC_ERROR)) == 0) {
         return {};

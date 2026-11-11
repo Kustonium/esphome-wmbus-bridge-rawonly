@@ -839,6 +839,16 @@ protected:
   // Consumed by the add-on's diagnostics panel; kept in sync with the boot log block.
   bool config_report_mqtt_pending_{true};
 
+  // Runtime settings (runtime_settings.h): announced on <diag>/settings
+  // (retained) once per boot, changed through <topic>/set/<key>.
+  bool settings_subscribed_{false};
+  bool settings_publish_pending_{true};
+  std::string topic_base_() const;
+  void publish_settings_();
+  void on_set_listen_mode_(const std::string &payload);
+  bool config_report_settings_applied_{false};
+  void apply_settings_to_config_report_();
+
   // SX1262 YAML sanity state. These values are copied from YAML as-is.
   // They do not auto-configure board wiring; they only make risky settings visible in boot logs.
   bool sx1262_yaml_sanity_configured_{false};

@@ -2,6 +2,16 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Tryb nasłuchu przełączany z dodatku Home Assistant, bez kompilacji
+
+- **Płytka publikuje teraz ustawienia, które dodatek może zmieniać** (retained `wmbus/<płytka>/diag/settings`), i słucha `wmbus/<płytka>/set/listen_mode` (`t1`, `c1`, `both`, `s1` albo `yaml`). Zakładka Płytki w dodatku (od 1.6.18) pokazuje kafelek każdej płytki z tymi przyciskami. Kliknięcie zapisuje tryb we flashu płytki i ją restartuje (około 10 s); płytka wraca w nowym trybie. S1 na CC1101 jest odrzucane.
+- **Tryb zapisany w ten sposób wygrywa z `listen_mode:` z YAML, także po ponownym wgraniu firmware.** Log startowy i raport konfiguracji to mówią (`listen_mode: c1 (CHANGED, stored by the add-on; YAML: both)`). Powrót do YAML: „wróć do YAML” na kafelku albo `yaml` wysłane na `set/listen_mode`; tryb równy temu z YAML działa tak samo.
+- **S1 i T1/C1 mają różne częstotliwości:** przełączenie przestawia domyślną (868,30 / 868,95 MHz) razem z trybem. Częstotliwość ustawiona w YAML (`frequency:`) nigdy nie jest ruszana.
+- **Płytka, której trybu nikt nie przełączał, działa bez zmian,** dokładnie według YAML. Gdy zapis do flasha się nie uda, płytka się nie restartuje i zgłasza `setting_failed`.
+- Wystarczy przebudować płytkę z aktualnym komponentem; YAML się nie zmienia.
+
+---
+
 ## CC1101: bez fałszywych alarmów przy starcie; podpowiedź o przesterowaniu C1 tylko przy realnych stratach
 
 - **Autotest CC1101 przy starcie nie ostrzega już `RADIO_NOT_IN_RX`, gdy układ kalibruje się w drodze do RX** (`MARCSTATE` STARTCAL..ENDCAL, odczyt tuż po komendzie RX). Wcześniej zdrowe radio dostawało komunikat, że „RX powinien zostać uruchomiony ponownie”.

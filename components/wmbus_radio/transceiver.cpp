@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver.h"
+#include "runtime_settings.h"
 
 #include "esphome/core/log.h"
 
@@ -55,6 +56,30 @@ bool RadioTransceiver::read_in_task_partial(uint8_t *buffer, size_t max_length,
   }
 
   return out_read == max_length;
+}
+
+void RadioTransceiver::apply_stored_settings_() {
+  const uint8_t stored = runtime_settings::load_listen_mode();
+  if (stored == runtime_settings::NONE) return;
+  if (stored > LISTEN_MODE_S1) {
+    ESP_LOGW(TAG, "Stored listen_mode %u is not valid, using YAML", (unsigned) stored);
+    return;
+  }
+  const auto mode = static_cast<ListenMode>(stored);
+  if (mode == LISTEN_MODE_S1 && std::string(this->get_name()) == "CC1101") {
+    ESP_LOGW(TAG, "Stored listen_mode S1 is not supported on CC1101, using YAML");
+    return;
+  }
+  // The YAML default frequency follows the mode (868.30 MHz for S1, 868.95
+  // otherwise); an explicit frequency: stays as written.
+  if (!this->frequency_explicit_ &&
+      (mode == LISTEN_MODE_S1) != (this->yaml_listen_mode_ == LISTEN_MODE_S1)) {
+    this->set_frequency_mhz(mode == LISTEN_MODE_S1 ? 868.300f : 868.950f);
+  }
+  this->listen_mode_ = mode;
+  this->listen_mode_stored_ = true;
+  ESP_LOGI(TAG, "listen_mode from the add-on's stored setting: %u (YAML: %u)", (unsigned) mode,
+           (unsigned) this->yaml_listen_mode_);
 }
 
 void RadioTransceiver::set_reset_pin(InternalGPIOPin *reset_pin) {
