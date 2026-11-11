@@ -2,6 +2,16 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Listen mode switchable from the Home Assistant add-on, without compiling
+
+- **The board now publishes the settings the add-on may change** (retained `wmbus/<board>/diag/settings`) and listens for `wmbus/<board>/set/listen_mode` (`t1`, `c1`, `both`, `s1` or `yaml`). The add-on's Boards tab (1.6.18 and later) shows a tile per board with these buttons. A click stores the mode in the board's flash and restarts it (about 10 s); the board comes back in the new mode. S1 is refused on CC1101.
+- **A mode stored this way wins over `listen_mode:` in YAML, also after reflashing.** The boot log and the configuration report say so (`listen_mode: c1 (CHANGED, stored by the add-on; YAML: both)`). To go back to YAML, press "back to YAML" on the tile or send `yaml` to `set/listen_mode`; sending the mode the YAML already has does the same.
+- **S1 and T1/C1 use different frequencies:** switching moves the default (868.30 / 868.95 MHz) with the mode. A `frequency:` set in YAML is never moved.
+- **Nothing changes for a board whose mode was never switched:** it runs exactly as its YAML says. If the flash write fails, the board does not restart and reports `setting_failed` instead.
+- Rebuild the board with the current component to get it; no YAML change is needed.
+
+---
+
 ## CC1101: no false alarms at boot; C1 overload hint needs real losses
 
 - **The CC1101 boot check no longer warns `RADIO_NOT_IN_RX` while the chip is calibrating on its way into RX** (`MARCSTATE` STARTCAL..ENDCAL, read right after the RX strobe). It used to tell a healthy radio that "RX should be restarted".

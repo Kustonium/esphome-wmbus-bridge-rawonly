@@ -94,6 +94,7 @@ static constexpr uint8_t REG_TEST0    = 0x2E;
 // CC1101 status registers
 static constexpr uint8_t REG_PARTNUM  = 0x30;
 static constexpr uint8_t REG_VERSION  = 0x31;
+static constexpr uint8_t REG_FREQEST  = 0x32;
 static constexpr uint8_t REG_RSSI     = 0x34;
 static constexpr uint8_t REG_MARCSTATE= 0x35;
 static constexpr uint8_t REG_RXBYTES  = 0x3B;
@@ -131,11 +132,9 @@ static constexpr uint8_t EXP_SYNC_C1   = 0xCD;
 static constexpr uint8_t EXP_FSCTRL1   = 0x08;
 static constexpr uint8_t EXP_MDMCFG4   = 0x5C;
 static constexpr uint8_t EXP_MDMCFG3   = 0x04;
-static constexpr uint8_t EXP_MDMCFG2   = 0x06;
 static constexpr uint8_t EXP_DEVIATN   = 0x44;
 static constexpr uint8_t EXP_FOCCFG    = 0x2E;
 static constexpr uint8_t EXP_BSCFG     = 0xBF;
-static constexpr uint8_t EXP_AGCCTRL2  = 0x43;
 static constexpr uint8_t EXP_AGCCTRL1  = 0x09;
 static constexpr uint8_t EXP_AGCCTRL0  = 0xB5;
 static constexpr uint8_t EXP_FREND1    = 0xB6;
@@ -462,7 +461,8 @@ void CC1101::apply_radio_profile_() {
   this->write_reg_verified_(REG_FSCTRL0, 0x00);
   this->write_reg_verified_(REG_MDMCFG4, 0x5C);
   this->write_reg_verified_(REG_MDMCFG3, 0x04);
-  this->write_reg_verified_(REG_MDMCFG2, 0x06);
+  // 0x06 = 16/16 sync bits + carrier sense; cc1101_sync_15_16 -> 0x05.
+  this->write_reg_verified_(REG_MDMCFG2, this->exp_mdmcfg2_());
   this->write_reg_verified_(REG_MDMCFG1, 0x22);
   this->write_reg_verified_(REG_MDMCFG0, 0xF8);
   this->write_reg_verified_(REG_DEVIATN, 0x44);
@@ -472,7 +472,8 @@ void CC1101::apply_radio_profile_() {
   this->write_reg_verified_(REG_MCSM0, 0x18);  // auto-calibrate from IDLE to RX/TX
   this->write_reg_verified_(REG_FOCCFG, 0x2E);
   this->write_reg_verified_(REG_BSCFG, 0xBF);
-  this->write_reg_verified_(REG_AGCCTRL2, 0x43);
+  // 0x43 forbids the top DVGA gain step (0x03 measured worse, see __init__.py).
+  this->write_reg_verified_(REG_AGCCTRL2, this->exp_agcctrl2_());
   this->write_reg_verified_(REG_AGCCTRL1, 0x09);
   this->write_reg_verified_(REG_AGCCTRL0, 0xB5);
   this->write_reg_verified_(REG_WOREVT1, 0x87);
@@ -605,11 +606,11 @@ bool CC1101::validate_startup_config_() {
   check("FSCTRL1", fsctrl1, EXP_FSCTRL1, "RF frequency offset profile", "profil przesuniecia czestotliwosci RF");
   check("MDMCFG4", mdmcfg4, EXP_MDMCFG4, "RX bandwidth / data rate profile", "profil pasma RX / predkosci danych");
   check("MDMCFG3", mdmcfg3, EXP_MDMCFG3, "data rate profile", "profil predkosci danych");
-  check("MDMCFG2", mdmcfg2, EXP_MDMCFG2, "modem/sync profile", "profil modemu/synchronizacji");
+  check("MDMCFG2", mdmcfg2, this->exp_mdmcfg2_(), "modem/sync profile", "profil modemu/synchronizacji");
   check("DEVIATN", deviatn, EXP_DEVIATN, "frequency deviation profile", "profil dewiacji czestotliwosci");
   check("FOCCFG", foccfg, EXP_FOCCFG, "frequency offset compensation", "kompensacja odchylki czestotliwosci");
   check("BSCFG", bscfg, EXP_BSCFG, "bit synchronization", "synchronizacja bitow");
-  check("AGCCTRL2", agc2, EXP_AGCCTRL2, "AGC profile", "profil AGC");
+  check("AGCCTRL2", agc2, this->exp_agcctrl2_(), "AGC profile", "profil AGC");
   check("AGCCTRL1", agc1, EXP_AGCCTRL1, "AGC profile", "profil AGC");
   check("AGCCTRL0", agc0, EXP_AGCCTRL0, "AGC profile", "profil AGC");
   check("FREND1", frend1, EXP_FREND1, "RF frontend profile", "profil toru RF");
@@ -734,9 +735,9 @@ void CC1101::dump_debug_status(const char *reason) {
 
   const bool rf_profile_ok =
       reg_ok_(fsctrl1, EXP_FSCTRL1) && reg_ok_(mdmcfg4, EXP_MDMCFG4) &&
-      reg_ok_(mdmcfg3, EXP_MDMCFG3) && reg_ok_(mdmcfg2, EXP_MDMCFG2) &&
+      reg_ok_(mdmcfg3, EXP_MDMCFG3) && reg_ok_(mdmcfg2, this->exp_mdmcfg2_()) &&
       reg_ok_(deviatn, EXP_DEVIATN) && reg_ok_(foccfg, EXP_FOCCFG) &&
-      reg_ok_(bscfg, EXP_BSCFG) && reg_ok_(agc2, EXP_AGCCTRL2) &&
+      reg_ok_(bscfg, EXP_BSCFG) && reg_ok_(agc2, this->exp_agcctrl2_()) &&
       reg_ok_(agc1, EXP_AGCCTRL1) && reg_ok_(agc0, EXP_AGCCTRL0) &&
       reg_ok_(frend1, EXP_FREND1) && fscal3_config_ok_(fscal3, EXP_FSCAL3);
 
@@ -913,6 +914,7 @@ void CC1101::log_reg_status() {
 }
 
 void CC1101::setup() {
+  this->apply_stored_settings_();
   // CC1101 deliberately does not use the generic reset_pin/irq_pin-only setup.
   // It needs both GDO2(sync) and GDO0(FIFO threshold) for deterministic RX.
   this->spi_setup();
@@ -953,6 +955,10 @@ void CC1101::dump_config() {
   ESP_LOGCONFIG(TAG, "  Frequency: %.3f MHz", this->configured_frequency_hz_ / 1000000.0f);
   ESP_LOGCONFIG(TAG, "  SPI/RX: experimental CC1101, requires GDO0+GDO2");
   ESP_LOGCONFIG(TAG, "  RF profile: compatibility modem profile, infinite packet mode");
+  // Only when the bench option is set: users who never touch it see no line.
+  if (this->sync_15_16_) {
+    ESP_LOGCONFIG(TAG, "  Bench: sync_15_16=on (MDMCFG2=0x%02X)", this->exp_mdmcfg2_());
+  }
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                        : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
                        : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only (experimental sync only)"
@@ -1013,6 +1019,29 @@ void CC1101::capture_rssi_() {
   }
   this->last_rssi_dbm_ = (int8_t) std::clamp<int16_t>(rssi, -127, 20);
   this->rssi_captured_ = true;
+  // Bench instrument, verbose only, so the normal path gains no SPI access. Read
+  // here, once per frame, because infinite packet mode never drops to IDLE on its
+  // own (DN015 reads it in IDLE, right after the packet) and the estimate has to
+  // belong to this frame, not to the empty channel after it.
+  if (this->diag_verbose_) {
+    this->last_freqest_raw_ = (int8_t) this->read_status_(REG_FREQEST);
+    this->freq_error_fresh_ = true;
+  }
+}
+
+// take_frame_freq_error: FREQEST for the frame, once. Two's complement in steps of
+// fXOSC / 2^14 (1587 Hz at 26 MHz, datasheet 0x32). It holds the transmitter's
+// crystal error plus this module's, so a value shared by all meters points at the
+// module. FSCTRL0 stays 0, so there is no applied correction to report as afc.
+bool CC1101::take_frame_freq_error(int32_t *afc_hz, int32_t *fei_hz) {
+  if (!this->freq_error_fresh_)
+    return false;
+  this->freq_error_fresh_ = false;
+  if (afc_hz != nullptr)
+    *afc_hz = 0;
+  if (fei_hz != nullptr)
+    *fei_hz = (int32_t) (((int64_t) this->last_freqest_raw_ * 26000000LL) / 16384);
+  return true;
 }
 
 optional<uint8_t> CC1101::drain_fifo_once_() {

@@ -248,3 +248,5 @@ Przed otwarciem issue przeczytaj [`SUPPORT_PL.md`](SUPPORT_PL.md).
 ## Wkład w projekt
 
 To repozytorium publikuje z osobnego drzewa deweloperskiego, więc zmiana nie wchodzi przez gałąź pull requesta — jest tam najpierw przenoszona i trafia tutaj jednym zgniecionym commitem sync. Oznacza to, że Twoje commity nie pojawią się w historii tego repozytorium, mimo że kod jest Twój. Autorstwo jest odnotowywane w dwóch innych miejscach: commit przenoszący w drzewie deweloperskim wymienia Twoje oryginalne commity, a komentarz zamykający pull requesta mówi wprost, że kod jest Twój.
+
+Od czego zacząć, jak uruchomić testy i jak zmierzyć zmianę w odbiorze radia: [CONTRIBUTING_PL.md](CONTRIBUTING_PL.md).

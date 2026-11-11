@@ -423,6 +423,7 @@ void LR1121::read_packet_status_rssi_(uint8_t &raw_sync, uint8_t &raw_avg) {
 // the calibrations.
 // ---------------------------------------------------------------------------
 void LR1121::setup() {
+  this->apply_stored_settings_();
   this->raw_sample_queue_ = xQueueCreate(2, sizeof(RawRxSample));
   if (this->drain_) {
     this->drain_sample_queue_ = xQueueCreate(1, sizeof(DrainSample));

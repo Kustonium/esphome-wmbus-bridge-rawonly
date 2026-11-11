@@ -21,6 +21,9 @@ class CC1101 : public RadioTransceiver {
   void set_gdo0_pin(InternalGPIOPin *pin) { this->gdo0_pin_ = pin; }
   void set_gdo2_pin(InternalGPIOPin *pin) { this->gdo2_pin_ = pin; }
   void set_frequency_mhz(float frequency_mhz);
+  // Bench option (see __init__.py): the register it changes, and what the
+  // health check then expects instead of the default profile.
+  void set_sync_15_16(bool v) { this->sync_15_16_ = v; }
 
   void setup() override;
   void dump_config() override;
@@ -34,6 +37,7 @@ class CC1101 : public RadioTransceiver {
   uint32_t take_fifo_overrun_count() override;
   void dump_debug_status(const char *reason) override;
   void log_reg_status() override;
+  bool take_frame_freq_error(int32_t *afc_hz, int32_t *fei_hz) override;
 
  protected:
   InternalGPIOPin *gdo0_pin_{nullptr};
@@ -46,7 +50,15 @@ class CC1101 : public RadioTransceiver {
   uint32_t configured_frequency_hz_{868950000UL};
   int8_t last_rssi_dbm_{-127};
   bool rssi_captured_{false};
+  // FREQEST of the current frame; see take_frame_freq_error().
+  int8_t last_freqest_raw_{0};
+  bool freq_error_fresh_{false};
   bool abort_requested_{false};
+  bool sync_15_16_{false};
+  uint8_t exp_mdmcfg2_() const { return this->sync_15_16_ ? 0x05 : 0x06; }
+  // 0x43: MAX_DVGA_GAIN forbids the top DVGA step. 0x03 (every step) was
+  // measured on 2026-11-10/11 and cost ~30% of frames; see __init__.py.
+  uint8_t exp_agcctrl2_() const { return 0x43; }
   uint32_t fifo_overrun_count_{0};
   // SPI transactions the chip answered with CHIP_RDYn still high.
   uint32_t chip_not_ready_count_{0};

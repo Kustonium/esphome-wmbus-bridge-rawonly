@@ -80,9 +80,9 @@ public:
   virtual void dump_debug_status(const char *reason) {}
 
   // Frequency error of the frame just received, in Hz, latched when its first
-  // bytes arrived. Returns false on radios that cannot measure it - which is
-  // every one here except the SX1276: SX126x and LR1121 have no AFC in GFSK
-  // and no register that reports the offset.
+  // bytes arrived. Returns false on radios that cannot measure it: only the
+  // SX1276 and CC1101 can. SX126x and LR1121 have no AFC in GFSK and no register
+  // that reports the offset.
   //
   // Single-shot on purpose: it answers true once per latched frame and then
   // goes quiet, so a caller that runs more often than frames arrive cannot
@@ -175,8 +175,20 @@ public:
   void set_reset_pin(InternalGPIOPin *reset_pin);
   void set_irq_pin(InternalGPIOPin *irq_pin);
   void set_busy_pin(InternalGPIOPin *busy_pin);
-  void set_listen_mode(ListenMode mode) { this->listen_mode_ = mode; }
+  // listen_mode from YAML. A value stored by the add-on (runtime_settings.h)
+  // replaces it at the next start, in apply_stored_settings_().
+  void set_listen_mode(ListenMode mode) {
+    this->listen_mode_ = mode;
+    this->yaml_listen_mode_ = mode;
+  }
   ListenMode get_listen_mode() const { return this->listen_mode_; }
+  ListenMode get_yaml_listen_mode() const { return this->yaml_listen_mode_; }
+  bool listen_mode_from_store() const { return this->listen_mode_stored_; }
+  // Each driver keeps its own frequency field; virtual so a stored S1 <-> T1/C1
+  // change can move the default frequency without knowing the driver.
+  virtual void set_frequency_mhz(float frequency_mhz) {}
+  // True when YAML set frequency: explicitly; then a stored mode never moves it.
+  void set_frequency_explicit(bool explicit_frequency) { this->frequency_explicit_ = explicit_frequency; }
   const std::string &get_rf_params_str() const { return this->rf_params_str_; }
 
 protected:
@@ -189,6 +201,12 @@ protected:
   gpio::InterruptType irq_edge_{gpio::INTERRUPT_FALLING_EDGE};
 
   ListenMode listen_mode_{LISTEN_MODE_BOTH};
+  ListenMode yaml_listen_mode_{LISTEN_MODE_BOTH};
+  bool listen_mode_stored_{false};
+  bool frequency_explicit_{false};
+  // First line of every driver's setup(): apply the values stored in flash
+  // by the add-on (diag/settings, set/<key>) before the radio is configured.
+  void apply_stored_settings_();
   std::string rf_params_str_{};
   bool diag_verbose_{false};
 

@@ -97,6 +97,8 @@ Prefer `topic_name`.
 | `wmbus/<topic_name>/diag/meter_snapshot` | meter snapshot | `normal` and above with `highlight_meters`; all meters in `dev` |
 | `wmbus/<topic_name>/diag/boot` | once after startup | `retain=true`; also copied to root `diag` without retain |
 | `wmbus/<topic_name>/diag/config` | once after startup | `retain=true`; effective configuration snapshot (`{radio, lines[]}`), used by the add-on diagnostic panel |
+| `wmbus/<topic_name>/diag/settings` | once after startup | `retain=true`; settings the add-on may change without compiling (`{v, radio, listen_mode{value, source, yaml, options, unsupported, weak}}`) |
+| `wmbus/<topic_name>/set/listen_mode` | subscribed | `t1`, `c1`, `both`, `s1` or `yaml`; stored in flash, then the board restarts. A stored mode wins over YAML until `yaml` is sent (or the YAML mode itself) |
 | `wmbus/<topic_name>/diag/suggestion` | detected RF anomaly | diagnostic suggestions |
 | `wmbus/<topic_name>/diag/busy_ether_changed` | busy-ether state transition | SX1276 with `adaptive` |
 | `wmbus/<topic_name>/rssi/<meter_id>` | frame with a real RSSI measurement | only with `publish_rssi: true`; `retain=true` |
