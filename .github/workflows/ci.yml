@@ -62,6 +62,12 @@ jobs:
       - name: Run host parser tests
         run: ./build/test_core
 
+      - name: Test CC1101 RX state waits and idle-refresh guards
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/wmbus_radio \
+            tests/host/test_cc1101_rx_control.cpp -o build/test_cc1101_rx_control
+          ./build/test_cc1101_rx_control
+
   firmware-build:
     # Compile the real ESPHome firmware against THIS checkout for every
     # board/chip/core-count variant, so a change that builds on the host but
@@ -73,6 +79,8 @@ jobs:
         include:
           - name: CC1101 / esp32-c3 (single-core)
             config: examples/CC1101/CC1101_clean.yaml
+          - name: CC1101 RX bench options / esp32-c3
+            config: tests/ci/cc1101_rx_bench_ci.yaml
           - name: SX1262 / esp32-s3 (dual-core)
             config: examples/SX1262/Heltec V3/SX1262_Heltec_V3_clean.yaml
           - name: SX1262 / esp32-s3 R8 (KCT8103L FEM, HW-untested)

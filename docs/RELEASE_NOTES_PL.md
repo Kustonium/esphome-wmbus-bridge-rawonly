@@ -2,6 +2,34 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Więcej ustawień przełączanych z dodatku, także przy wyłączonej diagnostyce
+
+- **Ustawienia płytki i raport konfiguracji nie wymagają już `diagnostic_mode`.** `diag/settings` i `diag/config` są publikowane, a `set/...` nasłuchiwane, przy każdym `diagnostic_mode`, także `off` (domyślnym). Wcześniej płytki z wyłączoną diagnostyką w ogóle nie dało się przełączać z dodatku, nawet trybu nasłuchu.
+- **Nowe ustawienia przełączane** obok `listen_mode`: `diagnostic_mode` (`off`, `low`, `normal`, `debug`; `dev` zostaje wyborem w YAML), `publish_rssi`, a na SX1262 `rx_gain` i `long_gfsk_packets`, na SX1276 `sx1276_busy_ether_mode`. Każde działa jak tryb nasłuchu: zapis we flashu, zastosowanie po restarcie, `yaml` („wróć do YAML” w dodatku) je kasuje. Pola diagnostyki ustawione wprost w YAML zachowują swoją wartość przy przełączonym `diagnostic_mode`.
+
+---
+
+## CC1101: filtr odbiornika 232 kHz domyślnie, przełączniki testowe znikają z kafelka dodatku
+
+- **`cc1101_rx_bandwidth` ma teraz domyślnie `232khz` zamiast `325khz`.** Zmierzone na stanowisku w listopadzie 2026, odniesieniem LR1121 na rozgałęźniku: więcej ramek przy progu, żaden licznik nie zniknął, żadnych strat na mocnych ramkach. `325khz` (TI AN067) zostaje do wyboru dla liczników ze skrajnym przesunięciem częstotliwości.
+- **Kafelek CC1101 w dodatku nie przełącza już filtra ani wykrywania nośnej.** Oba były przełącznikami testowymi, oba testy są rozstrzygnięte (232 kHz, nośna włączona). Teraz to opcje tylko w YAML. Wartość zapisaną w płytce z dodatku w czasie testów płytka kasuje przy najbliższym starcie i odnotowuje to w logu.
+- **Płytki z `cc1101_rx_bandwidth:` w YAML zachowują swoją wartość.** Płytki bez tego wpisu przechodzą na 232 kHz przy najbliższym budowaniu.
+
+---
+
+## SX1262: filtr odbiornika 234 kHz domyślnie
+
+- **`sx1262_rx_bandwidth` ma teraz domyślnie `234khz` zamiast `312khz`.** Wartość 312 kHz była odziedziczona i nigdy nie zmierzona dla T1. Pomiar 12–13.11.2026, te same godziny w dwa dni robocze, odniesieniem LR1121 na rozgałęźniku: T-Beam na drugim wyjściu rozgałęźnika złapał przy 234 kHz 52,5% ramek LR1121 z zakresu −110..−105 dBm wobec 30,6% przy 312 kHz i słyszał 0,84 jego liczników wobec 0,76. Heltec zyskał przy −105..−100 dBm (33% wobec 26%), XIAO trochę. Mocne ramki nic nie straciły, a C1 w `listen_mode: both` też się poprawił (T-Beam złapał 77% ramek C1 LR1121 wobec 60%).
+- **Płytki z `sx1262_rx_bandwidth:` w YAML zachowują swoją wartość.** Płytki bez tego wpisu przechodzą na 234 kHz przy najbliższym budowaniu. Żeby zostać przy starym zachowaniu, ustaw `sx1262_rx_bandwidth: 312khz`. S1 bez zmian (jego 234,3 kHz było zawsze stałe).
+
+---
+
+## CC1101: opcjonalne testy restartowania RX
+
+- Nowe przełączniki `cc1101_rx_state_wait` i `cc1101_idle_rx_refresh`, oba domyślnie wyłączone. Osobno testują restart potwierdzany MARCSTATE i odświeżanie bezczynnego RX co około 50 ms; nie zmieniają `cc1101_sync_15_16`.
+- Raporty konfiguracji/statusu pokazują ustawienia oraz liczniki prób odświeżenia i timeoutów. Testy hostowe obejmują zmiany stanu, timeouty i nadejście ramki podczas kontroli; wynik RF wymaga pomiaru.
+- Procedura A–B–A i ograniczenia: [testy CC1101 RX](CC1101_RX_BENCH_PL.md).
+
 ## Tryb nasłuchu przełączany z dodatku Home Assistant, bez kompilacji
 
 - **Płytka publikuje teraz ustawienia, które dodatek może zmieniać** (retained `wmbus/<płytka>/diag/settings`), i słucha `wmbus/<płytka>/set/listen_mode` (`t1`, `c1`, `both`, `s1` albo `yaml`). Zakładka Płytki w dodatku (od 1.6.18) pokazuje kafelek każdej płytki z tymi przyciskami. Kliknięcie zapisuje tryb we flashu płytki i ją restartuje (około 10 s); płytka wraca w nowym trybie. S1 na CC1101 jest odrzucane.

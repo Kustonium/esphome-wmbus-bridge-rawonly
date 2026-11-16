@@ -242,6 +242,15 @@ void Radio::setup() {
   // metadata only; no radio setting or packet path depends on its value.
   this->rx_boot_id_ = esp_random();
   if (this->rx_boot_id_ == 0) this->rx_boot_id_ = 1;
+  // Options the add-on stored (runtime_settings.h) replace the YAML ones
+  // before anything below reads them.
+  this->publish_rssi_opt_.load();
+  if (this->publish_rssi_opt_.stored) this->publish_rssi_ = this->publish_rssi_opt_.value == 1;
+  this->busy_ether_opt_.load();
+  if (this->busy_ether_opt_.stored)
+    this->sx1276_busy_ether_mode_ = static_cast<SX1276BusyEtherMode>(this->busy_ether_opt_.value);
+  this->diag_mode_opt_.load();
+  if (this->diag_mode_opt_.stored) this->apply_diag_preset_(this->diag_mode_opt_.value);
   for (const auto &warning : this->config_warnings_) {
     ESP_LOGW(TAG, LOG_TR("Config warning: %s", "Ostrzezenie konfiguracji: %s"), warning.c_str());
   }
@@ -768,7 +777,11 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       mqtt->publish(this->diag_topic_, std::string(boot_payload), this->diag_qos_, false);
       this->boot_info_event_pending_ = false;
     }
+  }
 
+  // Configuration report and settings: also with diagnostic_mode off, on
+  // <topic_base>/diag/..., so the add-on can show and switch the board.
+  if (this->radio != nullptr && mqtt != nullptr && mqtt->is_connected() && !this->topic_base_().empty()) {
     // Effective configuration as one retained JSON snapshot per boot.
     // The add-on renders it as the "what the board is running" panel;
     // publishing here means the marker (default / CHANGED / set) matches
@@ -793,7 +806,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
         cfg_payload += "\"";
       }
       cfg_payload += "]}";
-      std::string cfg_topic = this->diag_topic_ + "/config";
+      std::string cfg_topic = this->settings_topic_("config");
       mqtt->publish(cfg_topic, cfg_payload, this->diag_qos_, true);
       this->config_report_mqtt_pending_ = false;
     }
@@ -805,6 +818,22 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       mqtt->subscribe(
           this->topic_base_() + "/set/listen_mode",
           [this](const std::string &, const std::string &payload) { this->on_set_listen_mode_(payload); }, 1);
+      // Radio-specific settings (e.g. SX1262 rx_gain).
+      for (const auto &key : this->radio->runtime_setting_keys()) {
+        mqtt->subscribe(
+            this->topic_base_() + "/set/" + key,
+            [this, key](const std::string &, const std::string &payload) { this->on_set_radio_setting_(key, payload); },
+            1);
+      }
+      // Component-level settings (diagnostic_mode, publish_rssi, ...).
+      std::vector<std::string> keys = {"diagnostic_mode", "publish_rssi"};
+      if (strcmp(this->radio->get_name(), "SX1276") == 0) keys.push_back("sx1276_busy_ether_mode");
+      for (const auto &key : keys) {
+        mqtt->subscribe(
+            this->topic_base_() + "/set/" + key,
+            [this, key](const std::string &, const std::string &payload) { this->on_set_component_setting_(key, payload); },
+            1);
+      }
     }
     if (this->settings_publish_pending_) {
       this->settings_publish_pending_ = false;
@@ -1320,7 +1349,9 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
 }
 
 void Radio::wakeup_receiver_task_from_isr(TaskHandle_t *arg) {
-  BaseType_t xHigherPriorityTaskWoken;
+  // FreeRTOS only ever sets this to pdTRUE; it must start at pdFALSE, or a
+  // stack leftover asks for a context switch from every interrupt.
+  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
   vTaskNotifyGiveFromISR(*arg, &xHigherPriorityTaskWoken);
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
@@ -1347,7 +1378,23 @@ void Radio::receive_frame() {
       this->diag_60min_rx_path_.stale_wakeups_cleared++;
     }
     this->radio->restart_rx();
-    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(hop_ms))) {
+    // Only the opt-in CC1101 bench path slices this wait. Do not clear task
+    // notifications or blindly flush FIFO between slices: a sync IRQ may have
+    // arrived just as the previous wait expired. The driver checks GDO2/FIFO
+    // before any maintenance. The legacy 5-second safety re-arm stays intact.
+    const uint32_t poll_ms = this->radio->idle_rx_poll_interval_ms();
+    uint32_t hop_waited = 0;
+    bool notified = false;
+    while (hop_waited < hop_ms) {
+      const uint32_t slice_ms = poll_ms == 0 ? hop_ms : std::min(poll_ms, hop_ms - hop_waited);
+      if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(slice_ms))) {
+        notified = true;
+        break;
+      }
+      hop_waited += slice_ms;
+      if (poll_ms != 0 && hop_waited < hop_ms) this->radio->service_idle_rx();
+    }
+    if (notified) {
       got_irq = true;
       this->diag_rx_path_.irq_fired++;
       this->diag_15m_rx_path_.irq_fired++;
@@ -1772,6 +1819,11 @@ static const char *listen_mode_key_(ListenMode mode) {
 void Radio::apply_settings_to_config_report_() {
   if (this->config_report_settings_applied_ || this->radio == nullptr) return;
   this->config_report_settings_applied_ = true;
+  // Settings stored by the add-on: the radio's own, then the component's.
+  this->radio->patch_config_report(this->config_report_);
+  this->diag_mode_opt_.patch(this->config_report_);
+  this->publish_rssi_opt_.patch(this->config_report_);
+  if (strcmp(this->radio->get_name(), "SX1276") == 0) this->busy_ether_opt_.patch(this->config_report_);
   if (!this->radio->listen_mode_from_store()) return;
   for (auto &line : this->config_report_) {
     if (line.rfind("  listen_mode: ", 0) == 0) {
@@ -1782,7 +1834,18 @@ void Radio::apply_settings_to_config_report_() {
   }
 }
 
+std::string Radio::settings_topic_(const char *leaf) const {
+  if (!this->diag_topic_.empty()) return this->diag_topic_ + "/" + leaf;
+  return this->topic_base_() + "/diag/" + leaf;
+}
+
 std::string Radio::topic_base_() const {
+  // wmbus/<topic_name>: from the health topic, which exists whatever
+  // diagnostic_mode says; an explicit diagnostic_topic is the fallback.
+  const std::string health = "/health";
+  if (this->health_topic_.size() > health.size() &&
+      this->health_topic_.compare(this->health_topic_.size() - health.size(), health.size(), health) == 0)
+    return this->health_topic_.substr(0, this->health_topic_.size() - health.size());
   const std::string suffix = "/diag";
   if (this->diag_topic_.size() > suffix.size() &&
       this->diag_topic_.compare(this->diag_topic_.size() - suffix.size(), suffix.size(), suffix) == 0)
@@ -1796,20 +1859,117 @@ std::string Radio::topic_base_() const {
 // without this topic runs firmware that cannot take changes.
 void Radio::publish_settings_() {
   auto *mqtt = mqtt::global_mqtt_client;
-  if (mqtt == nullptr || !mqtt->is_connected() || this->radio == nullptr || this->diag_topic_.empty()) {
+  if (mqtt == nullptr || !mqtt->is_connected() || this->radio == nullptr || this->topic_base_().empty()) {
     this->settings_publish_pending_ = true;
     return;
   }
   const std::string chip = this->radio->get_name();
-  std::string unsupported = chip == "CC1101" ? "[\"s1\"]" : "[]";
-  std::string weak = chip == "SX1262" ? "[\"s1\"]" : "[]";
+  // S1 on CC1101 has its own modem profile since 2026-11-13 but is still
+  // experimental, so it is offered with a warning like SX1262's weaker S1.
+  std::string unsupported = "[]";
+  std::string weak = (chip == "SX1262" || chip == "CC1101") ? "[\"s1\"]" : "[]";
   std::string payload = "{\"v\":1,\"radio\":\"" + chip + "\",\"listen_mode\":{\"value\":\"" +
                         listen_mode_key_(this->radio->get_listen_mode()) + "\",\"source\":\"" +
                         (this->radio->listen_mode_from_store() ? "stored" : "yaml") + "\",\"yaml\":\"" +
                         listen_mode_key_(this->radio->get_yaml_listen_mode()) +
                         "\",\"options\":[\"t1\",\"c1\",\"both\",\"s1\"],\"unsupported\":" + unsupported +
-                        ",\"weak\":" + weak + ",\"apply\":\"restart\"}}";
-  mqtt->publish(this->diag_topic_ + "/settings", payload, this->diag_qos_, true);
+                        ",\"weak\":" + weak + ",\"apply\":\"restart\"}" +
+                        this->radio->runtime_settings_json() + this->diag_mode_opt_.json() +
+                        this->publish_rssi_opt_.json() + (chip == "SX1276" ? this->busy_ether_opt_.json() : "") + "}";
+  mqtt->publish(this->settings_topic_("settings"), payload, this->diag_qos_, true);
+}
+
+runtime_settings::Option *Radio::component_option_(const std::string &key) {
+  if (key == "diagnostic_mode") return &this->diag_mode_opt_;
+  if (key == "publish_rssi") return &this->publish_rssi_opt_;
+  if (key == "sx1276_busy_ether_mode") return &this->busy_ether_opt_;
+  return nullptr;
+}
+
+void Radio::on_set_component_setting_(const std::string &key, const std::string &payload) {
+  auto *opt = this->component_option_(key);
+  if (opt == nullptr) return;
+  this->finish_setting_(key, payload, opt->set(payload));
+}
+
+// diagnostic_mode presets, the same table as __init__.py (preset_map). A
+// field YAML set explicitly keeps its value; the diag topic follows the mode
+// unless YAML gave diagnostic_topic.
+void Radio::apply_diag_preset_(uint8_t mode) {
+  //                       verbose raw summary drop rx_path hl_only suggest 15min 60min meter_stats
+  static const uint8_t T[5][10] = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},   // off
+                                   {0, 0, 1, 0, 0, 0, 0, 0, 0, 0},   // low
+                                   {0, 0, 1, 0, 0, 0, 1, 1, 0, 1},   // normal
+                                   {0, 0, 1, 1, 1, 1, 1, 1, 0, 1},   // debug
+                                   {1, 1, 1, 1, 1, 0, 1, 1, 1, 2}};  // dev
+  if (mode > 4) return;
+  const uint8_t *p = T[mode];
+  const uint16_t x = this->diag_explicit_mask_;
+  if (!(x & (1 << 0))) this->diag_verbose_ = p[0];
+  if (!(x & (1 << 1))) this->diag_publish_raw_ = p[1];
+  if (!(x & (1 << 2))) this->diag_publish_summary_ = p[2];
+  if (!(x & (1 << 3))) this->diag_publish_drop_events_ = p[3];
+  if (!(x & (1 << 4))) this->diag_publish_rx_path_events_ = p[4];
+  if (!(x & (1 << 5))) this->diag_publish_highlight_only_ = p[5];
+  if (!(x & (1 << 6))) this->diag_publish_suggestion_ = p[6];
+  if (!(x & (1 << 7))) this->diag_publish_summary_15min_ = p[7];
+  if (!(x & (1 << 8))) this->diag_publish_summary_60min_ = p[8];
+  if (!(x & (1 << 9))) {
+    static const char *const MS[3] = {"off", "highlighted", "all"};
+    this->meter_stats_str_ = MS[p[9]];
+    if (!(x & (1 << 10))) {
+      this->diag_publish_summary_highlight_meters_ = p[9] != 0;
+      this->diag_meter_stats_all_ = p[9] == 2;
+    }
+  }
+  this->diag_mode_str_ = this->diag_mode_opt_.options[mode];
+  if (!this->diag_topic_explicit_) {
+    const bool on = mode != 0 || this->diag_publish_summary_ || this->diag_publish_drop_events_ ||
+                    this->diag_publish_rx_path_events_ || this->diag_publish_summary_15min_ ||
+                    this->diag_publish_summary_60min_ || this->diag_publish_summary_highlight_meters_ ||
+                    this->diag_publish_suggestion_;
+    this->diag_topic_ = on ? this->diag_base_topic_ : "";
+  }
+  ESP_LOGI(TAG, "diagnostic_mode from the add-on's stored setting: %s (YAML: %s)", this->diag_mode_str_.c_str(),
+           this->diag_mode_opt_.options[this->diag_mode_opt_.yaml]);
+}
+
+// <topic>/set/<key> for a radio-specific setting; the radio validates and
+// stores it, the board restarts to apply it like listen_mode.
+void Radio::on_set_radio_setting_(const std::string &key, const std::string &payload) {
+  if (this->radio == nullptr) return;
+  this->finish_setting_(key, payload, this->radio->set_runtime_setting(key, payload));
+}
+
+// Shared tail of every set/<key>: log, report to the add-on, restart on a
+// stored change.
+void Radio::finish_setting_(const std::string &key, const std::string &payload, int r) {
+  auto *mqtt = mqtt::global_mqtt_client;
+  const bool can_publish = mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty();
+  if (r == 0) {
+    ESP_LOGW(TAG, "set/%s: invalid value '%s'", key.c_str(), payload.c_str());
+    return;
+  }
+  if (r == 1) {
+    ESP_LOGD(TAG, "set/%s: '%s' already in effect", key.c_str(), payload.c_str());
+    return;
+  }
+  if (r == 3) {
+    ESP_LOGW(TAG, "set/%s: could not store '%s' in flash, not restarting", key.c_str(), payload.c_str());
+    if (can_publish) {
+      mqtt->publish(this->diag_topic_,
+                    "{\"event\":\"setting_failed\",\"key\":\"" + key + "\",\"reason\":\"flash\"}",
+                    this->diag_qos_, false);
+    }
+    return;
+  }
+  ESP_LOGI(TAG, "set/%s: '%s' stored, restarting to apply it", key.c_str(), payload.c_str());
+  if (can_publish) {
+    mqtt->publish(this->diag_topic_,
+                  "{\"event\":\"setting_saved\",\"key\":\"" + key + "\",\"restart\":true}",
+                  this->diag_qos_, false);
+  }
+  this->set_timeout("wmbus_settings_restart", 1000, []() { App.safe_reboot(); });
 }
 
 // <topic>/set/listen_mode: t1 | c1 | both | s1, or "yaml" to drop the stored
@@ -1835,10 +1995,6 @@ void Radio::on_set_listen_mode_(const std::string &raw) {
   // the board ignore a later YAML change. It clears the stored value instead.
   if (code != runtime_settings::NONE && code == (uint8_t) this->radio->get_yaml_listen_mode()) {
     code = runtime_settings::NONE;
-  }
-  if (code == LISTEN_MODE_S1 && std::string(this->radio->get_name()) == "CC1101") {
-    ESP_LOGW(TAG, "set/listen_mode: S1 is not supported on CC1101, ignored");
-    return;
   }
   const uint8_t stored = runtime_settings::load_listen_mode();
   const uint8_t effective_after = code == runtime_settings::NONE ? (uint8_t) this->radio->get_yaml_listen_mode() : code;

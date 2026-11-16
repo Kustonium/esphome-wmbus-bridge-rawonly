@@ -2,6 +2,7 @@
 #pragma once
 
 #include "transceiver.h"
+#include "runtime_settings.h"
 #include "esphome/core/hal.h"
 
 #include <array>
@@ -40,8 +41,8 @@ enum SX1262PreambleDetector : uint8_t {
 };
 
 enum SX1262T1RxBandwidth : uint8_t {
-  T1_BW_312 = 0,  // inherited default, current behaviour
-  T1_BW_234 = 1,  // matches C1/S1 and roughly the SX1276 window
+  T1_BW_312 = 0,  // the inherited value, default until 2026-11-15
+  T1_BW_234 = 1,  // default: measured better for T1 and C1, roughly the SX1276 window
   T1_BW_156 = 2,  // deliberately too narrow; the losing end of the S1 sweep
 };
 
@@ -71,7 +72,10 @@ class SX1262 : public RadioTransceiver {
   SX1262() { this->irq_edge_ = gpio::INTERRUPT_RISING_EDGE; }
 
   // RX gain (BOOSTED/POWER_SAVING)
-  void set_rx_gain(SX1262RxGain gain) { this->rx_gain_ = gain; }
+  void set_rx_gain(SX1262RxGain gain) {
+    this->rx_gain_ = gain;
+    this->rx_gain_opt_.set_yaml(gain == POWER_SAVING ? 1 : 0);
+  }
 
   // T1 receiver bandwidth only; C1/S1 stay at their measured 234.3 kHz.
   void set_t1_rx_bandwidth(SX1262T1RxBandwidth bw) { this->t1_rx_bandwidth_ = bw; }
@@ -93,7 +97,15 @@ class SX1262 : public RadioTransceiver {
   // This bypasses the 255-byte internal data-buffer limitation by streaming
   // from the radio buffer while RX is still running (rxAddrPtr wrap + RxTxPldLen).
   // Useful for WMBus T-mode where 3-of-6 expands telegrams beyond 255 raw bytes.
-  void set_long_gfsk_packets(bool v) { this->long_gfsk_packets_ = v; }
+  void set_long_gfsk_packets(bool v) {
+    this->long_gfsk_packets_ = v;
+    this->long_gfsk_opt_.set_yaml(v ? 1 : 0);
+  }
+  // rx_gain and long_gfsk_packets can also be switched from the add-on.
+  std::vector<std::string> runtime_setting_keys() override;
+  std::string runtime_settings_json() override;
+  int set_runtime_setting(const std::string &key, const std::string &value) override;
+  void patch_config_report(std::vector<std::string> &lines) override;
   void set_stream_poll_ms(uint8_t v) { this->stream_poll_ms_ = v; }
   void set_stream_quiet_ms(uint8_t v) { this->stream_quiet_ms_ = v; }
   void set_force_long_stream(bool v) { this->force_long_stream_ = v; }
@@ -202,7 +214,9 @@ class SX1262 : public RadioTransceiver {
   bool dio2_rf_switch_{true};
   bool has_tcxo_{false};
   SX1262RxGain rx_gain_{BOOSTED};
-  SX1262T1RxBandwidth t1_rx_bandwidth_{T1_BW_312};
+  runtime_settings::Option rx_gain_opt_{"rx_gain", "wmbus_radio.sx1262_rx_gain", {"boosted", "power_saving"}};
+  runtime_settings::Option long_gfsk_opt_{"long_gfsk_packets", "wmbus_radio.sx1262_long_gfsk", {"false", "true"}};
+  SX1262T1RxBandwidth t1_rx_bandwidth_{T1_BW_234};
   SX1262PreambleDetector preamble_detector_{PREAMBLE_DETECT_16};
   SX1262TcxoVoltage tcxo_voltage_{SX1262_TCXO_3_0V};
   uint8_t tcxo_startup_ms_{1};

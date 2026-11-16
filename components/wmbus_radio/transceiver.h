@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #define BYTE(x, n) ((uint8_t)(x >> (n * 8)))
 
@@ -42,6 +43,10 @@ public:
     this->irq_pin_->attach_interrupt(callback, arg, this->irq_edge_);
   }
   virtual void restart_rx() = 0;
+  // Optional bench maintenance, called only while the receiver task waits for
+  // its sync IRQ. Zero keeps the existing single 5-second notification wait.
+  virtual uint32_t idle_rx_poll_interval_ms() const { return 0; }
+  virtual void service_idle_rx() {}
   virtual int8_t get_rssi() = 0;
   virtual const char *get_name() = 0;
 
@@ -187,6 +192,17 @@ public:
   // Each driver keeps its own frequency field; virtual so a stored S1 <-> T1/C1
   // change can move the default frequency without knowing the driver.
   virtual void set_frequency_mhz(float frequency_mhz) {}
+  // Radio-specific runtime settings besides listen_mode (runtime_settings.h):
+  // the keys the add-on may set on <base>/set/<key>, the JSON members appended
+  // to <diag>/settings (each ',"key":{...}'), and the handler. Result:
+  // 0 = invalid value, 1 = already in effect, 2 = stored (restart to apply),
+  // 3 = flash write failed.
+  virtual std::vector<std::string> runtime_setting_keys() { return {}; }
+  virtual std::string runtime_settings_json() { return ""; }
+  virtual int set_runtime_setting(const std::string &key, const std::string &value) { return 0; }
+  // Rewrites the boot configuration report lines of settings stored by the
+  // add-on, so the report shows what the radio runs (YAML stays in brackets).
+  virtual void patch_config_report(std::vector<std::string> &lines) {}
   // True when YAML set frequency: explicitly; then a stored mode never moves it.
   void set_frequency_explicit(bool explicit_frequency) { this->frequency_explicit_ = explicit_frequency; }
   const std::string &get_rf_params_str() const { return this->rf_params_str_; }

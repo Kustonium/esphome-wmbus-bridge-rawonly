@@ -62,7 +62,7 @@ Know three things before you buy or wire one:
 What to expect: users run it on **T1**, but there is no benchmark of the CC1101 against the other
 radios here, so there are no numbers to promise. It is the slowest of the four radios at reading
 frames (1800 µs FIFO deadline against 1000 µs on the SX1276), which matters most with many fast
-meters, and S1 on CC1101 is a raw sniffer rather than a receive path. A report with your results
+meters, and S1 on CC1101 is experimental and not measured yet. A report with your results
 in Discussions helps more than anything else. If you are buying new
 hardware anyway, see [`CHIP_SELECTION.md`](CHIP_SELECTION.md) first; if you already have a CC1101,
 use it.

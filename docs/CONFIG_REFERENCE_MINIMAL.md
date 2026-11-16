@@ -52,9 +52,10 @@ A valid S1 telegram is published on `wmbus/<topic_name>/telegram` just like vali
 | `dio2_rf_switch` | `SX1262` | `true` | public | control the RF switch through DIO2 |
 | `rx_gain` | `SX1262` | `boosted` | public | `boosted` or `power_saving` |
 | `long_gfsk_packets` | `SX1262` | `false` | public | for long T1 frames; disabling it may truncate/drop them. When a meter in range needs it, the board says so: a warning in the log and the `ENABLE_LONG_GFSK_PACKETS` suggestion, after the same over-long T1 frame has arrived twice |
-| `sx1262_rx_bandwidth` | `SX1262` | `312khz` | public | `312khz` (inherited default, unmeasured for T1), `234khz`, `156khz`. Applies to `listen_mode: t1`, `both` **and `c1`**; ignored by `s1`, whose measured 234.3 kHz setting is fixed. `c1` was pinned to 234.3 kHz before 2026-09-25, a value only ever measured for S1 |
+| `sx1262_rx_bandwidth` | `SX1262` | `234khz` | public | `234khz` (default since 2026-11-15, measured better than 312 kHz for T1 and C1), `312khz` (the inherited value, default before), `156khz`. Applies to `listen_mode: t1`, `both` **and `c1`**; ignored by `s1`, whose measured 234.3 kHz setting is fixed. `c1` was pinned to 234.3 kHz before 2026-09-25, a value only ever measured for S1 |
 | `fem_ctrl_pin`, `fem_en_pin`, `fem_pa_pin` | `SX1262` | none | board-specific | external RF front-end pins, e.g. Heltec V4 |
 | `rf_sw_pin` | `SX1262` | none | board-specific | module RF-switch gate; required on XIAO ESP32-S3 + Wio-SX1262 (`GPIO38`), otherwise sensitivity is about 30 dB lower |
+| `cc1101_rx_bandwidth` | `CC1101` | `232khz` | public | T1/C1 receive filter: `232khz` (default since 2026-11-16, measured better than 325 kHz near the threshold, nothing lost on strong frames), `325khz` (TI AN067, also covers meters with an extreme frequency offset), `270khz`. YAML only. |
 | `sx1276_busy_ether_mode` | `SX1276` | `normal` | public | `normal`, `aggressive`, `adaptive`; increase only for **measured** overload (`fifo_overrun`/`truncated` > 0); `adaptive` aborts weak starts and costs about 12 dB of sensitivity |
 | `tcxo_pin` | `SX1276` | none | board-specific | optional TCXO-enable pin, driven HIGH before SX1276 initialization |
 | `busy_pin` | `SX1262`, `LR1121` | required | public | BUSY line; without it the driver cannot distinguish “not ready yet” from a response |
@@ -96,9 +97,9 @@ Prefer `topic_name`.
 | `wmbus/<topic_name>/diag/summary_60min` | every 60 minutes | `dev` only, unless legacy flags override it |
 | `wmbus/<topic_name>/diag/meter_snapshot` | meter snapshot | `normal` and above with `highlight_meters`; all meters in `dev` |
 | `wmbus/<topic_name>/diag/boot` | once after startup | `retain=true`; also copied to root `diag` without retain |
-| `wmbus/<topic_name>/diag/config` | once after startup | `retain=true`; effective configuration snapshot (`{radio, lines[]}`), used by the add-on diagnostic panel |
-| `wmbus/<topic_name>/diag/settings` | once after startup | `retain=true`; settings the add-on may change without compiling (`{v, radio, listen_mode{value, source, yaml, options, unsupported, weak}}`) |
-| `wmbus/<topic_name>/set/listen_mode` | subscribed | `t1`, `c1`, `both`, `s1` or `yaml`; stored in flash, then the board restarts. A stored mode wins over YAML until `yaml` is sent (or the YAML mode itself) |
+| `wmbus/<topic_name>/diag/config` | once after startup | `retain=true`; effective configuration snapshot (`{radio, lines[]}`), used by the add-on's board tiles. Published with any `diagnostic_mode`, also `off` |
+| `wmbus/<topic_name>/diag/settings` | once after startup | `retain=true`; settings the add-on may change without compiling (`{v, radio, listen_mode{value, source, yaml, options, unsupported, weak}, <key>{value, source, yaml, options}...}`). Published with any `diagnostic_mode`, also `off` |
+| `wmbus/<topic_name>/set/<key>` | subscribed | `listen_mode` (`t1`, `c1`, `both`, `s1`), `diagnostic_mode` (`off`, `low`, `normal`, `debug`), `publish_rssi` (`true`, `false`), on SX1262 `rx_gain` (`boosted`, `power_saving`) and `long_gfsk_packets` (`true`, `false`), on SX1276 `sx1276_busy_ether_mode` (`normal`, `aggressive`, `adaptive`); or `yaml`. Stored in flash, then the board restarts. A stored value wins over YAML until `yaml` is sent (or the YAML value itself) |
 | `wmbus/<topic_name>/diag/suggestion` | detected RF anomaly | diagnostic suggestions |
 | `wmbus/<topic_name>/diag/busy_ether_changed` | busy-ether state transition | SX1276 with `adaptive` |
 | `wmbus/<topic_name>/rssi/<meter_id>` | frame with a real RSSI measurement | only with `publish_rssi: true`; `retain=true` |

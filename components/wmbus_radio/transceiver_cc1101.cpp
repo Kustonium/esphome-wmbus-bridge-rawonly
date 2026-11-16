@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "transceiver_cc1101.h"
+#include "runtime_settings.h"
+#include "cc1101_rx_control.h"
 #include "log_lang.h"
 
 #include "esphome/core/log.h"
@@ -8,6 +10,7 @@
 #include "esp_rom_sys.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <cstdio>
 
@@ -134,9 +137,7 @@ static constexpr uint8_t EXP_MDMCFG4   = 0x5C;
 static constexpr uint8_t EXP_MDMCFG3   = 0x04;
 static constexpr uint8_t EXP_DEVIATN   = 0x44;
 static constexpr uint8_t EXP_FOCCFG    = 0x2E;
-static constexpr uint8_t EXP_BSCFG     = 0xBF;
 static constexpr uint8_t EXP_AGCCTRL1  = 0x09;
-static constexpr uint8_t EXP_AGCCTRL0  = 0xB5;
 static constexpr uint8_t EXP_FREND1    = 0xB6;
 static constexpr uint8_t EXP_FSCAL3    = 0xEA;
 
@@ -324,11 +325,55 @@ uint8_t CC1101::rxbytes_raw_() { return this->read_status_(REG_RXBYTES); }
 uint8_t CC1101::rxbytes_count_() { return this->rxbytes_raw_() & 0x7F; }
 bool CC1101::rx_overflow_() { return (this->rxbytes_raw_() & 0x80) != 0; }
 
-void CC1101::flush_rx_() {
+bool CC1101::wait_marcstate_(uint8_t expected) {
+  const bool ready = cc1101_wait_state(
+      [this]() { return this->last_wait_state_ = this->read_status_(REG_MARCSTATE); },
+      []() { return esp_timer_get_time(); }, []() { esp_rom_delay_us(20); }, expected, 10000);
+  if (!ready) {
+    this->state_wait_timeouts_++;
+    // Rate-limit failure logging: a failed board must not flood the RX task.
+    if (this->state_wait_timeouts_ == 1 || (this->state_wait_timeouts_ % 64) == 0)
+      ESP_LOGW(TAG, "RX state timeout: expected=0x%02X observed=0x%02X total=%u",
+               expected, this->last_wait_state_ & 0x1F, (unsigned) this->state_wait_timeouts_);
+  }
+  return ready;
+}
+
+void CC1101::enter_rx_() {
+  this->strobe_(CC1101_SRX);
+  if (this->rx_state_wait_ && !this->wait_marcstate_(0x0D)) this->abort_requested_ = true;
+}
+
+bool CC1101::flush_rx_() {
   this->strobe_(CC1101_SIDLE);
-  esp_rom_delay_us(120);
+  if (this->rx_state_wait_) {
+    if (!this->wait_marcstate_(0x01)) {
+      this->abort_requested_ = true;
+      this->chunk_len_ = 0;
+      this->chunk_idx_ = 0;
+      this->rssi_captured_ = false;
+      this->last_rssi_dbm_ = -127;
+      return false;  // SFRX must not be sent before IDLE is confirmed.
+    }
+  } else {
+    esp_rom_delay_us(120);
+  }
   this->strobe_(CC1101_SFRX);
-  esp_rom_delay_us(120);
+  if (!this->rx_state_wait_) esp_rom_delay_us(120);
+  return true;
+}
+
+void CC1101::service_idle_rx() {
+  if (!this->idle_rx_refresh_) return;
+  if (this->gdo2_pin_ == nullptr || !cc1101_idle_refresh_safe(
+          [this]() { return this->gdo2_pin_->digital_read(); },
+          [this]() { return this->rxbytes_raw_(); },
+          [this]() { return this->read_status_(REG_MARCSTATE); })) {
+    this->idle_refresh_skipped_++;
+    return;
+  }
+  this->idle_refresh_count_++;
+  this->restart_rx();
 }
 
 void CC1101::reset_cc1101_() {
@@ -420,9 +465,10 @@ void CC1101::apply_radio_profile_() {
 
   this->set_frequency_(this->configured_frequency_hz_);
   // wM-Bus sync word 0x543D, shared by mode T and mode C. See restart_rx() for
-  // why 0x54CD is not a second sync word to listen on.
-  this->write_reg_verified_(REG_SYNC1, 0x54);
-  this->write_reg_verified_(REG_SYNC0, 0x3D);
+  // why 0x54CD is not a second sync word to listen on. S1: the last 16 chips of
+  // the S-mode sync, 0x7696 (the chip has a 16-bit sync register).
+  this->write_reg_verified_(REG_SYNC1, this->exp_sync1_());
+  this->write_reg_verified_(REG_SYNC0, this->exp_sync0_());
   this->write_reg_verified_(REG_PKTLEN, 0xFF);
   this->write_reg_verified_(REG_PKTCTRL1, 0x00);  // no address check, no appended status
 
@@ -459,23 +505,35 @@ void CC1101::apply_radio_profile_() {
   // ---------------------------------------------------------------------------
   this->write_reg_verified_(REG_FSCTRL1, 0x08);
   this->write_reg_verified_(REG_FSCTRL0, 0x00);
-  this->write_reg_verified_(REG_MDMCFG4, 0x5C);
-  this->write_reg_verified_(REG_MDMCFG3, 0x04);
+  // T1/C1: 0x5C/0x04 = RX filter 325 kHz, 103 kbaud (100 kcps chips).
+  // S1 (dev, 2026-11-13): S-mode is 32.768 kcps Manchester, +-50 kHz deviation
+  // at 868.30 MHz. Until now the chip stayed on the T1 rate in S1 and could
+  // only report the sync ("raw sniffer"). Computed for fXOSC = 26 MHz:
+  //   MDMCFG4 0x6A: CHANBW_E=1, CHANBW_M=2 -> 270.8 kHz; DRATE_E=10
+  //   MDMCFG3 0x4A: DRATE_M=74 -> (256+74)*2^10*26e6/2^28 = 32 730 baud (-0.12 %)
+  //   DEVIATN 0x47: E=4, M=7 -> 26e6/2^17*15*2^4 = 47.6 kHz
+  // These are the Radio Link A (S-mode) values of TI AN067 (SWRA234), which
+  // also sets BSCFG 0x6D, AGCCTRL2 0x04, AGCCTRL0 0xB2 and MDMCFG2 0x05 for S
+  // (see the exp_*_() helpers). TI: 270 kHz is the minimum filter for the full
+  // range of valid S signals; receiver deviation 40-50 kHz, 47 kHz for link A.
+  // Not yet measured on hardware.
+  this->write_reg_verified_(REG_MDMCFG4, this->exp_mdmcfg4_());
+  this->write_reg_verified_(REG_MDMCFG3, this->exp_mdmcfg3_());
   // 0x06 = 16/16 sync bits + carrier sense; cc1101_sync_15_16 -> 0x05.
   this->write_reg_verified_(REG_MDMCFG2, this->exp_mdmcfg2_());
   this->write_reg_verified_(REG_MDMCFG1, 0x22);
   this->write_reg_verified_(REG_MDMCFG0, 0xF8);
-  this->write_reg_verified_(REG_DEVIATN, 0x44);
+  this->write_reg_verified_(REG_DEVIATN, this->exp_deviatn_());
 
   this->write_reg_verified_(REG_MCSM2, 0x07);
   this->write_reg_verified_(REG_MCSM1, 0x00);
   this->write_reg_verified_(REG_MCSM0, 0x18);  // auto-calibrate from IDLE to RX/TX
   this->write_reg_verified_(REG_FOCCFG, 0x2E);
-  this->write_reg_verified_(REG_BSCFG, 0xBF);
+  this->write_reg_verified_(REG_BSCFG, this->exp_bscfg_());
   // 0x43 forbids the top DVGA gain step (0x03 measured worse, see __init__.py).
   this->write_reg_verified_(REG_AGCCTRL2, this->exp_agcctrl2_());
   this->write_reg_verified_(REG_AGCCTRL1, 0x09);
-  this->write_reg_verified_(REG_AGCCTRL0, 0xB5);
+  this->write_reg_verified_(REG_AGCCTRL0, this->exp_agcctrl0_());
   this->write_reg_verified_(REG_WOREVT1, 0x87);
   this->write_reg_verified_(REG_WOREVT0, 0x6B);
   this->write_reg_verified_(REG_WORCTRL, 0xFB);
@@ -600,19 +658,19 @@ bool CC1101::validate_startup_config_() {
   check("FIFOTHR", fifothr, EXP_FIFOTHR, "FIFO threshold around 32 bytes", "prog FIFO okolo 32 bajtow");
   check("PKTCTRL1", pktctrl1, EXP_PKTCTRL1, "no address filtering/status append", "bez filtrowania adresu i statusu");
   check("PKTCTRL0", pktctrl0, EXP_PKTCTRL0, "infinite packet mode for long T1 raw frames", "tryb infinite dla dlugich ramek T1 raw");
-  check("SYNC1", sync1, EXP_SYNC1, "wM-Bus sync high byte", "starszy bajt sync wM-Bus");
-  check("SYNC0", sync0, EXP_SYNC_T1, "T1 sync low byte", "mlodszy bajt sync T1");
+  check("SYNC1", sync1, this->exp_sync1_(), "wM-Bus sync high byte", "starszy bajt sync wM-Bus");
+  check("SYNC0", sync0, this->exp_sync0_(), "sync low byte (T1/C1 or S1)", "mlodszy bajt sync (T1/C1 albo S1)");
 
   check("FSCTRL1", fsctrl1, EXP_FSCTRL1, "RF frequency offset profile", "profil przesuniecia czestotliwosci RF");
-  check("MDMCFG4", mdmcfg4, EXP_MDMCFG4, "RX bandwidth / data rate profile", "profil pasma RX / predkosci danych");
-  check("MDMCFG3", mdmcfg3, EXP_MDMCFG3, "data rate profile", "profil predkosci danych");
+  check("MDMCFG4", mdmcfg4, this->exp_mdmcfg4_(), "RX bandwidth / data rate profile", "profil pasma RX / predkosci danych");
+  check("MDMCFG3", mdmcfg3, this->exp_mdmcfg3_(), "data rate profile", "profil predkosci danych");
   check("MDMCFG2", mdmcfg2, this->exp_mdmcfg2_(), "modem/sync profile", "profil modemu/synchronizacji");
-  check("DEVIATN", deviatn, EXP_DEVIATN, "frequency deviation profile", "profil dewiacji czestotliwosci");
+  check("DEVIATN", deviatn, this->exp_deviatn_(), "frequency deviation profile", "profil dewiacji czestotliwosci");
   check("FOCCFG", foccfg, EXP_FOCCFG, "frequency offset compensation", "kompensacja odchylki czestotliwosci");
-  check("BSCFG", bscfg, EXP_BSCFG, "bit synchronization", "synchronizacja bitow");
+  check("BSCFG", bscfg, this->exp_bscfg_(), "bit synchronization", "synchronizacja bitow");
   check("AGCCTRL2", agc2, this->exp_agcctrl2_(), "AGC profile", "profil AGC");
   check("AGCCTRL1", agc1, EXP_AGCCTRL1, "AGC profile", "profil AGC");
-  check("AGCCTRL0", agc0, EXP_AGCCTRL0, "AGC profile", "profil AGC");
+  check("AGCCTRL0", agc0, this->exp_agcctrl0_(), "AGC profile", "profil AGC");
   check("FREND1", frend1, EXP_FREND1, "RF frontend profile", "profil toru RF");
   const bool fscal3_ok = fscal3_config_ok_(fscal3, EXP_FSCAL3);
   ok = ok && fscal3_ok;
@@ -731,14 +789,15 @@ void CC1101::dump_debug_status(const char *reason) {
   const bool pkt_infinite = (pktctrl0 & 0x03) == 0x02;
   const bool sync_t1 = sync1 == EXP_SYNC1 && sync0 == EXP_SYNC_T1;
   const bool sync_c1 = sync1 == EXP_SYNC1 && sync0 == EXP_SYNC_C1;
-  const bool sync_known = sync_t1 || sync_c1;
+  const bool sync_s1 = this->s1_() && sync1 == 0x76 && sync0 == 0x96;
+  const bool sync_known = sync_t1 || sync_c1 || sync_s1;
 
   const bool rf_profile_ok =
-      reg_ok_(fsctrl1, EXP_FSCTRL1) && reg_ok_(mdmcfg4, EXP_MDMCFG4) &&
-      reg_ok_(mdmcfg3, EXP_MDMCFG3) && reg_ok_(mdmcfg2, this->exp_mdmcfg2_()) &&
-      reg_ok_(deviatn, EXP_DEVIATN) && reg_ok_(foccfg, EXP_FOCCFG) &&
-      reg_ok_(bscfg, EXP_BSCFG) && reg_ok_(agc2, this->exp_agcctrl2_()) &&
-      reg_ok_(agc1, EXP_AGCCTRL1) && reg_ok_(agc0, EXP_AGCCTRL0) &&
+      reg_ok_(fsctrl1, EXP_FSCTRL1) && reg_ok_(mdmcfg4, this->exp_mdmcfg4_()) &&
+      reg_ok_(mdmcfg3, this->exp_mdmcfg3_()) && reg_ok_(mdmcfg2, this->exp_mdmcfg2_()) &&
+      reg_ok_(deviatn, this->exp_deviatn_()) && reg_ok_(foccfg, EXP_FOCCFG) &&
+      reg_ok_(bscfg, this->exp_bscfg_()) && reg_ok_(agc2, this->exp_agcctrl2_()) &&
+      reg_ok_(agc1, EXP_AGCCTRL1) && reg_ok_(agc0, this->exp_agcctrl0_()) &&
       reg_ok_(frend1, EXP_FREND1) && fscal3_config_ok_(fscal3, EXP_FSCAL3);
 
   // chip_id_known is deliberately not part of config_ok: it says which CC1101
@@ -905,6 +964,10 @@ void CC1101::dump_debug_status(const char *reason) {
            mdmcfg4, mdmcfg3, mdmcfg2, deviatn, foccfg, bscfg, agc2, agc1, agc0,
            frend1, fscal3, sync1, sync0);
 #undef CC1101_DETAIL_LOG
+  ESP_LOGI(TAG, "CC1101 RX bench: state_wait=%s idle_refresh_ms=%u refreshes=%u skipped=%u state_timeouts=%u",
+           this->rx_state_wait_ ? "on" : "off", (unsigned) this->idle_rx_poll_interval_ms(),
+           (unsigned) this->idle_refresh_count_, (unsigned) this->idle_refresh_skipped_,
+           (unsigned) this->state_wait_timeouts_);
 }
 
 void CC1101::log_reg_status() {
@@ -913,8 +976,22 @@ void CC1101::log_reg_status() {
   this->dump_debug_status("boot_log");
 }
 
+static const char *const CC1101_KEY_RX_BW = "wmbus_radio.cc1101_rx_bw";
+static const char *const CC1101_KEY_CS = "wmbus_radio.cc1101_cs";
+
 void CC1101::setup() {
   this->apply_stored_settings_();
+  // The RX filter and carrier sense were switchable from the add-on during
+  // the 2026-11 bench tests. Both are settled (232 kHz default, carrier sense
+  // on) and YAML-only now. A value an older build stored is dropped, not
+  // applied, so it cannot change reception without anything showing it.
+  for (const char *key : {CC1101_KEY_RX_BW, CC1101_KEY_CS}) {
+    if (runtime_settings::load_u8(key) != runtime_settings::NONE) {
+      runtime_settings::save_u8(key, runtime_settings::NONE);
+      ESP_LOGW(TAG, "CC1101: dropped a value stored by the add-on (%s); YAML applies: rx_bandwidth=%u kHz, "
+               "carrier_sense=%s", key, (unsigned) this->rx_bw_khz_(), this->cs_ ? "on" : "off");
+    }
+  }
   // CC1101 deliberately does not use the generic reset_pin/irq_pin-only setup.
   // It needs both GDO2(sync) and GDO0(FIFO threshold) for deterministic RX.
   this->spi_setup();
@@ -935,9 +1012,15 @@ void CC1101::setup() {
 
   this->apply_radio_profile_();
   char rf_buf[112];
-  snprintf(rf_buf, sizeof(rf_buf),
-           "CC1101 compat: freq=%.3fMHz DR=100kbps fdev~47kHz RxBW~325kHz infinite-packet",
-           this->configured_frequency_hz_ / 1000000.0f);
+  if (this->s1_()) {
+    snprintf(rf_buf, sizeof(rf_buf),
+             "CC1101 S1 (experimental, TI AN067 link A): freq=%.3fMHz DR=32.73kbaud fdev~48kHz RxBW~271kHz",
+             this->configured_frequency_hz_ / 1000000.0f);
+  } else {
+    snprintf(rf_buf, sizeof(rf_buf),
+             "CC1101 compat: freq=%.3fMHz DR=100kbps fdev~47kHz RxBW~%ukHz CS=%s infinite-packet",
+             this->configured_frequency_hz_ / 1000000.0f, (unsigned) this->rx_bw_khz_(), this->cs_ ? "on" : "off");
+  }
   this->rf_params_str_ = rf_buf;
   if (!this->validate_startup_config_()) {
     this->dump_debug_status("startup_config_error");
@@ -949,6 +1032,8 @@ void CC1101::setup() {
 }
 
 void CC1101::dump_config() {
+  ESP_LOGCONFIG(TAG, "  Bench RX: state_wait=%s idle_refresh_ms=%u (sync option independent)",
+                this->rx_state_wait_ ? "on" : "off", (unsigned) this->idle_rx_poll_interval_ms());
   ESP_LOGCONFIG(TAG, "Transceiver: %s", this->get_name());
   LOG_PIN("  GDO0/FIFO Pin: ", this->gdo0_pin_);
   LOG_PIN("  GDO2/SYNC Pin: ", this->gdo2_pin_);
@@ -956,12 +1041,14 @@ void CC1101::dump_config() {
   ESP_LOGCONFIG(TAG, "  SPI/RX: experimental CC1101, requires GDO0+GDO2");
   ESP_LOGCONFIG(TAG, "  RF profile: compatibility modem profile, infinite packet mode");
   // Only when the bench option is set: users who never touch it see no line.
-  if (this->sync_15_16_) {
-    ESP_LOGCONFIG(TAG, "  Bench: sync_15_16=on (MDMCFG2=0x%02X)", this->exp_mdmcfg2_());
+  if ((this->sync_15_16_ || !this->cs_ || this->rx_bw_ != 2) && !this->s1_()) {
+    ESP_LOGCONFIG(TAG, "  Bench: sync_15_16=%s carrier_sense=%s (MDMCFG2=0x%02X) rx_bandwidth=%ukHz (MDMCFG4=0x%02X)",
+                  this->sync_15_16_ ? "on" : "off", this->cs_ ? "on" : "off", this->exp_mdmcfg2_(),
+                  (unsigned) this->rx_bw_khz_(), this->exp_mdmcfg4_());
   }
   const char *mode_str = (this->listen_mode_ == LISTEN_MODE_T1) ? "T1 only"
                        : (this->listen_mode_ == LISTEN_MODE_C1) ? "C1 only"
-                       : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only (experimental sync only)"
+                       : (this->listen_mode_ == LISTEN_MODE_S1) ? "S1 only (experimental, 32.768 kcps profile)"
                        : "T1+C1 (both)";
   ESP_LOGCONFIG(TAG, "  Listen mode: %s", mode_str);
 }
@@ -969,10 +1056,11 @@ void CC1101::dump_config() {
 void CC1101::restart_rx() {
   uint8_t sync2;
   if (this->listen_mode_ == LISTEN_MODE_S1) {
-    // CC1101 has only the existing 2-byte sync path here; use the last 16 bits
-    // of S-mode sync as an experimental raw sniffer. SX1262/SX1276 are preferred for S1.
+    // 16-bit sync register: the last 16 chips of the S-mode sync. The modem runs
+    // the S1 profile set in apply_radio_profile_() (32.768 kcps); the receiver
+    // task raw-drains and packet.cpp decodes the Manchester chips.
     sync2 = 0x96;
-    this->flush_rx_();
+    if (!this->flush_rx_()) return;
     this->write_reg_verified_(REG_SYNC1, 0x76);
     this->write_reg_verified_(REG_SYNC0, sync2);
     this->chunk_len_ = 0;
@@ -980,7 +1068,7 @@ void CC1101::restart_rx() {
     this->rssi_captured_ = false;
     this->last_rssi_dbm_ = -127;
     this->abort_requested_ = false;
-    this->strobe_(CC1101_SRX);
+    this->enter_rx_();
     return;
   }
   // One sync word for t1, c1 and both: 0x543D. Per EN 13757-4 the C-mode header
@@ -999,14 +1087,14 @@ void CC1101::restart_rx() {
   // with the sibling drivers, which are now fixed too.
   sync2 = 0x3D;
 
-  this->flush_rx_();
+  if (!this->flush_rx_()) return;
   this->set_sync_word_(sync2);
   this->chunk_len_ = 0;
   this->chunk_idx_ = 0;
   this->rssi_captured_ = false;
   this->last_rssi_dbm_ = -127;
   this->abort_requested_ = false;
-  this->strobe_(CC1101_SRX);
+  this->enter_rx_();
 }
 
 void CC1101::capture_rssi_() {
