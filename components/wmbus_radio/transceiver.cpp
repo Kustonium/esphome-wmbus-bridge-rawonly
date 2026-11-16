@@ -66,10 +66,6 @@ void RadioTransceiver::apply_stored_settings_() {
     return;
   }
   const auto mode = static_cast<ListenMode>(stored);
-  if (mode == LISTEN_MODE_S1 && std::string(this->get_name()) == "CC1101") {
-    ESP_LOGW(TAG, "Stored listen_mode S1 is not supported on CC1101, using YAML");
-    return;
-  }
   // The YAML default frequency follows the mode (868.30 MHz for S1, 868.95
   // otherwise); an explicit frequency: stays as written.
   if (!this->frequency_explicit_ &&

@@ -2,6 +2,34 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## More settings switchable from the add-on, also with diagnostics off
+
+- **The board's settings and configuration report no longer need `diagnostic_mode`.** `diag/settings` and `diag/config` are published, and `set/...` is listened to, with any `diagnostic_mode`, also `off` (the default). Before, a board with diagnostics off could not be switched from the add-on at all, not even its listen mode.
+- **New switchable settings** besides `listen_mode`: `diagnostic_mode` (`off`, `low`, `normal`, `debug`; `dev` stays a YAML choice), `publish_rssi`, and on SX1262 `rx_gain` and `long_gfsk_packets`, on SX1276 `sx1276_busy_ether_mode`. Each works like the listen mode: stored in flash, applied after a restart, `yaml` (the add-on's "back to YAML") drops it. Diagnostic fields set explicitly in YAML keep their value under a switched `diagnostic_mode`.
+
+---
+
+## CC1101: 232 kHz receive filter by default, bench switches off the add-on tile
+
+- **`cc1101_rx_bandwidth` now defaults to `232khz` instead of `325khz`.** Measured on the bench in November 2026 with an LR1121 on a splitter as the reference: more frames near the threshold, no new meters lost, nothing lost on strong frames. `325khz` (TI AN067) stays selectable for meters with an extreme frequency offset.
+- **The add-on's CC1101 tile no longer switches the RX filter or carrier sense.** Both were test switches; both tests are settled (232 kHz, carrier sense on). They are YAML-only options now. A value the add-on stored on the board during the tests is dropped at the next boot and the log says so.
+- **Boards with `cc1101_rx_bandwidth:` in their YAML keep that value.** Boards without it switch to 232 kHz at the next build.
+
+---
+
+## SX1262: 234 kHz receive filter by default
+
+- **`sx1262_rx_bandwidth` now defaults to `234khz` instead of `312khz`.** The 312 kHz value was inherited and had never been measured for T1. Measured on 2026-11-12/13 at the same hours on two working days, with an LR1121 on a splitter as the reference: a T-Beam on the other splitter output caught 52.5% of the LR1121's frames at -110..-105 dBm with 234 kHz against 30.6% with 312 kHz, and heard 0.84 of its meters against 0.76. A Heltec gained at -105..-100 dBm (33% against 26%), a XIAO a little. Strong frames lost nothing, and C1 in `listen_mode: both` improved as well (the T-Beam caught 77% of the LR1121's C1 frames against 60%).
+- **Boards with `sx1262_rx_bandwidth:` in their YAML keep that value.** Boards without it switch to 234 kHz at the next build. To keep the old behaviour, set `sx1262_rx_bandwidth: 312khz`. S1 is unchanged (its 234.3 kHz was always fixed).
+
+---
+
+## CC1101: opt-in RX restart experiments
+
+- New `cc1101_rx_state_wait` and `cc1101_idle_rx_refresh` switches, both false by default. Test MARCSTATE-confirmed restart separately from guarded 50 ms idle refresh; neither changes `cc1101_sync_15_16`.
+- Effective settings and cumulative refresh/timeout counters appear in configuration/status reports. Host tests cover state transitions, timeouts and packet-arrival guards; RF results remain to be measured.
+- See [CC1101 RX bench](CC1101_RX_BENCH.md) for A-B-A phases and limitations.
+
 ## Listen mode switchable from the Home Assistant add-on, without compiling
 
 - **The board now publishes the settings the add-on may change** (retained `wmbus/<board>/diag/settings`) and listens for `wmbus/<board>/set/listen_mode` (`t1`, `c1`, `both`, `s1` or `yaml`). The add-on's Boards tab (1.6.18 and later) shows a tile per board with these buttons. A click stores the mode in the board's flash and restarts it (about 10 s); the board comes back in the new mode. S1 is refused on CC1101.

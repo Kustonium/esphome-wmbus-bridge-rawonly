@@ -206,21 +206,15 @@ wmbus_radio:
   # Check your longest decoded frame before enabling it prophylactically.
   # long_gfsk_packets: false  # default: false
 
-  # EN: T1 receiver bandwidth. Affects T1 ONLY - C1 and S1 keep their measured
-  #     234.3 kHz no matter what is set here.
-  #     The 312 kHz default was inherited, never measured for T1, and is 25%
-  #     wider than the window an SX1276 uses for the same mode, so it admits
-  #     noise the signal does not need. 234khz is the value to compare against.
-  #     Change it on ONE board and leave a second one at the default, otherwise
-  #     the comparison says nothing.
-  # PL: Szerokosc pasma odbiornika dla T1. Dotyczy WYLACZNIE T1 - C1 i S1
-  #     zachowuja swoje zmierzone 234,3 kHz niezaleznie od tego ustawienia.
-  #     Domyslne 312 kHz jest odziedziczone, nigdy nie zmierzone dla T1 i o 25%
-  #     szersze niz okno SX1276 w tym samym trybie, wiec wpuszcza szum, ktorego
-  #     sygnal nie potrzebuje. 234khz to wartosc do porownania.
-  #     Zmieniac na JEDNEJ plytce, druga zostawic na domyslnej - inaczej
-  #     porownanie niczego nie mowi.
-  # sx1262_rx_bandwidth: 234khz  # default: 312khz
+  # EN: Receiver bandwidth for T1 and C1 (S1 keeps its fixed 234.3 kHz).
+  #     Default 234khz since 2026-11-15: measured better than the inherited
+  #     312khz on three boards - more weak frames, T1 and C1, nothing lost on
+  #     strong ones. Set 312khz only to compare or to go back.
+  # PL: Szerokosc pasma odbiornika dla T1 i C1 (S1 ma stale 234,3 kHz).
+  #     Domyslnie 234khz od 15.11.2026: zmierzone jako lepsze od
+  #     odziedziczonych 312khz na trzech plytkach - wiecej slabych ramek, T1 i
+  #     C1, bez strat na mocnych. 312khz tylko do porownania albo powrotu.
+  # sx1262_rx_bandwidth: 312khz  # default: 234khz
 
   # EN: Receive mode. Available values: t1, c1, both, s1.
   #     both means T1/C1 only. S1 is separate and cannot be combined with T1/C1.

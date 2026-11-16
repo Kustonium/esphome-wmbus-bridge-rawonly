@@ -103,8 +103,9 @@ did not survive an A–B–A repeat and were removed from the code.
 Practical rule: **`SX1276` for S1, `SX1262` for T1.** If you need both, that is an
 argument for two devices rather than one compromise.
 
-`CC1101` in `listen_mode: s1` is an experimental raw sniffer on S-mode sync only,
-not a receive path — the driver says so at startup. `LR1121` received S1
+`CC1101` in `listen_mode: s1` runs its own S1 modem profile (TI AN067 Radio
+Link A: 32.768 kcps, 47 kHz, 271 kHz filter) on the development branch since 2026-11-13; before that
+it stayed on the T1 rate and only caught the sync. Not measured yet. `LR1121` received S1
 correctly on the first attempt, but only from a workshop transmitter at −59 dBm,
 which proves the path works and says nothing about sensitivity.
 

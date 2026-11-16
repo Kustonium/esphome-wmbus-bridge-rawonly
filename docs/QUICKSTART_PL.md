@@ -62,7 +62,7 @@ taka sama. Przed zakupem albo podłączeniem trzeba wiedzieć trzy rzeczy:
 Czego się spodziewać: użytkownicy używają go na **T1**, ale nie ma tu porównania CC1101 z innymi
 radiami, więc nie ma liczb do obiecania. To najwolniejsze z czterech radiów przy odczycie ramek
 (termin FIFO 1800 µs wobec 1000 µs na SX1276), co ma największe znaczenie przy wielu szybkich
-licznikach, a S1 na CC1101 to surowy sniffer, nie ścieżka odbiorcza. Raport z wynikami
+licznikach, a S1 na CC1101 jest eksperymentalne i jeszcze niezmierzone. Raport z wynikami
 w Discussions pomoże bardziej niż cokolwiek innego. Jeśli i tak
 kupujesz nowy sprzęt, najpierw zajrzyj do [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md); jeśli
 CC1101 już masz, używaj go.

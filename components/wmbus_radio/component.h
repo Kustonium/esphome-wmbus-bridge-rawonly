@@ -22,6 +22,7 @@
 #include "link_mode.h"
 
 #include "packet.h"
+#include "runtime_settings.h"
 #include "transceiver.h"
 
 // Only pointers to these entity types are kept on Radio, and only the sensor/
@@ -58,7 +59,10 @@ public:
   void set_target_topic(const std::string &topic) { this->target_topic_ = topic; }
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
   void set_publish_radio_raw(bool enabled) { this->publish_radio_raw_ = enabled; }
-  void set_publish_rssi(bool enabled) { this->publish_rssi_ = enabled; }
+  void set_publish_rssi(bool enabled) {
+    this->publish_rssi_ = enabled;
+    this->publish_rssi_opt_.set_yaml(enabled ? 1 : 0);
+  }
 
   // Per-topic MQTT QoS (0/1/2). Defaults all preserve the pre-existing
   // hardcoded behaviour: telegram/rssi/health/diagnostics stayed at 0, the
@@ -173,7 +177,10 @@ public:
   void set_diag_publish_summary_15min(bool enabled) { this->diag_publish_summary_15min_ = enabled; }
   void set_diag_publish_summary_60min(bool enabled) { this->diag_publish_summary_60min_ = enabled; }
   void set_diag_publish_summary_highlight_meters(bool enabled) { this->diag_publish_summary_highlight_meters_ = enabled; }
-  void set_sx1276_busy_ether_mode(SX1276BusyEtherMode mode) { this->sx1276_busy_ether_mode_ = mode; }
+  void set_sx1276_busy_ether_mode(SX1276BusyEtherMode mode) {
+    this->sx1276_busy_ether_mode_ = mode;
+    this->busy_ether_opt_.set_yaml((uint8_t) mode);
+  }
   void set_sx1262_yaml_sanity(bool has_tcxo, bool dio2_rf_switch, bool long_gfsk_packets, const std::string &rx_gain) {
     this->sx1262_yaml_sanity_configured_ = true;
     this->sx1262_yaml_has_tcxo_ = has_tcxo;
@@ -197,7 +204,17 @@ public:
   void set_listen_mode_filter_after_parse(bool enabled) { this->listen_mode_filter_after_parse_ = enabled; }
   void set_use_noise_floor_threshold(bool enabled) { this->use_noise_floor_threshold_ = enabled; }
   void set_noise_floor_margin_db(int32_t db) { this->noise_floor_margin_db_ = db; }
-  void set_diagnostic_mode_str(const std::string &mode) { this->diag_mode_str_ = mode; }
+  void set_diagnostic_mode_str(const std::string &mode) {
+    this->diag_mode_str_ = mode;
+    for (size_t i = 0; i < this->diag_mode_opt_.options.size(); i++)
+      if (mode == this->diag_mode_opt_.options[i]) this->diag_mode_opt_.set_yaml((uint8_t) i);
+  }
+  // For a diagnostic_mode switched from the add-on: which preset fields YAML
+  // set explicitly (DIAG_EXPLICIT_* bits, those keep their YAML value), the
+  // derived diag topic and whether YAML gave diagnostic_topic itself.
+  void set_diag_explicit_mask(uint16_t mask) { this->diag_explicit_mask_ = mask; }
+  void set_diag_base_topic(const std::string &topic) { this->diag_base_topic_ = topic; }
+  void set_diag_topic_explicit(bool v) { this->diag_topic_explicit_ = v; }
   void set_diagnostic_meter_stats_str(const std::string &mode) { this->meter_stats_str_ = mode; }
   void set_receiver_task_stack_size(uint32_t stack_size) {
     // This configures the dedicated radio_recv FreeRTOS task created by
@@ -844,8 +861,27 @@ protected:
   bool settings_subscribed_{false};
   bool settings_publish_pending_{true};
   std::string topic_base_() const;
+  // <diag>/settings and <diag>/config. They do not depend on diagnostic_mode:
+  // with it off they go to <topic_base>/diag/... so a board can still be
+  // switched from the add-on (including switching diagnostics on).
+  std::string settings_topic_(const char *leaf) const;
   void publish_settings_();
   void on_set_listen_mode_(const std::string &payload);
+  void on_set_radio_setting_(const std::string &key, const std::string &payload);
+  void on_set_component_setting_(const std::string &key, const std::string &payload);
+  void finish_setting_(const std::string &key, const std::string &payload, int result);
+  runtime_settings::Option *component_option_(const std::string &key);
+  void apply_diag_preset_(uint8_t mode);
+  // Component-level options the add-on may switch (runtime_settings.h).
+  // diagnostic_mode offers off/low/normal/debug; dev stays a YAML choice.
+  runtime_settings::Option diag_mode_opt_{"diagnostic_mode", "wmbus_radio.diag_mode",
+                                          {"off", "low", "normal", "debug", "dev"}, 4};
+  runtime_settings::Option publish_rssi_opt_{"publish_rssi", "wmbus_radio.publish_rssi", {"false", "true"}};
+  runtime_settings::Option busy_ether_opt_{"sx1276_busy_ether_mode", "wmbus_radio.sx1276_busy",
+                                           {"normal", "aggressive", "adaptive"}};
+  uint16_t diag_explicit_mask_{0};
+  std::string diag_base_topic_{};
+  bool diag_topic_explicit_{false};
   bool config_report_settings_applied_{false};
   void apply_settings_to_config_report_();
 
