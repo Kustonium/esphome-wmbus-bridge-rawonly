@@ -1,0 +1,183 @@
+# ESP-NOW repeater - BRIDGE (no wM-Bus radio needed).
+#
+# Sits on the home network, receives frames from a node (node_*.yaml) over
+# ESP-NOW and publishes them to MQTT on the node's behalf:
+#   wmbus/<node name>/telegram, wmbus/<node name>/rx  - same format as wmbus_radio
+#   wmbus/repeater/link                               - every 60 s: link statistics
+# The add-on sees the node as an ordinary board.
+#
+# Written for an ESP32-C3 dev board. Any ESP32 / S3 / C3 works: change the esp32:
+# block. A board with an external 2.4 GHz antenna connector gives more range.
+# Place it where it has good signal from BOTH the router and the node.
+#
+# Log language: uncomment the build flag below for Polish.
+
+substitutions:
+  devicename: esphome-wmbus-repeater-bridge
+  friendly_name: "wMBus Repeater Bridge"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+  includes:
+    - repeater_bridge.h
+  on_boot:
+    priority: 600
+    then:
+      - lambda: wmbus_repeater_bridge::setup(id(espnow_link), &id(accepted_node));
+  # platformio_options:
+  #   build_flags:
+  #     - -DWMBUS_LOG_LANG_PL
+
+esp32:
+  variant: esp32c3
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  on_disconnect:
+    - logger.log:
+        level: WARN
+        format: "Wi-Fi: disconnected from the router (ESP-NOW is off-channel while searching)"
+  on_connect:
+    - logger.log: "Wi-Fi: connected to the router"
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+safe_mode:
+  boot_is_good_after: 10s
+
+web_server:
+  port: 80
+  version: 3
+
+mqtt:
+  broker: !secret mqtt_broker
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  # EN: no skip_cert_cn_check here: since ESPHome 2026.11 it switches TLS on.
+  # PL: bez skip_cert_cn_check: od ESPHome 2026.11 ta opcja włącza TLS.
+  port: 1883
+
+# Clock for the node (it has no network): sent in every ACK. Also the key for
+# log anonymizing.
+time:
+  - platform: sntp
+    id: sntp_time
+
+globals:
+  - id: accepted_node
+    type: uint64_t
+    restore_value: true
+    initial_value: '0'
+
+espnow:
+  id: espnow_link
+  # Channel comes from Wi-Fi (the router's channel). The node finds it itself.
+  auto_add_peer: true
+  on_receive:
+    - lambda: wmbus_repeater_bridge::on_packet(info, data, size);
+  on_broadcast:
+    - lambda: wmbus_repeater_bridge::on_packet(info, data, size);
+
+interval:
+  - interval: 60s
+    then:
+      - lambda: |-
+          const std::string j = wmbus_repeater_bridge::link_json_and_reset();
+          auto *m = mqtt::global_mqtt_client;
+          if (m != nullptr && m->is_connected()) m->publish("wmbus/repeater/link", j, 0, false);
+          ESP_LOGI("repeater_bridge", "60 s: %s", j.c_str());
+
+debug:
+  update_interval: 60s
+
+text_sensor:
+  - platform: template
+    name: "Node"
+    icon: mdi:access-point-network
+    lambda: return wmbus_repeater_bridge::accepted_text();
+    update_interval: 5s
+  - platform: template
+    name: "Other nodes heard"
+    icon: mdi:access-point-plus
+    lambda: return wmbus_repeater_bridge::candidates_text();
+    update_interval: 10s
+  - platform: debug
+    reset_reason:
+      name: "Reset reason"
+
+sensor:
+  - platform: template
+    name: "Frames published"
+    lambda: return wmbus_repeater_bridge::rx();
+    update_interval: 60s
+    accuracy_decimals: 0
+    state_class: total_increasing
+  - platform: template
+    name: "Frames missing (seq gaps)"
+    lambda: return wmbus_repeater_bridge::lost();
+    update_interval: 60s
+    accuracy_decimals: 0
+    state_class: total_increasing
+  - platform: template
+    name: "Lost on node (buffer full)"
+    lambda: return wmbus_repeater_bridge::a_dropped();
+    update_interval: 60s
+    accuracy_decimals: 0
+  - platform: template
+    name: "Link RSSI"
+    lambda: return wmbus_repeater_bridge::link_rssi();
+    update_interval: 60s
+    unit_of_measurement: dBm
+    device_class: signal_strength
+  - platform: wifi_signal
+    name: "Wi-Fi RSSI"
+    update_interval: 60s
+  - platform: debug
+    free:
+      name: "Free heap"
+    loop_time:
+      name: "Longest loop"
+  - platform: uptime
+    name: "Uptime"
+
+switch:
+  # Masks meter IDs in this board's log (screenshots). MQTT is untouched.
+  - platform: template
+    name: "Anonymize"
+    icon: mdi:incognito
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - lambda: wmbus_repeater_bridge::set_anonymize(true);
+    turn_off_action:
+      - lambda: wmbus_repeater_bridge::set_anonymize(false);
+
+button:
+  - platform: template
+    name: "Accept strongest node"
+    on_press:
+      - lambda: wmbus_repeater_bridge::accept_strongest();
+  - platform: template
+    name: "Forget node"
+    on_press:
+      - lambda: wmbus_repeater_bridge::forget();
+  - platform: restart
+    name: "Restart"

@@ -1,0 +1,54 @@
+# CI-only configuration - NOT an example, do not flash it to a device.
+#
+# repeater: true with NO mqtt:, NO wifi:, NO api:. This is the only build in the
+# matrix where USE_MQTT is undefined, so it is the one that proves every MQTT
+# call site in wmbus_radio goes through mqtt_access.h (the stub client) and
+# nothing reaches esphome::mqtt directly. A new publish that bypasses
+# mqtt_client() breaks this build, not a user's board.
+#
+# The on_frame lambda stands in for what a real repeater does with the frame
+# (e.g. ESP-NOW to a bridge board); here it only logs.
+
+substitutions:
+  devicename: esphome-wmbus-ci-repeater
+  friendly_name: "wMBus CI repeater"
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32dev
+  variant: ESP32
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+
+spi:
+  clk_pin: GPIO5
+  mosi_pin: GPIO27
+  miso_pin: GPIO19
+
+wmbus_radio:
+  radio_type: SX1276
+  cs_pin: GPIO18
+  reset_pin: GPIO14
+  irq_pin:
+    number: GPIO35
+    mode: input
+  listen_mode: t1
+  diagnostic_mode: normal
+  repeater: true
+  on_frame:
+    then:
+      - lambda: |-
+          ESP_LOGI("repeater", "frame %u B RSSI %d", (unsigned) frame->data().size(), (int) frame->rssi());

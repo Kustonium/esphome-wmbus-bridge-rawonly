@@ -4,6 +4,8 @@
 
 Public examples are provided for SX1262, SX1276 and CC1101 boards.
 
+[repeater-espnow/](repeater-espnow/README.md): a receiver next to the meters without the home network, forwarding over ESP-NOW to a bridge board that publishes to MQTT. Node files for every example board.
+
 CC1101 support is available, but still experimental. It requires explicit YAML opt-in and proper GDO0/GDO2 wiring. This example is provided for advanced/testing use, not as the recommended user path.
 
 ## Topic model

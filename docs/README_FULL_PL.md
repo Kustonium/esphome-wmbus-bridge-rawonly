@@ -323,6 +323,7 @@ Gdzie stoi wobec pozostałych radiów — [`CHIP_SELECTION_PL.md`](CHIP_SELECTIO
 - [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md)
 - [`BENCHMARKS_PL.md`](BENCHMARKS_PL.md)
 - [`docs/RX_PIPELINE_PL.md`](RX_PIPELINE_PL.md)
+- [`examples/repeater-espnow/`](../examples/repeater-espnow/README_PL.md) - odbiornik bez sieci domowej (most ESP-NOW)
 
 ## Zasada supportu
 

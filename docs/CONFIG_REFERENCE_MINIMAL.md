@@ -15,6 +15,7 @@
 | `highlight_meters` | empty | public | meter IDs for highlighting and statistics in `normal/debug`; **does not filter MQTT** |
 | `forward_meters` | empty | public | whitelist of IDs published on `wmbus/<topic_name>/telegram`; a list or `true` to use `highlight_meters`; empty forwards everything |
 | `publish_rssi` | `false` | public | publish each meter's latest frame RSSI on `wmbus/<topic_name>/rssi/<meter_id>`; see below |
+| `repeater` | `false` | public | radio front end only: no MQTT at all (no topics, no buffer, no outage statistics), frames leave only through `on_frame` (e.g. ESP-NOW to a bridge board, ready setup in [`examples/repeater-espnow`](../examples/repeater-espnow/README.md)); the YAML may then omit `mqtt:` |
 | `receiver_task_stack_size` | `3072` | advanced | separate RX task stack size; range `2048..16384` |
 | `listen_mode_filter_after_parse` | `false` | experimental | more aggressive filtering after parsing; evaluate per meter, not just by the global drop percentage |
 | `use_noise_floor_threshold` | `false` | experimental | derive the weak-start abort threshold from the MEASURED noise floor instead of the average of successful receptions; `noise_floor_dbm` is always measured, this option only uses it |
@@ -23,7 +24,7 @@
 | `highlight_tag` | `wmbus_user` | public | log tag for highlighted meters |
 | `highlight_prefix` | `"★ "` | public | prefix of a highlighted meter's log line |
 | `allow_untested_framework` | `false` | safety gate | required to build with the `arduino` framework; compilation otherwise stops |
-| `mark_as_handled` | `false` | public | option inside `on_frame:`; marks the frame as handled |
+| `mark_as_handled` | `false` | public | option inside `on_frame:`; counts the frame as handled in the log; does **not** stop the MQTT publish (use `repeater` or `forward_meters`) |
 
 ## Listen modes and frequency
 

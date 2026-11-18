@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "internal_wmbus.h"
+// ESPHome 2026.11 moved str_sprintf()/format_hex() to alloc_helpers.h, which
+// helpers.h no longer pulls in. Older releases have no such header.
+#if __has_include("esphome/core/alloc_helpers.h")
+#include "esphome/core/alloc_helpers.h"
+#endif
 
 namespace esphome {
 namespace wmbus_radio {

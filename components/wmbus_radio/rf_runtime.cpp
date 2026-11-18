@@ -13,7 +13,7 @@
 #include "esphome/core/hal.h"
 
 // Optional: publish busy-ether transition events via ESPHome MQTT if present.
-#include "esphome/components/mqtt/mqtt_client.h"
+#include "mqtt_access.h"
 
 #include <algorithm>
 #include <cinttypes>
@@ -156,7 +156,7 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
                this->diag_rx_path_.fifo_overrun);
       // Publish busy_ether_changed event: passive -> active
       if (!this->diag_topic_.empty()) {
-        auto *mqtt = esphome::mqtt::global_mqtt_client;
+        auto *mqtt = mqtt_client();
         if (mqtt != nullptr && mqtt->is_connected()) {
           char ev[320];
           snprintf(ev, sizeof(ev),
@@ -177,7 +177,7 @@ void Radio::evaluate_busy_ether_adaptive_(uint32_t now_ms) {
                         "BusyEther [ADAPTIVE]: hold wygasl, powrot do trybu pasywnego (fsl_ext=%") PRIu32 " fsl_total=%" PRIu32 " drop_pct=%" PRIu32 ")", fsl, fsl_total, drop_pct);
     // Publish busy_ether_changed event: active -> passive
     if (!this->diag_topic_.empty()) {
-      auto *mqtt = esphome::mqtt::global_mqtt_client;
+      auto *mqtt = mqtt_client();
       if (mqtt != nullptr && mqtt->is_connected()) {
         char ev[320];
         snprintf(ev, sizeof(ev),

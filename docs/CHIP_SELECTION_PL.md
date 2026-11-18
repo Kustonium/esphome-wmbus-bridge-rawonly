@@ -9,15 +9,16 @@ radia: `CC1101`, `SX1276`, `SX1262` i `LR1121`.
 
 - **Dom / kilka liczników / spokojny eter / głównie wolne T1** → `SX1276` zwykle wystarczy.
 - **Blok / dużo liczników / częste pakiety / większe pakiety** → wybierz `SX1262`.
-- **Liczniki S1 na granicy słyszalności** → `SX1276`. Patrz [S1 to osobne pytanie](#s1-to-osobne-pytanie).
+- **Liczniki S1** → na czystym sygnale `LR1121`, `SX1276` i `SX1262` słyszą S1 w granicach ok. 1 dB (stanowisko, 17.11.2026). Na prawdziwych licznikach `SX1276` nadal łapie więcej, bo toleruje nadajniki odbiegające od normy; resztę rozstrzyga antena i jej miejsce. `CC1101` jest o ok. 5 dB słabszy. Patrz [S1 to osobne pytanie](#s1-to-osobne-pytanie).
 - **Liczniki C1** → `SX1262` w `listen_mode: both` teraz je słyszy (10 liczników C1 na T-Beamie, ponowny pomiar 01.10.2026 po poprawce słowa synchronizacji). `SX1276` w `both` usłyszał 14. Patrz [C1 też jest osobnym pytaniem](#c1-też-jest-osobnym-pytaniem).
 - **Mieszane T1 + C1 na jednym urządzeniu** → od poprawki z 30.09.2026 brak mierzalnego kosztu dla T1 na `SX1262`, `LR1121` i `SX1276`; `CC1101` nie zmierzony ponownie.
 - **Dwa osobne urządzenia** (`T1-only` i `C1-only`) → już niepotrzebne: na `SX1262`, `LR1121` i `SX1276` wystarczy jedno urządzenie w `both`.
 - **`CC1101`** → tylko jeśli już masz taki sprzęt. Stoi za jawną bramką
   bezpieczeństwa i nie jest układem, który warto kupić pod ten projekt.
-- **`LR1121`** → najnowszy i najlepszy odbiornik z dotąd zmierzonych tutaj, ale
-  najsłabiej sprawdzony. Traktuj jako działający punkt wyjścia, nie jako domyślny
-  wybór ze wsparciem.
+- **`LR1121`** → najnowszy. Na wspólnej antenie usłyszał więcej liczników niż
+  `SX1276` (11.11.2026), a na czystym S1 dzieli pierwsze miejsce (17.11.2026), ale
+  to jedna płytka i najmłodszy sterownik. Traktuj jako działający punkt wyjścia,
+  nie jako domyślny wybór ze wsparciem.
 
 ## Skąd bierze się różnica
 
@@ -32,18 +33,25 @@ radia: `CC1101`, `SX1276`, `SX1262` i `LR1121`.
 
 `CC1101` jest układem znacznie starszym i prostszym. Działa, ale ma najwolniejszy
 tor odczytu z całej czwórki (termin odpytywania FIFO to 1800 µs wobec 1000 µs na
-`SX1276`), a jego obsługa S1 jest surowym snifferem, nie ścieżką odbiorczą.
+`SX1276`). Od 13.11.2026 ma własny profil modemu S1; na S1 jest o ok. 5 dB mniej
+czuły od pozostałych trzech.
 
-`LR1121` to najnowszy krzem, a brakujące porównanie zostało w międzyczasie
-zrobione: tygodnie obok czterech innych odbiorników w jednym mieszkaniu, a potem
-stanowisko tłumikowe ze wspólnym wejściem. **Wypadł ostatni.** Przez 12 godzin
-usłyszał 48 liczników tam, gdzie T-Beam na SX1262 przy identycznej antenie
-usłyszał 113, a na stanowisku jako pierwszy stracił sygnał całkowicie. Zamiana
-anten wykluczyła antenę — przegrywał, mając tę lepszą.
+`LR1121` to najnowszy krzem. Wcześniejsza wersja tej strony mówiła, że **wypadł
+ostatni**; to nie przetrwało uczciwego porównania. Opierało się na RSSI
+poprawionym o −11 dB, a ta poprawka zawierała też gorsze miejsce anteny (`LR1121`
+miał antenę na bardzo krótkim pigtailu). Na **jednej antenie przez rozgałęźnik**
+(11.11.2026, z zamianą wyjść między fazami) `LR1121` czyta **6 dB niżej** niż
+`SX1276` na tych samych ramkach, odebrał mniej więcej **dwa razy więcej ramek**
+i **174–190 liczników wobec 121–136**, a z najsłabszych ramek, które zdekodował
+`SX1276`, złapał 86–98%. T-Beam na `SX1262` na drugim wyjściu rozgałęźnika usłyszał
+0,84 jego liczników (12–13.11.2026). Na czystym S1 (17.11.2026) zremisował
+z najlepszym `SX1262`. Na stanowisku tłumikowym T1 (31.08.2026) dwie płytki `SX1262`
+dekodowały jeszcze ok. 4–5 dB dalej niż on, więc jego przewaga na wspólnej antenie
+w T1 nie wynika z samej czułości.
 
-Jego front end nie jest problemem. Zamienia 80% wyzwoleń odbiornika w ramki,
-najlepszy wynik w stawce, i wyzwala się najrzadziej. To po prostu najostrożniejszy
-odbiornik z tych pięciu, a przy tym obciążeniu ostrożność kosztuje zasięg.
+Co pozostaje prawdą: nie ma tolerancji błędu w wykrywaniu preambuły i synchronizacji
+(tak jak `SX1262`), więc nadajnik odbiegający o kilka procent od szybkości normy
+ginie całkowicie - patrz [S1 to osobne pytanie](#s1-to-osobne-pytanie).
 
 Jedno mieszkanie i po jednej płytce każdego typu, więc to szereguje te pięć
 egzemplarzy, a nie krzem.
@@ -57,7 +65,11 @@ Najważniejsze czynniki to:
 3. **gęstość RF / eter blokowy**,
 4. **tryb pojedynczy vs `both`**,
 5. **który tryb łącza realnie Cię interesuje** — T1/C1 i S1 nie ustawiają radiów
-   w tej samej kolejności.
+   w tej samej kolejności,
+6. **antena i jej miejsce** — antena 10 cm zamiast 6 cm dołączonej do płytki dała
+   Heltecowi V4 ok. **+5 dB**, a XIAO ok. **+3 dB** na licznik (15.10.2026, te same
+   płytki, to samo miejsce), więcej niż większość różnic między układami na tej
+   stronie.
 
 Sama liczba liczników nie mówi wszystkiego. Kilka szybkich liczników może szkodzić bardziej niż wiele wolnych.
 
@@ -70,7 +82,7 @@ Sama liczba liczników nie mówi wszystkiego. Kilka szybkich liczników może sz
 | Szybkie liczniki rzędu 30–60 s | słaby | często słaby | zalecany | dobry |
 | Duże pakiety pod presją czasu | słaby | słaby | zalecany | dobry |
 | `both` na jednym urządzeniu | niezalecane | **w porządku** - brak mierzalnego kosztu T1 | **w porządku** - brak mierzalnego kosztu T1 | w porządku - brak mierzalnego kosztu T1 |
-| Liczniki S1 przy progu szumu | tylko surowy sniffer | **zalecany** | słabszy, patrz niżej | obiecujący, jeden test |
+| Liczniki S1 przy progu szumu | o ok. 5 dB słabszy | **zalecany** - ta sama czułość, toleruje liczniki odbiegające od normy | ta sama czułość na czystym sygnale, bez tolerancji | ta sama czułość na czystym sygnale, bez tolerancji |
 | Liczniki C1 | niesprawdzony tutaj | **najlepszy** w `both` (14 liczników C1) | **dobry** w `both`, patrz niżej | słyszy liczniki C1 w swoim (krótszym) zasięgu T1 |
 | Maksymalna niezawodność | nie | ograniczony | zalecany | jeszcze nie do udowodnienia |
 | Dostępność drugiej opinii | szeroka | szeroka | szeroka | jedna płytka, jeden dom |
@@ -85,31 +97,64 @@ W testowanym środowisku bloku mieszkalnego na ESPHome `2026.3.2`:
 
 To jest próg **praktyczny, nie absolutny**. Zależy od budynku, poziomów sygnału i obciążenia RF.
 
+Od 15.11.2026 `sx1262_rx_bandwidth` ma domyślnie **234 kHz** (było 312 kHz,
+odziedziczone i nigdy niezmierzone dla T1). Zmierzone 12–13.11.2026 wobec `LR1121`
+na rozgałęźniku: T-Beam złapał **52,5%** ramek `LR1121` w zakresie −110…−105 dBm
+przy 234 kHz wobec 30,6% przy 312 kHz, usłyszał 0,84 jego liczników wobec 0,76
+i złapał 77% jego ramek C1 wobec 60%.
+
 ## S1 to osobne pytanie
 
 S1 nie ustawia radiów w tej samej kolejności co T1, więc powyższa tabela T1 tu
-nie obowiązuje. Zmierzone 2026-08-01 i 2026-08-14:
+nie obowiązuje.
 
-- `SX1262` dekoduje S1 mniej więcej do **−82 dBm** i zawodzi przy **−85 dBm**.
-  Trzy niezależne metody dały ten sam próg.
-- `SX1276` zdekodował tę samą, rzeczywistą emisję, w tej samej sekundzie, przy
-  **−99/−100 dBm**.
-- Różnica to zatem około **3–10 dB**, a w testowanym budynku cała lokalna
-  populacja S1 dociera na progu `SX1262` albo poniżej niego.
+**Zmierzone na czystym sygnale, 17.11.2026.** Płytka-nadajnik wysyłała poprawną
+ramkę S1 na 869,850 MHz (tam nie nadaje żaden prawdziwy licznik) przez tłumiki
+2×30 dB, zmniejszając moc o 1 dB na krok, 20–30 ramek na krok. Każda płytka
+dzieliła jedną antenę z `LR1121` przez rozgałęźnik, więc każdy wynik to różnica
+wobec `LR1121` **w tym samym przebiegu** (sam `LR1121` przesuwa się o 1,5–3 dB
+między przebiegami). Próg to moc, przy której płytka odbiera połowę ramek.
 
-**`SX1262` nie ma defektu przy S1. Jest tam po prostu mniej czuły.** Żadne
-strojenie AGC ani rejestrów nie odrobiło tej różnicy; eksperymenty, które
-wyglądały na pomocne, nie powtórzyły się w układzie A–B–A i zostały usunięte
-z kodu.
+| płytka | układ | wobec `LR1121` | próg 50%, ≈ skala LilyGO |
+|---|---|---|---|
+| Waveshare | LR1121 | **0 dB** (odniesienie) | ≈ −103,5 dBm |
+| LilyGO T-Beam | SX1262 | **0 dB** | ≈ −103,5 dBm |
+| LilyGO T3-S3 | SX1276 | **≈ −1 dB** | −102,6 dBm |
+| Heltec V4 | SX1262 | **≈ −1 dB** | ≈ −102,5 dBm |
+| SIH Reader | CC1101 | **≈ −5 dB** | ≈ −98,5 dBm |
+| XIAO ESP32-S3 + Wio | SX1262 | **≈ −8 dB** | ≈ −95,5 dBm |
 
-Zasada praktyczna: **`SX1276` do S1, `SX1262` do T1.** Jeśli potrzebujesz obu,
-jest to argument za dwoma urządzeniami, a nie za jednym kompromisem.
+Dokładność ok. ±1–2 dB. „Skala LilyGO” to własny odczyt RSSI LilyGO plus zmierzona
+różnica do `LR1121` - przybliżenie, a nie laboratoryjne dBm na złączu.
 
-`CC1101` w `listen_mode: s1` ma w gałęzi rozwojowej od 2026-11-13 własny profil
-modemu S1 (TI AN067 Radio Link A: 32,768 kcps, 47 kHz, filtr 271 kHz); wcześniej zostawał na szybkości
-T1 i łapał tylko sync. Jeszcze niezmierzone. `LR1121`
-odebrał S1 poprawnie za pierwszym razem, ale wyłącznie z nadajnika warsztatowego
-przy −59 dBm, co dowodzi działania toru i nie mówi nic o czułości.
+Co z tego wynika:
+
+- **`LR1121`, `SX1276` i `SX1262` słyszą czysty sygnał S1 tak samo**, w granicach
+  decybela. W tych samych godzinach na prawdziwych licznikach jedna płytka złapała
+  256 emisji S1, a inna 58 - to nie jest czułość.
+- **Na prawdziwych licznikach decydują dwie rzeczy.** Po pierwsze tolerancja na
+  nadajnik: prawdziwe liczniki odbiegają częstotliwością, szybkością albo preambułą,
+  a `SX1276` ma tolerancję błędu w detektorze preambuły
+  (`sx1276_preamble_tolerance`, domyślnie 10), której `SX1262` i `LR1121` nie mają -
+  przy szybkości −6% `SX1276` nadal dekodował 8,4% ramek, obie płytki `SX1262`
+  i `LR1121` żadnej (05.09.2026). Po drugie antena i jej miejsce: LilyGO na
+  własnej, najdłuższej antenie zyskał ok. 5 dB względem rozgałęźnika, z czego
+  ok. 3,5 dB to strata samego rozgałęźnika.
+- **`CC1101` jest na S1 o ok. 5 dB słabszy**, to realna różnica radia: liczniki,
+  które docierają do `SX1276` na −96…−101 dBm, są poniżej jego progu, dlatego na
+  stanowisku nie odbiera żadnego prawdziwego licznika S1, choć mocną ramkę testową
+  dekoduje w 99%. Od 13.11.2026 ma własny profil modemu S1 (TI AN067 Radio Link A).
+- **Egzemplarz XIAO jest o ok. 8 dB słabszy** od dwóch pozostałych płytek
+  `SX1262` - to ta płytka z jej torem antenowym, nie układ.
+
+**Wycofane:** „`SX1262` zawodzi na S1 przy −85 dBm, 3–10 dB za `SX1276`”
+(08.2026). Porównywało RSSI odczytane przez różne płytki, które nie mają wspólnej
+skali: na swoim progu Heltec czytał −87 dBm tam, gdzie `LR1121` czytał −109 dBm
+dla tego samego sygnału.
+
+Zasada praktyczna dla S1: **najpierw antena i miejsce.** Każdy z `LR1121`,
+`SX1276`, `SX1262` słyszy czyste S1 tak samo; przy wielu słabych, starszych
+licznikach wybierz `SX1276` ze względu na tolerancję; do słabego S1 unikaj `CC1101`.
 
 ## C1 też jest osobnym pytaniem
 
@@ -239,8 +284,10 @@ go do tej klamry), ale skala efektu w innych warunkach jest nieznana.
 - `both` na jednym radiu zawsze jest kompromisem.
 - Soft może poprawiać margines, ale nie usuwa różnicy klasy sprzętowej między tymi układami.
 - **Wartości RSSI nie są porównywalne między płytkami.** Płytka z zewnętrznym
-  LNA/FEM czyta 13–15 dB wyżej na identycznych ramkach. Zestawianie bezwzględnych
-  dBm z dwóch różnych płytek mierzy front end, a nie odbiór.
+  LNA/FEM czyta 13–15 dB wyżej na identycznych ramkach. Na jednej wspólnej antenie
+  (11.11 i 17.11.2026) `LR1121` czyta ok. 6 dB niżej niż `SX1276` LilyGO, a Heltec V4
+  ok. 15 dB wyżej. Zestawianie bezwzględnych dBm z dwóch różnych płytek mierzy front
+  end, a nie odbiór.
 - **Liczby ramek są porównywalne tylko wtedy, gdy płytki stoją w tym samym
   miejscu.** W żadnym z cytowanych tu testów tak nie było, więc każda liczba
   „międzyukładowa" opisuje płytkę w danym położeniu, a nie sam układ. Ile waży

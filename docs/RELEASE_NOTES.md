@@ -2,6 +2,34 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## Docs: receivers re-ranked after the shared-antenna and clean-S1 measurements
+
+- **S1:** on a clean signal (attenuator bench, 2026-11-17) `LR1121`, `SX1276` and `SX1262` are within about 1 dB; `CC1101` about 5 dB weaker; one XIAO sample 8 dB weaker. The 2026-08 rule "`SX1276` for S1, `SX1262` for T1" (based on RSSI across boards) is withdrawn; on real meters the `SX1276` lead comes from its preamble error tolerance and from antenna/position. Table and method in CHIP_SELECTION and BENCHMARKS.
+- **`LR1121`:** "came last" is withdrawn - that comparison had a worse antenna position. On one antenna through a splitter it heard the most meters. The T1 attenuator result (SX1262 about 4–5 dB further) and the missing off-rate tolerance stay.
+- Antenna (10 cm instead of 6 cm: Heltec +5 dB, XIAO +3 dB) and the 234 kHz SX1262 default added to CHIP_SELECTION.
+
+---
+
+## Example: ESP-NOW repeater for a receiver without the home network
+
+- **New [examples/repeater-espnow](../examples/repeater-espnow/README.md).** A receiver next to the meters, out of Wi-Fi reach, forwards every frame over ESP-NOW to a bridge board on the home network, which publishes it to MQTT as that receiver. Node files for every example board, one bridge file for any ESP32. Pairing finds the channel by itself; the node keeps frames in a buffer (1500 in PSRAM) until the bridge confirms they reached MQTT; numbering and `received_at` follow the `wmbus_radio` contract, so the add-on sees an ordinary board. Uses `repeater: true`.
+
+---
+
+## Hiding meter IDs on screenshots
+
+- **New: `esphome::wmbus_radio::set_log_anonymize(true/false)`**, meant for a template switch on the board's page. While on, every meter ID in the log is replaced by a stand-in (each digit plus the matching digit of today's UTC date, modulo 10), the raw hex of truncated/dropped packets is hidden, and MQTT, the add-on and `on_frame` keep the real IDs. Without a clock IDs show as `????????`. A cover for forum posts, not encryption. See [DIAGNOSTIC](DIAGNOSTIC.md#hiding-meter-ids-on-screenshots).
+
+---
+
+## `repeater: true`, quiet log with the MQTT buffer off, `mark_as_handled` corrected
+
+- **New `repeater` option (default `false`).** With `repeater: true` the board is a radio front end only: no MQTT at all - no telegram, `/rx`, diagnostic or settings topics, no buffer, no outage statistics. Frames leave only through `on_frame`, for example over ESP-NOW to a bridge board that has network and publishes them. The YAML of such a board may omit `mqtt:`. Every other board still needs `mqtt:`, and the validation says so.
+- **`mqtt_buffer_size: 0` no longer fills the log with buffer statistics.** Without a buffer, the 30 s "outbox stats" lines and the per-meter drop list used to report every frame missed during a broker outage as "evicted" from a 0/0 buffer, and they grew without end on a board with MQTT disabled. Now one line is logged when the broker comes back: `MQTT back after N s - M frame(s) not published (mqtt_buffer_size: 0)`. With a buffer set, nothing changes.
+- **Documentation fix: `mark_as_handled` does not stop the MQTT publish.** The publish runs before the `on_frame` triggers; `mark_as_handled` only counts the frame as handled in the log. The docs said otherwise. To stop the publish use `repeater: true` or `forward_meters`.
+
+---
+
 ## More settings switchable from the add-on, also with diagnostics off
 
 - **The board's settings and configuration report no longer need `diagnostic_mode`.** `diag/settings` and `diag/config` are published, and `set/...` is listened to, with any `diagnostic_mode`, also `off` (the default). Before, a board with diagnostics off could not be switched from the add-on at all, not even its listen mode.

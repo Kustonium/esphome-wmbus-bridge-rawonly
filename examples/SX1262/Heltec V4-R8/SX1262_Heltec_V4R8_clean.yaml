@@ -61,7 +61,8 @@ mqtt:
   # PL: zwykłe MQTT na 1883; nie włączaj TLS bez pewności co do certu brokera
   #     (zły/nieznany cert blokuje połączenie ESP).
   port: 1883
-  skip_cert_cn_check: true
+  # EN: no skip_cert_cn_check here: since ESPHome 2026.11 it switches TLS on.
+  # PL: bez skip_cert_cn_check: od ESPHome 2026.11 ta opcja włącza TLS.
 
 api:
   # A standalone MQTT receiver must not reboot because no Native API client is

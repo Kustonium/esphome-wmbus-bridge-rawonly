@@ -68,6 +68,7 @@ examples/SX1276/LilygoT3S3/
 examples/SX1276/LilygoT3V3TCXO/
 examples/CC1101/
 examples/LR1121/Waveshare ESP32-S3-LR1121-HF/
+examples/repeater-espnow/        odbiornik bez sieci domowej + most ESP-NOW
 ```
 
 Do normalnego użycia zostaw:

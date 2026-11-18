@@ -17,6 +17,12 @@ ale publikacje MQTT były pomijane. Telegram ginął, zamiast zostać opóźnion
 `mqtt_buffer_size` (**domyślnie `0` — funkcja jest wyłączona, dopóki jej nie
 ustawisz**, zakres `0`–`8192` albo `auto`) ustawia kolejkę FIFO w RAM.
 
+Przy `0` statystyki bufora milczą: nie ma linii „Statystyki bufora MQTT” co
+30 s ani listy odrzuconych wg licznika, a sensory `buffer_dropped_*` nie liczą.
+Ramki utracone, gdy brokera nie było, zgłasza jedna linia po jego powrocie:
+`MQTT wrocil po 42 s - 18 ramek nieopublikowanych (mqtt_buffer_size: 0)`.
+Płytka z `repeater: true` nie ma MQTT w ogóle i nic nie zgłasza.
+
 **Jednostką są wiadomości MQTT, nie telegramy.** Jeden odebrany telegram
 tworzy dwie wiadomości: surową ramkę na `.../telegram` i metadane na
 `.../rx`, publikowane dla każdej przekazywanej ramki. Dlatego

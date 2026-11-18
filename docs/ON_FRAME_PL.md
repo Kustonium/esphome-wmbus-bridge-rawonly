@@ -42,24 +42,31 @@ Wewnątrz bloku `lambda:` zmienna `frame` to wskaźnik na odebraną ramkę.
 | `frame->link_mode()` | `LinkMode` | `LISTEN_MODE_T1`, `LISTEN_MODE_C1`, `LISTEN_MODE_S1` |
 | `frame->format()` | `std::string` | String formatu ramki, np. `"T1 A"` |
 | `frame->try_get_meter_id(uint32_t &id)` | `bool` | Wyciąga ID licznika z ramki; zwraca `false` jeśli wyciągnięcie się nie powiodło |
-| `frame->mark_as_handled()` | `void` | Wyłącza wbudowane publikowanie MQTT dla tej ramki |
+| `frame->mark_as_handled()` | `void` | Liczy ramkę jako obsłużoną (log: „obsłużony przez N handlerów”); **nie** wyłącza publikacji MQTT |
 
 ## mark_as_handled
 
-Ustawienie `mark_as_handled: true` w bloku triggera mówi komponentowi, żeby pominął
-wbudowane publikowanie MQTT po wykonaniu lambdy `on_frame`. Używaj gdy twoja lambda
-obsługuje całe przekierowanie i nie chcesz żeby ramka była publikowana dwa razy.
+`mark_as_handled: true` w bloku triggera tylko liczy ramkę jako obsłużoną: linia
+logu po triggerach mówi „Telegram obsłużony przez N handlerów” zamiast „nie obsłużony
+przez żaden handler”. **Nie** wyłącza wbudowanej publikacji MQTT. Ta publikacja
+odbywa się przed triggerami `on_frame`, więc gdy lambda dostaje ramkę, ta już wyszła.
+
+Żeby wyłączyć wbudowaną publikację:
+
+- `repeater: true` - bez MQTT w ogóle; ramki wychodzą tylko przez `on_frame` (płytka,
+  która je przekazuje dalej, np. przez ESP-NOW, i może nie mieć sekcji `mqtt:`);
+- `forward_meters:` - publikuj tylko wymienione liczniki.
 
 ```yaml
 on_frame:
   - mark_as_handled: true
     then:
       - lambda: |-
-          // własne przekierowanie — wbudowane MQTT jest pomijane
+          // ramka liczona jako obsłużona; publikacja MQTT już się odbyła
           std::string hex = frame->as_hex();
 ```
 
-Bez `mark_as_handled: true` wbudowane publikowanie MQTT nadal działa po twojej lambdzie.
+Wcześniejsze wersje tej strony podawały, że `mark_as_handled` wyłącza publikację MQTT. Kod nigdy tego nie robił; strona była błędna (poprawione 17.11.2026).
 
 ## Filtrowanie po ID licznika
 

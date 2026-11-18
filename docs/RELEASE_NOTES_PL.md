@@ -2,6 +2,34 @@
 
 [English version](RELEASE_NOTES.md)
 
+## Dokumentacja: nowa ocena odbiorników po pomiarach na wspólnej antenie i czystym S1
+
+- **S1:** na czystym sygnale (stanowisko tłumikowe, 17.11.2026) `LR1121`, `SX1276` i `SX1262` mieszczą się w ok. 1 dB; `CC1101` o ok. 5 dB słabszy; jeden egzemplarz XIAO o 8 dB słabszy. Zasada z 08.2026 „`SX1276` do S1, `SX1262` do T1” (oparta na RSSI z różnych płytek) jest wycofana; na prawdziwych licznikach przewaga `SX1276` wynika z tolerancji błędu detektora preambuły oraz z anteny i miejsca. Tabela i metoda w CHIP_SELECTION i BENCHMARKS.
+- **`LR1121`:** „wypadł ostatni” jest wycofane - tamto porównanie miało gorsze miejsce anteny. Na jednej antenie przez rozgałęźnik usłyszał najwięcej liczników. Wynik ze stanowiska T1 (SX1262 ok. 4–5 dB dalej) i brak tolerancji na odchyłkę szybkości zostają.
+- Do CHIP_SELECTION doszły antena (10 cm zamiast 6 cm: Heltec +5 dB, XIAO +3 dB) i domyślne 234 kHz na SX1262.
+
+---
+
+## Przykład: przedłużacz ESP-NOW dla odbiornika bez sieci domowej
+
+- **Nowy [examples/repeater-espnow](../examples/repeater-espnow/README_PL.md).** Odbiornik przy licznikach, poza zasięgiem Wi-Fi, przekazuje każdą ramkę przez ESP-NOW do płytki-mostu w sieci domowej, a most publikuje ją do MQTT jako ten odbiornik. Pliki płytki dla każdej płytki z przykładów, jeden plik mostu dla dowolnego ESP32. Parowanie samo znajduje kanał; płytka trzyma ramki w buforze (1500 w PSRAM), dopóki most nie potwierdzi, że trafiły do MQTT; numeracja i `received_at` zgodne z `wmbus_radio`, więc dodatek widzi zwykłą płytkę. Korzysta z `repeater: true`.
+
+---
+
+## Ukrywanie numerów liczników na zrzutach
+
+- **Nowe: `esphome::wmbus_radio::set_log_anonymize(true/false)`**, do przełącznika na stronie płytki. Gdy włączone, każdy numer licznika w logu zastępuje numer zastępczy (cyfra plus cyfra dzisiejszej daty UTC, modulo 10), surowy hex uciętych i odrzuconych pakietów jest ukryty, a MQTT, dodatek i `on_frame` dostają prawdziwe numery. Bez zegara numery pokazują się jako `????????`. Zasłona na zrzuty na forum, nie szyfrowanie. Szczegóły: [DIAGNOSTIC](DIAGNOSTIC_PL.md#ukrywanie-numerów-liczników-na-zrzutach).
+
+---
+
+## `repeater: true`, cichy log przy wyłączonym buforze MQTT, poprawka opisu `mark_as_handled`
+
+- **Nowa opcja `repeater` (domyślnie `false`).** Przy `repeater: true` płytka jest tylko odbiornikiem radiowym: bez MQTT w ogóle, czyli bez tematów telegramów, `/rx`, diagnostyki i ustawień, bez bufora i bez statystyk awarii. Ramki wychodzą wyłącznie przez `on_frame`, na przykład przez ESP-NOW do płytki-mostu, która ma sieć i je publikuje. YAML takiej płytki może nie mieć `mqtt:`. Każda inna płytka nadal potrzebuje `mqtt:` i walidacja o tym mówi.
+- **`mqtt_buffer_size: 0` nie zasypuje już logu statystykami bufora.** Bez bufora linie „Statystyki bufora MQTT” co 30 s i lista odrzuconych wg licznika pokazywały każdą ramkę z czasu przerwy brokera jako „eksmisję” z bufora 0/0, a na płytce z wyłączonym MQTT rosły bez końca. Teraz po powrocie brokera pojawia się jedna linia: `MQTT wrocil po N s - M ramek nieopublikowanych (mqtt_buffer_size: 0)`. Z ustawionym buforem nic się nie zmienia.
+- **Poprawka dokumentacji: `mark_as_handled` nie wyłącza publikacji MQTT.** Publikacja odbywa się przed triggerami `on_frame`, a `mark_as_handled` tylko liczy ramkę jako obsłużoną w logu. Dokumentacja twierdziła inaczej. Do wyłączenia publikacji służy `repeater: true` albo `forward_meters`.
+
+---
+
 ## Więcej ustawień przełączanych z dodatku, także przy wyłączonej diagnostyce
 
 - **Ustawienia płytki i raport konfiguracji nie wymagają już `diagnostic_mode`.** `diag/settings` i `diag/config` są publikowane, a `set/...` nasłuchiwane, przy każdym `diagnostic_mode`, także `off` (domyślnym). Wcześniej płytki z wyłączoną diagnostyką w ogóle nie dało się przełączać z dodatku, nawet trybu nasłuchu.

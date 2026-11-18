@@ -1,0 +1,113 @@
+# ESP-NOW repeater NODE - SX1262 XIAO ESP32-S3 + Wio-SX1262
+#
+# Generated from examples/SX1262/XIAO ESP32 S3/xiao_esp32_s3_clean.yaml:
+# same board, pins and radio settings; wifi: and mqtt: are gone, the
+# repeater package (repeater_node_common.yaml) and repeater: true + on_frame
+# are added. Needs repeater_node.h and repeater_node_common.yaml next to it,
+# and repeater_ap_password in secrets.yaml. See README.md in this folder.
+#
+# After flashing, the board is NOT on your network: update it from
+# http://192.168.4.1 on its hotspot "${devicename}", or over USB.
+
+substitutions:
+  devicename: xiao-seed-esp-s3
+  friendly_name: "wMBus Bridge XIAO ESP32-S3"
+
+packages:
+  repeater_node: !include repeater_node_common.yaml
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+
+esp32:
+  variant: esp32s3
+  flash_size: 8MB
+  cpu_frequency: 160MHz
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+api:
+  # A standalone MQTT receiver must not reboot because no Native API client is
+  # connected. ESPHome's default is reboot_timeout: 15min, which restarted these
+  # boards every 15 minutes (measured 2026-08-20/21: 51 distinct boot_id per
+  # board in one night, median 900 s apart). 0s disables that watchdog only -
+  # Native API and time: platform: homeassistant keep working.
+  reboot_timeout: 0s
+ota:
+  - platform: esphome
+# Reception timestamp: SNTP first, HA time as a fallback. If only
+# `homeassistant` is listed and HA API is not connected, the clock
+# never gets set and /rx frames go out without `received_at` - the
+# add-on then reports "no timestamp" indefinitely. SNTP works from
+# WiFi alone, so it recovers frames even before HA sees the board.
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
+  - platform: homeassistant
+    id: ha_time
+
+spi:
+  clk_pin: GPIO7
+  miso_pin: GPIO8
+  mosi_pin: GPIO9
+
+wmbus_radio:
+  radio_type: SX1262
+  cs_pin: GPIO41
+  reset_pin: GPIO42
+  busy_pin: GPIO40
+  irq_pin:
+    number: GPIO39
+    mode: input
+  # REQUIRED on this board. Wio-SX1262 pin 1 (RF_SW) gates the module's internal
+  # RF switch and must be held high; without it the antenna never connects and
+  # the receiver is ~50 dB deaf. Not the same as dio2_rf_switch.
+  rf_sw_pin: GPIO38
+  has_tcxo: true
+  # A TCXO board sets XOSC_START_ERR on every power-up: the chip tries its own
+  # crystal before DIO3 is told to power the TCXO, and DIO3 is configured after
+  # reset. Clearing it once the reference is up is what the datasheet expects,
+  # and it is what makes the flag mean something - one that stays cleared was a
+  # boot artefact, one that comes back is a reference that really is not
+  # starting. Left off, the flag is always set and reports nothing.
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: true
+  rx_gain: boosted
+  # false is the right default. true switches the receive path to streaming and
+  # costs about 7 dB in weak signal - measured off/on/off on one board, with
+  # three untouched controls holding their RSSI percentile to the decibel.
+  # Turn it on only if a meter here actually sends more than about 150 decoded
+  # bytes: a three-phase electricity meter does, a water or heat meter does not.
+  # Check your longest decoded frame before enabling it prophylactically.
+  long_gfsk_packets: false
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+  diagnostic_mode: normal
+
+  # --- repeater node -----------------------------------------------------
+  # No MQTT on this board; every frame goes into the node buffer and over
+  # ESP-NOW to the bridge (repeater_node.h).
+  repeater: true
+  on_frame:
+    then:
+      - lambda: |-
+          const auto &raw = frame->data();
+          char id8[9] = "????????";
+          if (raw.size() >= 8) snprintf(id8, sizeof(id8), "%02X%02X%02X%02X", raw[7], raw[6], raw[5], raw[4]);
+          wmbus_repeater_node::send_frame(raw, frame->rssi(), (uint8_t) frame->link_mode(), id8);

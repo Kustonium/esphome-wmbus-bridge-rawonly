@@ -7,7 +7,7 @@ Wszystkie fazy zbudować z tego samego commita dev. Nowe opcje domyślnie nie zm
 
 | Opcja `wmbus_radio` | Domyślnie | Działanie |
 |---|---|---|
-| `cc1101_sync_15_16` | `false` | T1/C1: 0x06 (16/16 + CS) lub 0x05 (15/16 + CS — **oba z bramką carrier sense**, SWRS061I s. 44). S1 ma własny profil 0x05. |
+| `cc1101_sync_15_16` | `false` | T1/C1: 0x06 (16/16 + CS) lub 0x05 (15/16 + CS — **oba z bramką carrier sense**, SWRS061I s. 44). S1 ma zawsze 0x05 z noty TI (15/16 + CS), niezależnie od tej opcji i `cc1101_carrier_sense`. Zmierzone 16.11.2026: bez CS szum trafiał synchronizację S1 ~230/min (15/16) albo ~25/min (16/16), wszystko ze złym CRC, i żadna prawdziwa słaba ramka S1 nie przeszła; mocną fałszywą ramkę S1 przy 0x05 zdekodował 714/720. CC1101 nie słyszy słabych liczników S1, które dekodują SX1276/LR1121. |
 | `cc1101_carrier_sense` | `true` | `false` = sync bez carrier sense (0x02, z `sync_15_16` 0x01). Tylko w YAML: od 16.11.2026 nie ma tego na kafelku dodatku (wyłączenie zmierzone jako szkodliwe); wartość zapisana przez starszą wersję jest kasowana przy starcie. |
 | `cc1101_rx_bandwidth` | `232khz` | Filtr RX T1/C1: `232khz` (domyślne od 16.11.2026, zmierzone jako lepsze), `325khz` (TI AN067 link B), `270khz`. Od 16.11.2026 tylko w YAML; wartość zapisana z dodatku w czasie testu jest kasowana przy starcie. |
 | `cc1101_rx_state_wait` | `false` | SIDLE → czekaj na IDLE → SFRX → SRX → czekaj na RX. |

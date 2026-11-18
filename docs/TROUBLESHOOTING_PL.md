@@ -363,8 +363,10 @@ wejściu w `STDBY_XOSC`; jeżeli linie kalibracji po nim pokazują
 Ramki przychodzą, ale są ucięte: podnieś `payload_length` — ramki NES mają 245
 bajtów surowych, więc wartością roboczą jest `255`.
 
-Przy S1 pamiętaj, że kolejność radiów jest inna niż przy T1: układem sprawdzonym
-przy progu szumu S1 jest `SX1276`. Patrz [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md).
+Przy S1: na czystym sygnale `LR1121`, `SX1276` i `SX1262` mieszczą się w ok. 1 dB,
+więc słaby odbiór S1 to głównie antena i jej miejsce. Na prawdziwych licznikach
+`SX1276` nadal łapie więcej, bo toleruje nadajniki odbiegające od normy; `CC1101`
+jest o ok. 5 dB słabszy. Patrz [`CHIP_SELECTION_PL.md`](CHIP_SELECTION_PL.md#s1-to-osobne-pytanie).
 
 ## 17. Płytka restartuje się co 15 minut
 

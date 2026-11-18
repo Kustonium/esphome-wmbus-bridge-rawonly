@@ -322,6 +322,7 @@ and [`RADIO_OPTIONS_MINIMAL.md`](RADIO_OPTIONS_MINIMAL.md) for the wiring.
 - [`CHIP_SELECTION.md`](CHIP_SELECTION.md)
 - [`BENCHMARKS.md`](BENCHMARKS.md)
 - [`docs/RX_PIPELINE.md`](RX_PIPELINE.md)
+- [`examples/repeater-espnow/`](../examples/repeater-espnow/README.md) - receiver without the home network (ESP-NOW bridge)
 
 ## Support rule
 

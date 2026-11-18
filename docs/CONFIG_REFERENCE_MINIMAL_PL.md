@@ -15,6 +15,7 @@
 | `highlight_meters` | puste | publiczna | ID liczników do wyróżnienia i statystyk w `normal/debug`; **nie filtruje MQTT** |
 | `forward_meters` | puste | publiczna | whitelista ID publikowanych na `wmbus/<topic_name>/telegram`; lista ID albo `true` = użyj `highlight_meters`; puste = wysyłaj wszystko |
 | `publish_rssi` | `false` | publiczna | publikuj RSSI ostatniej ramki każdego licznika na `wmbus/<topic_name>/rssi/<meter_id>`; patrz sekcja niżej |
+| `repeater` | `false` | publiczna | tylko odbiornik radiowy: bez MQTT w ogóle (bez tematów, bufora i statystyk awarii), ramki wychodzą tylko przez `on_frame` (np. ESP-NOW do płytki-mostu, gotowy układ w [`examples/repeater-espnow`](../examples/repeater-espnow/README_PL.md)); YAML może wtedy nie mieć `mqtt:` |
 | `receiver_task_stack_size` | `3072` | zaawansowana | stos osobnego taska RX, zakres `2048..16384` |
 | `listen_mode_filter_after_parse` | `false` | eksperymentalna | agresywniejsze filtrowanie po parserze; testować po licznikach, nie po samym globalnym drop% |
 | `use_noise_floor_threshold` | `false` | eksperymentalna | próg przerywania słabych startów liczony od ZMIERZONEJ podłogi szumu zamiast od średniej udanych odbiorów; pomiar (`noise_floor_dbm`) działa zawsze, ta opcja tylko go używa |
@@ -23,7 +24,7 @@
 | `highlight_tag` | `wmbus_user` | publiczna | tag logu dla wyróżnionych liczników |
 | `highlight_prefix` | `"★ "` | publiczna | prefiks linii logu wyróżnionego licznika |
 | `allow_untested_framework` | `false` | wymaga jawnej zgody | wymagane do zbudowania na frameworku `arduino`; domyślnie kompilacja jest przerywana |
-| `mark_as_handled` | `false` | publiczna | opcja wewnątrz `on_frame:`; oznacza ramkę jako obsłużoną |
+| `mark_as_handled` | `false` | publiczna | opcja wewnątrz `on_frame:`; liczy ramkę jako obsłużoną w logu; **nie** wyłącza publikacji MQTT (do tego `repeater` albo `forward_meters`) |
 
 ## Tryby nasłuchu i częstotliwość
 

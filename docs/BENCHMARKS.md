@@ -188,6 +188,28 @@ SX1276 may look cleaner in `summary` because `adaptive` rejects more problematic
 
 ---
 
+## 3. S1 on a clean signal (attenuator bench, 2026-11-17)
+
+Not a field test: a transmitter board sends a correct S1 frame on 869.850 MHz
+through 2×30 dB attenuators in front of its antenna, stepping down 1 dB at a time
+with 20–30 frames per step. Each receiver shares one antenna with an `LR1121`
+through a splitter; the result is the power at which it receives half the frames,
+as a difference to the `LR1121` in the same run.
+
+| board | chip | vs `LR1121` |
+|---|---|---|
+| Waveshare | LR1121 | 0 dB (reference) |
+| LilyGO T-Beam | SX1262 | 0 dB |
+| LilyGO T3-S3 | SX1276 | ≈ −1 dB |
+| Heltec V4 | SX1262 | ≈ −1 dB |
+| SIH Reader | CC1101 | ≈ −5 dB |
+| XIAO ESP32-S3 + Wio | SX1262 | ≈ −8 dB |
+
+±1–2 dB. Thresholds, the reading of the result and what it changes in practice:
+[CHIP_SELECTION, S1](CHIP_SELECTION.md#s1-is-a-separate-question).
+
+---
+
 ## Final benchmark conclusion
 
 ### `SX1276`
