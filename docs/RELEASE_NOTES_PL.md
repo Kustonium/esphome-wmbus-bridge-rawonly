@@ -10,8 +10,16 @@
 
 ---
 
-## Przykład: przedłużacz ESP-NOW dla odbiornika bez sieci domowej
+## Zgodność z ESPHome 2026.11
 
+- **Poprawka kompilacji:** ESPHome 2026.11 przeniósł `str_sprintf()` / `format_hex()` do `alloc_helpers.h`, którego `helpers.h` już nie dołącza, więc komponent kończył się błędem `'str_sprintf' was not declared` / `'format_hex' was not declared`. Poprawione; starsze wersje ESPHome dalej się kompilują.
+- **MQTT: usuń `skip_cert_cn_check: true` ze swojego YAML.** Od ESPHome 2026.11 ta opcja włącza TLS, więc płytka na zwykłym brokerze (port 1883) nigdy się nie łączy (`mbedtls_ssl_handshake returned -0x7280`). Przed 2026.11 bez certyfikatu nic nie robiła. Wszystkie przykłady są poprawione.
+
+---
+
+## Przykład: przedłużacz ESP-NOW dla odbiornika bez sieci domowej (w trakcie)
+
+- **Status: w trakcie.** Sprawdzone na jednej parze na stanowisku (odbiornik Heltec V4 + most ESP32-C3). Pozostałe pliki płytek są tylko sprawdzone kompilacją w CI; testy zasięgu dopiero przed nami.
 - **Nowy [examples/repeater-espnow](../examples/repeater-espnow/README_PL.md).** Odbiornik przy licznikach, poza zasięgiem Wi-Fi, przekazuje każdą ramkę przez ESP-NOW do płytki-mostu w sieci domowej, a most publikuje ją do MQTT jako ten odbiornik. Pliki płytki dla każdej płytki z przykładów, jeden plik mostu dla dowolnego ESP32. Parowanie samo znajduje kanał; płytka trzyma ramki w buforze (1500 w PSRAM), dopóki most nie potwierdzi, że trafiły do MQTT; numeracja i `received_at` zgodne z `wmbus_radio`, więc dodatek widzi zwykłą płytkę. Korzysta z `repeater: true`.
 
 ---

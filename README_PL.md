@@ -220,6 +220,8 @@ gniazdo daje idealną ciszę bez żadnego błędu.
 
 ## Odbiornik bez sieci domowej (most ESP-NOW)
 
+> **Status: w trakcie.** Sprawdzone na jednej parze na stanowisku (odbiornik Heltec V4 + most ESP32-C3). Pozostałe pliki płytek są tylko sprawdzone kompilacją w CI; testy zasięgu dopiero przed nami.
+
 Gdy liczniki są poza zasięgiem Wi-Fi (piwnica, garaż, klatka schodowa),
 odbiornik może tam stać zupełnie bez sieci. Druga płytka ESP32, która jest
 w sieci, czyli **most**, odbiera od niego ramki przez ESP-NOW i publikuje je do

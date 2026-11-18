@@ -2,6 +2,8 @@
 
 [Polska wersja](README_PL.md)
 
+> **Status: in progress.** Tested on one bench pair (Heltec V4 receiver + ESP32-C3 bridge). The other node files are build-checked in CI only; range tests are still to come.
+
 The receiver sits next to the meters (basement, garage, stairwell), out of reach of
 your Wi-Fi. A second ESP32 inside the network takes its frames over ESP-NOW and
 publishes them to MQTT on its behalf. The add-on sees the receiver as an ordinary

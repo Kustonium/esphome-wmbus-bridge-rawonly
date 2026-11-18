@@ -10,8 +10,16 @@
 
 ---
 
-## Example: ESP-NOW repeater for a receiver without the home network
+## ESPHome 2026.11 compatibility
 
+- **Build fix:** ESPHome 2026.11 moved `str_sprintf()` / `format_hex()` to `alloc_helpers.h`, which `helpers.h` no longer includes, so the component failed with `'str_sprintf' was not declared` / `'format_hex' was not declared`. Fixed; older ESPHome releases still build.
+- **MQTT: remove `skip_cert_cn_check: true` from your YAML.** Since ESPHome 2026.11 this option turns TLS on, so a board on a plain broker (port 1883) never connects (`mbedtls_ssl_handshake returned -0x7280`). Before 2026.11 it had no effect without a certificate. All examples are updated.
+
+---
+
+## Example: ESP-NOW repeater for a receiver without the home network (in progress)
+
+- **Status: in progress.** Tested on one bench pair (Heltec V4 receiver + ESP32-C3 bridge). The other node files are build-checked in CI only; range tests are still to come.
 - **New [examples/repeater-espnow](../examples/repeater-espnow/README.md).** A receiver next to the meters, out of Wi-Fi reach, forwards every frame over ESP-NOW to a bridge board on the home network, which publishes it to MQTT as that receiver. Node files for every example board, one bridge file for any ESP32. Pairing finds the channel by itself; the node keeps frames in a buffer (1500 in PSRAM) until the bridge confirms they reached MQTT; numbering and `received_at` follow the `wmbus_radio` contract, so the add-on sees an ordinary board. Uses `repeater: true`.
 
 ---

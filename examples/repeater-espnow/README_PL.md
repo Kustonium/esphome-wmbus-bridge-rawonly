@@ -2,6 +2,8 @@
 
 [English version](README.md)
 
+> **Status: w trakcie.** Sprawdzone na jednej parze na stanowisku (odbiornik Heltec V4 + most ESP32-C3). Pozostałe pliki płytek są tylko sprawdzone kompilacją w CI; testy zasięgu dopiero przed nami.
+
 Odbiornik stoi przy licznikach (piwnica, garaż, klatka schodowa), poza zasięgiem
 Twojego Wi-Fi. Druga płytka ESP32, która jest w sieci, odbiera od niego ramki przez
 ESP-NOW i publikuje je do MQTT w jego imieniu. Dodatek widzi odbiornik jak zwykłą

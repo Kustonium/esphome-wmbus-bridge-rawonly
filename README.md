@@ -219,6 +219,8 @@ wrong socket gives perfect silence with no error anywhere.
 
 ## Receiver without the home network (ESP-NOW bridge)
 
+> **Status: in progress.** Tested on one bench pair (Heltec V4 receiver + ESP32-C3 bridge). The other node files are build-checked in CI only; range tests are still to come.
+
 When the meters are out of Wi-Fi reach (basement, garage, stairwell), the
 receiver can stay there with no network at all. A second ESP32 inside the
 network, the **bridge**, takes its frames over ESP-NOW and publishes them to MQTT
