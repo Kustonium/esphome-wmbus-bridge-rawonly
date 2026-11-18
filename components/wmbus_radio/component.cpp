@@ -8,6 +8,11 @@
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+// ESPHome 2026.11 moved str_sprintf()/format_hex() to alloc_helpers.h, which
+// helpers.h no longer pulls in. Older releases have no such header.
+#if __has_include("esphome/core/alloc_helpers.h")
+#include "esphome/core/alloc_helpers.h"
+#endif
 #include "esp_system.h"
 #include "esp_timer.h"
 #include <esp_heap_caps.h>  // heap_caps_get_free_size() for the outbox boot log / auto-sizing seed
@@ -20,7 +25,9 @@
 #include <cinttypes>
 
 // Optional: publish diagnostics via ESPHome MQTT if mqtt component is present.
-#include "esphome/components/mqtt/mqtt_client.h"
+#include "mqtt_access.h"
+#include "log_anon.h"
+#include <esp_random.h>  // esp_random(): came in through mqtt_client.h before repeater builds dropped it
 #include "esphome/core/application.h"
 #include "runtime_settings.h"
 
@@ -51,6 +58,9 @@ static inline intptr_t assert_result_value(intptr_t value) { return value; }
 namespace esphome {
 namespace wmbus_radio {
 static const char *TAG = "wmbus";
+
+bool g_repeater_mode = false;  // see mqtt_access.h
+bool g_log_anonymize = false;  // see log_anon.h
 
 // Logging policy for this component:
 // - important user-facing INFO/WARN/ERROR messages may be concise bilingual EN/PL,
@@ -281,7 +291,10 @@ void Radio::setup() {
     }
   }
 
-  if (!this->telegram_topic_.empty()) {
+  if (this->repeater_) {
+    ESP_LOGI(TAG, LOG_TR("repeater: true -> no MQTT; frames leave only through on_frame",
+                         "repeater: true -> bez MQTT; ramki wychodza tylko przez on_frame"));
+  } else if (!this->telegram_topic_.empty()) {
     ESP_LOGI(TAG, LOG_TR("Frame RAW forwarding topic: %s", "Topic publikacji RAW: %s"), this->telegram_topic_.c_str());
     ESP_LOGI(TAG, LOG_TR("Frame RX metadata topic: %s", "Topic metadanych RX: %s"), this->rx_topic_.c_str());
   }
@@ -486,9 +499,9 @@ void Radio::loop() {
       const auto diagnostic = this->radio->runtime_diag_json();
       if (!diagnostic.empty()) {
         if (this->diag_verbose_) ESP_LOGI(TAG, "Radio runtime: %s", diagnostic.c_str());
-        if (!this->diag_topic_.empty() && mqtt::global_mqtt_client != nullptr &&
-            mqtt::global_mqtt_client->is_connected()) {
-          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/radio_runtime", diagnostic, 1, false);
+        if (!this->diag_topic_.empty() && mqtt_client() != nullptr &&
+            mqtt_client()->is_connected()) {
+          mqtt_client()->publish(this->diag_topic_ + "/radio_runtime", diagnostic, 1, false);
         }
         if (!this->probe_baseline_reported_) {
           const auto baseline = this->radio->probe_baseline_json();
@@ -501,9 +514,9 @@ void Radio::loop() {
             // undocumented register values, which is bench reading.
             if (this->diag_verbose_)
               ESP_LOGI(TAG, "Register probe baseline (pre-RX, read-only): %s", baseline.c_str());
-            if (!this->diag_topic_.empty() && mqtt::global_mqtt_client != nullptr &&
-                mqtt::global_mqtt_client->is_connected()) {
-              mqtt::global_mqtt_client->publish(this->diag_topic_ + "/probe_baseline", baseline, 1, false);
+            if (!this->diag_topic_.empty() && mqtt_client() != nullptr &&
+                mqtt_client()->is_connected()) {
+              mqtt_client()->publish(this->diag_topic_ + "/probe_baseline", baseline, 1, false);
             }
             // Marked reported whether or not MQTT took it. It used to be set
             // only inside the publish branch, so with the broker away the
@@ -515,8 +528,8 @@ void Radio::loop() {
     }
     RadioTransceiver::RawRxSample raw_sample{};
     while (this->radio->take_raw_rx_sample(raw_sample)) {
-      if (!this->diag_verbose_ || this->diag_topic_.empty() || mqtt::global_mqtt_client == nullptr ||
-          !mqtt::global_mqtt_client->is_connected()) continue;
+      if (!this->diag_verbose_ || this->diag_topic_.empty() || mqtt_client() == nullptr ||
+          !mqtt_client()->is_connected()) continue;
       char hex[511];
       for (size_t i = 0; i < raw_sample.length; ++i)
         snprintf(hex + i * 2, 3, "%02X", (unsigned) raw_sample.bytes[i]);
@@ -537,7 +550,7 @@ void Radio::loop() {
         (unsigned) raw_sample.differing_bytes, (unsigned) raw_sample.first_difference,
         (unsigned) raw_sample.probe[0], (unsigned) raw_sample.probe[1],
         (unsigned) raw_sample.probe[2], (unsigned) raw_sample.probe[3], hex);
-      mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_fifo/" +
+      mqtt_client()->publish(this->diag_topic_ + "/lr_fifo/" +
         std::to_string((this->lr_raw_sample_seq_ - 1) % 8), std::string(body), 1, false);
     }
     if (strcmp(this->radio->get_name(), "LR1121") == 0 &&
@@ -546,11 +559,11 @@ void Radio::loop() {
       this->publish_lr_pipeline_diag_(nullptr, false);
       const auto sync_probe = this->radio->sync_probe_json();
       if (!sync_probe.empty() && this->diag_publish_summary_ && !this->diag_topic_.empty() &&
-          mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected()) {
-        mqtt::global_mqtt_client->publish(this->diag_topic_ + "/sync_probe", sync_probe, 1, false);
+          mqtt_client() != nullptr && mqtt_client()->is_connected()) {
+        mqtt_client()->publish(this->diag_topic_ + "/sync_probe", sync_probe, 1, false);
         const auto drain_sample = this->radio->drain_sample_json();
         if (!drain_sample.empty())
-          mqtt::global_mqtt_client->publish(this->diag_topic_ + "/lr_drain", drain_sample, 1, false);
+          mqtt_client()->publish(this->diag_topic_ + "/lr_drain", drain_sample, 1, false);
       }
     }
   }
@@ -760,7 +773,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   }
 }
 
-  auto *mqtt = mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (this->radio != nullptr && mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty()) {
     std::string boot_payload = str_sprintf(
         "{\"event\":\"boot\",\"radio\":\"%s\",\"listen_mode\":\"%s\",\"uptime_ms\":%lu}",
@@ -955,7 +968,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
       this->diag_truncated_++;
       this->diag_15m_truncated_++;
       this->diag_60min_truncated_++;
-      if (this->should_publish_packet_event_(p) && mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+      if (this->should_publish_packet_event_(p) && mqtt_client() != nullptr && !this->diag_topic_.empty()) {
         char payload[1280];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
@@ -977,7 +990,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                    (unsigned) p->decoded_len(), (unsigned) p->final_len(),
                    (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
         }
-        mqtt::global_mqtt_client->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
+        mqtt_client()->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
       }
 
       if (this->diag_verbose_) {
@@ -988,7 +1001,8 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                  (unsigned) p->raw_got_len(), (unsigned) p->decoded_len(),
                  (unsigned) p->final_len(), (int) p->get_rssi(), p->drop_detail().c_str());
         if (this->diag_publish_raw_) {
-          ESP_LOGW(TAG, LOG_TR("TRUNCATED raw(hex)=%s", "Ucieta ramka raw(hex)=%s"), p->raw_hex().c_str());
+          ESP_LOGW(TAG, LOG_TR("TRUNCATED raw(hex)=%s", "Ucieta ramka raw(hex)=%s"),
+                   log_anonymize() ? LOG_TR("(hidden: anonymize on)", "(ukryte: anonimizacja)") : p->raw_hex().c_str());
         }
       }
     } else if (!p->drop_reason().empty()) {
@@ -1042,7 +1056,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
         this->diag_60min_mode_crc_failed_[mode_idx]++;
       }
 
-      if (this->should_publish_packet_event_(p) && mqtt::global_mqtt_client != nullptr && !this->diag_topic_.empty()) {
+      if (this->should_publish_packet_event_(p) && mqtt_client() != nullptr && !this->diag_topic_.empty()) {
         char payload[1280];
         if (this->diag_publish_raw_) {
           snprintf(payload, sizeof(payload),
@@ -1064,7 +1078,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                    (unsigned) p->decoded_len(), (unsigned) p->final_len(),
                    (unsigned) p->dll_crc_removed(), (unsigned) p->suffix_ignored());
         }
-        mqtt::global_mqtt_client->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
+        mqtt_client()->publish(this->diag_topic_, std::string(payload), this->diag_qos_, false);
       }
 
       if (this->diag_verbose_) {
@@ -1075,7 +1089,8 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
                  (unsigned) p->raw_got_len(), (unsigned) p->decoded_len(),
                  (unsigned) p->final_len(), (int) p->get_rssi(), p->drop_detail().c_str());
         if (this->diag_publish_raw_) {
-          ESP_LOGW(TAG, LOG_TR("DROPPED raw(hex)=%s", "Odrzucony pakiet raw(hex)=%s"), p->raw_hex().c_str());
+          ESP_LOGW(TAG, LOG_TR("DROPPED raw(hex)=%s", "Odrzucony pakiet raw(hex)=%s"),
+                   log_anonymize() ? LOG_TR("(hidden: anonymize on)", "(ukryte: anonimizacja)") : p->raw_hex().c_str());
         }
       }
     }
@@ -1279,6 +1294,9 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
   }
 
   const char *log_tag = TAG;
+  // Log text only: id_str itself stays real for MQTT / forwarding below.
+  char log_id_buf[12];
+  const char *log_id = anon_meter_id(id_str, log_id_buf, sizeof(log_id_buf));
   if (highlight) {
     if (!this->highlight_tag_.empty()) log_tag = this->highlight_tag_.c_str();
     const char *ansi_pre = this->highlight_ansi_ ? "\033[1;32m" : "";
@@ -1288,7 +1306,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
-             mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci,
+             mfr, log_id, (unsigned) ver, (unsigned) dev, (unsigned) ci,
              ansi_suf);
 
     // Keep highlight_meters lightweight by default: local emphasis plus packet number only.
@@ -1296,10 +1314,10 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     const auto &stats = this->highlight_meter_stats_[stats_key_ro];
     if (stats.count == 1) {
       ESP_LOGI(log_tag, LOG_TR("%s[id:%s] first packet (packet #1)", "%s[id:%s] pierwszy pakiet (pakiet nr 1)"),
-               this->highlight_prefix_.c_str(), id_str);
+               this->highlight_prefix_.c_str(), log_id);
     } else {
       ESP_LOGI(log_tag, LOG_TR("%s[id:%s] packet #%u received", "%s[id:%s] odebrano pakiet nr %u"),
-               this->highlight_prefix_.c_str(), id_str,
+               this->highlight_prefix_.c_str(), log_id,
                (unsigned) stats.count);
     }
   } else {
@@ -1307,7 +1325,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
              d.size(), p->raw_got_len(), frame->rssi(),
              link_mode_name(frame->link_mode()),
              frame->format().c_str(),
-             mfr, id_str, (unsigned) ver, (unsigned) dev, (unsigned) ci);
+             mfr, log_id, (unsigned) ver, (unsigned) dev, (unsigned) ci);
   }
 
   // Per-frame frequency error, next to the meter that sent it.
@@ -1326,7 +1344,7 @@ if (!this->boot_log_done_ && this->radio != nullptr) {
     if (this->radio->take_frame_freq_error(&afc_hz, &fei_hz)) {
       ESP_LOGI(TAG, "FREQERR id:%s mode:%s len:%zu rssi:%ddBm afc:%ldHz fei:%ldHz"
                     LOG_TR("", " (blad czestotliwosci nadajnika)"),
-               id_str, link_mode_name(frame->link_mode()), d.size(), frame->rssi(),
+               log_id, link_mode_name(frame->link_mode()), d.size(), frame->rssi(),
                (long) afc_hz, (long) fei_hz);
     }
   }
@@ -1858,7 +1876,7 @@ std::string Radio::topic_base_() const {
 // applied. The add-on draws the board's settings panel from it; a board
 // without this topic runs firmware that cannot take changes.
 void Radio::publish_settings_() {
-  auto *mqtt = mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected() || this->radio == nullptr || this->topic_base_().empty()) {
     this->settings_publish_pending_ = true;
     return;
@@ -1944,7 +1962,7 @@ void Radio::on_set_radio_setting_(const std::string &key, const std::string &pay
 // Shared tail of every set/<key>: log, report to the add-on, restart on a
 // stored change.
 void Radio::finish_setting_(const std::string &key, const std::string &payload, int r) {
-  auto *mqtt = mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   const bool can_publish = mqtt != nullptr && mqtt->is_connected() && !this->diag_topic_.empty();
   if (r == 0) {
     ESP_LOGW(TAG, "set/%s: invalid value '%s'", key.c_str(), payload.c_str());
@@ -2002,7 +2020,7 @@ void Radio::on_set_listen_mode_(const std::string &raw) {
     ESP_LOGD(TAG, "set/listen_mode: '%s' already in effect", v.c_str());
     return;
   }
-  auto *mqtt = mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (!runtime_settings::save_listen_mode(code)) {
     // No restart: it would come back with the old mode and look like a
     // silent no-op. The add-on shows the event instead.

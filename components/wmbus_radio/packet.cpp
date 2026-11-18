@@ -7,6 +7,11 @@
 
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+// ESPHome 2026.11 moved str_sprintf()/format_hex() to alloc_helpers.h, which
+// helpers.h no longer pulls in. Older releases have no such header.
+#if __has_include("esphome/core/alloc_helpers.h")
+#include "esphome/core/alloc_helpers.h"
+#endif
 
 #include "decode3of6.h"
 // Lightweight DLL CRC validation/removal helpers (EN13757 CRC16)
@@ -457,7 +462,7 @@ static inline uint8_t bit_at_msb_(const std::vector<uint8_t> &raw, size_t bit_in
 // S-mode/S1 uses Manchester coding at 32.768 kcps. Try both common polarities:
 // polarity=false: 01 -> 0, 10 -> 1
 // polarity=true : 01 -> 1, 10 -> 0
-static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool polarity,
+static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, size_t bit_offset, bool polarity,
                                       std::vector<uint8_t> &decoded,
                                       uint16_t &symbols_total, uint16_t &symbols_invalid,
                                       std::vector<uint16_t> &erasures) {
@@ -465,7 +470,9 @@ static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool pola
   erasures.clear();
   symbols_total = 0;
   symbols_invalid = 0;
-  const size_t pairs = (raw.size() * 8U) / 2U;
+  const size_t raw_bits = raw.size() * 8U;
+  if (bit_offset >= raw_bits) return false;
+  const size_t pairs = (raw_bits - bit_offset) / 2U;
   if (pairs < 16) return false;
 
   decoded.reserve((pairs + 7U) / 8U);
@@ -473,8 +480,8 @@ static bool manchester_decode_s_mode_(const std::vector<uint8_t> &raw, bool pola
   uint8_t out_bits = 0;
 
   for (size_t i = 0; i < pairs; i++) {
-    const uint8_t a = bit_at_msb_(raw, i * 2U);
-    const uint8_t b = bit_at_msb_(raw, i * 2U + 1U);
+    const uint8_t a = bit_at_msb_(raw, bit_offset + i * 2U);
+    const uint8_t b = bit_at_msb_(raw, bit_offset + i * 2U + 1U);
     symbols_total++;
 
     uint8_t bit;
@@ -597,9 +604,23 @@ static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
     return best;
   }
 
-  ParseAttemptResult attempts[2];
-  for (int pol = 0; pol < 2; pol++) {
-    auto &out = attempts[pol];
+  // SX1276, SX1262 and LR1121 match the 24-bit 0x547696 S-mode marker and
+  // deliver the following L-field on a byte boundary. CC1101 has only a 16-bit
+  // sync register, so it matches the TI-recommended 0x7696 suffix. Its FIFO
+  // boundary is therefore allowed to differ from the other radios even though
+  // the RF profile is otherwise identical. Try every possible bit position in
+  // the first FIFO byte; CRC still makes acceptance exact, while limiting the
+  // search to one byte prevents noise from being scanned as arbitrary frames.
+  static constexpr size_t S1_START_OFFSETS = 8;
+  ParseAttemptResult failed;
+  bool have_failure = false;
+  auto record_failure = [&](const ParseAttemptResult &candidate) {
+    failed = have_failure ? pick_better_failure_(failed, candidate) : candidate;
+    have_failure = true;
+  };
+  for (size_t bit_offset = 0; bit_offset < S1_START_OFFSETS; bit_offset++) {
+    for (int pol = 0; pol < 2; pol++) {
+    ParseAttemptResult out;
     out.mode = LinkMode::S1;
     out.frame_format = "A";
     out.raw_got_len = raw.size();
@@ -607,13 +628,14 @@ static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
     std::vector<uint8_t> decoded;
     std::vector<uint16_t> erasures;
     uint16_t total = 0, invalid = 0;
-    if (!manchester_decode_s_mode_(raw, pol != 0, decoded, total, invalid, erasures) || decoded.size() < 2) {
+    if (!manchester_decode_s_mode_(raw, bit_offset, pol != 0, decoded, total, invalid, erasures) || decoded.size() < 2) {
       char detail[160];
-      snprintf(detail, sizeof(detail), "polarity=%d symbols_total=%u symbols_invalid=%u raw_len=%u",
-               pol, (unsigned) total, (unsigned) invalid, (unsigned) raw.size());
+      snprintf(detail, sizeof(detail), "bit_offset=%u polarity=%d symbols_total=%u symbols_invalid=%u raw_len=%u",
+               (unsigned) bit_offset, pol, (unsigned) total, (unsigned) invalid, (unsigned) raw.size());
       set_attempt_drop_(out, "s1_manchester", "decode_failed", detail);
       out.t1_symbols_total = total;
       out.t1_symbols_invalid = invalid;
+      record_failure(out);
       continue;
     }
 
@@ -630,19 +652,21 @@ static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
 
     if (want < 12 || want > 260) {
       char detail[160];
-      snprintf(detail, sizeof(detail), "polarity=%d l_field=%u decoded_len=%u want=%u need_total=%u symbols_invalid=%u",
-               pol, (unsigned) l, (unsigned) out.decoded_len, (unsigned) want,
+      snprintf(detail, sizeof(detail), "bit_offset=%u polarity=%d l_field=%u decoded_len=%u want=%u need_total=%u symbols_invalid=%u",
+               (unsigned) bit_offset, pol, (unsigned) l, (unsigned) out.decoded_len, (unsigned) want,
                (unsigned) need_total, (unsigned) invalid);
       set_attempt_drop_(out, "s1_l_field", "l_field_invalid", detail);
+      record_failure(out);
       continue;
     }
 
     if (out.data.size() < need_total) {
       out.truncated = true;
       char detail[160];
-      snprintf(detail, sizeof(detail), "polarity=%d decoded_len=%u need_total=%u l_field=%u symbols_invalid=%u",
-               pol, (unsigned) out.data.size(), (unsigned) need_total, (unsigned) l, (unsigned) invalid);
+      snprintf(detail, sizeof(detail), "bit_offset=%u polarity=%d decoded_len=%u need_total=%u l_field=%u symbols_invalid=%u",
+               (unsigned) bit_offset, pol, (unsigned) out.data.size(), (unsigned) need_total, (unsigned) l, (unsigned) invalid);
       set_attempt_drop_(out, "s1_length_check", "truncated", detail);
+      record_failure(out);
       continue;
     }
 
@@ -652,25 +676,28 @@ static ParseAttemptResult try_parse_s1_(const std::vector<uint8_t> &raw) {
     if (!wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
       const auto recovery = recover_s1_erasures_format_a_(out.data, erasures);
       if (!recovery.ok || !wmbus_common::trim_dll_crc_format_a(out.data, &crc_diag)) {
-        std::string detail = dll_crc_detail_(crc_diag) + " polarity=" + std::to_string(pol) +
+        std::string detail = dll_crc_detail_(crc_diag) + " bit_offset=" + std::to_string(bit_offset) +
+                             " polarity=" + std::to_string(pol) +
                              " symbols_invalid=" + std::to_string((unsigned) invalid) +
                              " erasure_worst=" + std::to_string((unsigned) recovery.worst_block) +
                              " erasure_trials=" + std::to_string((unsigned) recovery.trials);
         set_attempt_drop_(out, crc_diag.stage, "dll_crc_failed", detail);
+        record_failure(out);
         continue;
       }
-      ESP_LOGI(TAG, "S1 erasure recovery: resolved=%u worst_block=%u trials=%u polarity=%d",
+      ESP_LOGI(TAG, "S1 erasure recovery: resolved=%u worst_block=%u trials=%u bit_offset=%u polarity=%d",
                (unsigned) recovery.resolved, (unsigned) recovery.worst_block,
-               (unsigned) recovery.trials, pol);
+               (unsigned) recovery.trials, (unsigned) bit_offset, pol);
     }
 
     out.dll_crc_removed = crc_diag.removed_bytes;
     out.final_len = out.data.size();
     out.ok = true;
     return out;
+    }
   }
 
-  return pick_better_failure_(attempts[0], attempts[1]);
+  return failed;
 }
 
 }  // namespace

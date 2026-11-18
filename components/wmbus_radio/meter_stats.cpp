@@ -13,7 +13,8 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
-#include "esphome/components/mqtt/mqtt_client.h"
+#include "mqtt_access.h"
+#include "log_anon.h"
 
 #include <algorithm>
 #include <cstring>
@@ -34,7 +35,7 @@ void Radio::publish_meter_window_batch_(const char *trigger, uint32_t elapsed_s,
   if (!this->diag_publish_summary_highlight_meters_) return;
   if (this->highlight_meter_stats_.empty()) return;
   if (this->diag_topic_.empty()) return;
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   const char *listen_mode = (this->radio != nullptr)
@@ -124,7 +125,7 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
                                       bool reset_time_window,
                                       bool reset_count_window) {
   if (this->diag_topic_.empty()) return;
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   // rssi_n_window counts measured samples only, so count_window > 0 does not
@@ -175,8 +176,10 @@ void Radio::publish_meter_window_for_(const char *trigger, uint32_t elapsed_s,
   if (!meter_window_topic.empty()) {
     mqtt->publish(meter_window_topic, std::string(payload), this->diag_qos_, false);
   }
+  char log_id_buf[12];
+  const char *log_id = anon_meter_id(id_str, log_id_buf, sizeof(log_id_buf));
   ESP_LOGI(TAG, LOG_TR("METER", "LICZNIK") " [%s] uptime_ms=%lu listen_mode=%s id=%s mode=%s win=%us count_window=%u total=%u avg_interval=%us win_avg_interval=%us win_avg_rssi=%ddBm",
-           trigger, (unsigned long) now_ms, listen_mode, id_str, mode_str,
+           trigger, (unsigned long) now_ms, listen_mode, log_id, mode_str,
            (unsigned) elapsed_s,
            (unsigned) count_window,
            (unsigned) st.count,

@@ -48,7 +48,8 @@ mqtt:
   username: !secret mqtt_user
   password: !secret mqtt_password
   port: 1883
-  skip_cert_cn_check: true
+  # EN: no skip_cert_cn_check here: since ESPHome 2026.11 it switches TLS on.
+  # PL: bez skip_cert_cn_check: od ESPHome 2026.11 ta opcja włącza TLS.
 
 api:
   # A standalone MQTT receiver must not reboot because no Native API client is

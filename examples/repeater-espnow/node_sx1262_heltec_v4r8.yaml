@@ -1,0 +1,138 @@
+# ESP-NOW repeater NODE - SX1262 Heltec V4-R8
+#
+# Generated from examples/SX1262/Heltec V4-R8/SX1262_Heltec_V4R8_clean.yaml:
+# same board, pins and radio settings; wifi: and mqtt: are gone, the
+# repeater package (repeater_node_common.yaml) and repeater: true + on_frame
+# are added. Needs repeater_node.h and repeater_node_common.yaml next to it,
+# and repeater_ap_password in secrets.yaml. See README.md in this folder.
+#
+# After flashing, the board is NOT on your network: update it from
+# http://192.168.4.1 on its hotspot "${devicename}", or over USB.
+
+# ESPHome wM-Bus Bridge RAW-only — Heltec WiFi LoRa 32 V4-R8 / SX1262
+#
+# EN: Derived from the working "Heltec V4" (V4.2) example. The V4-R8 uses the
+#     ESP32-S3R8 (8 MB octal PSRAM) and a DIFFERENT LoRa front-end: KCT8103L
+#     (V4.2 uses GC1109). Per Heltec's own driver (board-config.h / radio.c),
+#     the only functional change for a RAW-only receiver is fem_pa_pin 46 -> 5
+#     (PA_CTX moved to GPIO5; GPIO46 became the LED). fem_en/fem_ctrl unchanged.
+#     STATUS: pin map + RX levels validated against Heltec's driver source, but
+#     NOT yet flashed on physical R8 hardware. If it boots but receives nothing
+#     despite good RSSI, fem_pa_pin is the first suspect (KCT8103L != GC1109).
+# PL: Pochodzi od działającego przykładu "Heltec V4" (V4.2). R8 to ESP32-S3R8
+#     (8 MB octal PSRAM) i INNY front-end LoRa: KCT8103L (V4.2 ma GC1109). Wg
+#     sterownika Helteca jedyna funkcjonalna zmiana dla odbiornika RAW-only to
+#     fem_pa_pin 46 -> 5 (PA_CTX przeniesiony na GPIO5; GPIO46 przejął LED).
+#     STATUS: mapa pinów i poziomy RX zgodne ze sterownikiem Helteca, ale
+#     JESZCZE nie flashowane na fizycznym R8. Jak wstanie i nic nie odbierze
+#     mimo dobrego RSSI — pierwszy podejrzany to fem_pa_pin (KCT8103L != GC1109).
+
+substitutions:
+  devicename: esphome-wmbus-heltec-v4r8
+  friendly_name: "wMBus Bridge Heltec V4-R8"
+
+packages:
+  repeater_node: !include repeater_node_common.yaml
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  variant: esp32s3
+  flash_size: 16MB
+  cpu_frequency: 160MHz
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal  # V4-R8 = ESP32-S3R8, 8 MB octal PSRAM (V4.2 was quad/2 MB)
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+api:
+  # A standalone MQTT receiver must not reboot because no Native API client is
+  # connected. ESPHome's default is reboot_timeout: 15min, which restarted these
+  # boards every 15 minutes (measured 2026-08-20/21: 51 distinct boot_id per
+  # board in one night, median 900 s apart). 0s disables that watchdog only -
+  # Native API and time: platform: homeassistant keep working.
+  reboot_timeout: 0s
+ota:
+  - platform: esphome
+# Reception timestamp: SNTP first, HA time as a fallback. If only
+# `homeassistant` is listed and HA API is not connected, the clock
+# never gets set and /rx frames go out without `received_at` - the
+# add-on then reports "no timestamp" indefinitely. SNTP works from
+# WiFi alone, so it recovers frames even before HA sees the board.
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
+  - platform: homeassistant
+    id: ha_time
+
+spi:
+  clk_pin: GPIO9
+  mosi_pin: GPIO10
+  miso_pin: GPIO11
+
+wmbus_radio:
+  radio_type: SX1262
+  cs_pin: GPIO8
+  reset_pin: GPIO12
+  busy_pin: GPIO13
+  irq_pin:
+    number: GPIO14
+    mode: input
+  fem_en_pin: GPIO2     # KCT8103L CSD (unchanged vs V4.2)
+  fem_ctrl_pin: GPIO7   # FEM power / VFEM (unchanged vs V4.2)
+  fem_pa_pin: GPIO5     # KCT8103L CTX — was GPIO46 on V4.2 (GC1109 TX_EN)
+  dio2_rf_switch: true
+  has_tcxo: true
+  # A TCXO board sets XOSC_START_ERR on every power-up: the chip tries its own
+  # crystal before DIO3 is told to power the TCXO, and DIO3 is configured after
+  # reset. Clearing it once the reference is up is what the datasheet expects,
+  # and it is what makes the flag mean something - one that stays cleared was a
+  # boot artefact, one that comes back is a reference that really is not
+  # starting. Left off, the flag is always set and reports nothing.
+  clear_device_errors_on_boot: true
+  publish_dev_err_after_clear: true
+  rx_gain: boosted
+  # false is the right default. true switches the receive path to streaming and
+  # costs about 7 dB in weak signal - measured off/on/off on one board, with
+  # three untouched controls holding their RSSI percentile to the decibel.
+  # Turn it on only if a meter here actually sends more than about 150 decoded
+  # bytes: a three-phase electricity meter does, a water or heat meter does not.
+  # Check your longest decoded frame before enabling it prophylactically.
+  # The sign that you need it: the same meter logs
+  #   payload read short ... total_len=<over 255>
+  # on every transmission of that meter (for example total_len=353).
+  long_gfsk_packets: false
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+  diagnostic_mode: normal
+
+  # --- repeater node -----------------------------------------------------
+  # No MQTT on this board; every frame goes into the node buffer and over
+  # ESP-NOW to the bridge (repeater_node.h).
+  repeater: true
+  on_frame:
+    then:
+      - lambda: |-
+          const auto &raw = frame->data();
+          char id8[9] = "????????";
+          if (raw.size() >= 8) snprintf(id8, sizeof(id8), "%02X%02X%02X%02X", raw[7], raw[6], raw[5], raw[4]);
+          wmbus_repeater_node::send_frame(raw, frame->rssi(), (uint8_t) frame->link_mode(), id8);

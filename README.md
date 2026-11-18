@@ -172,19 +172,21 @@ Silicon revisions: modules reporting `VERSION=0x14` and `VERSION=0x04` are both 
 LR1121 support is experimental and requires explicit opt-in. It has decoded real
 T1, C1 and S1 traffic on the Waveshare ESP32-S3-LR1121-HF board (SKU 34011).
 
-It has now run for weeks beside four other receivers in one flat, and the
-comparison that used to be missing has been made. It is not flattering: over a
-12 h window it heard **48 meters against the T-Beam SX1262's 113**, on an
-identical 10 cm antenna, the same firmware and the same window. On an attenuator
-bench it was the first board to lose the signal entirely, where two SX1262 boards
-were still decoding 92.9% of frames. Swapping antennas between the two ruled out
-the antenna: the LR1121 lost while holding the better one.
+An earlier version of this section said it hears far less than the other boards
+(48 meters against a T-Beam SX1262's 113 in 12 h). That comparison had the boards
+on different antennas and in different places, and the `LR1121` had its antenna on
+a very short pigtail. **On one antenna through a splitter it is the strongest
+receiver here:** against a LilyGO SX1276 (2026-11-11, outputs swapped between
+phases) it received about twice as many frames and 174–190 meters against
+121–136, and a T-Beam SX1262 on the other output heard 0.84 of its meters
+(2026-11-12/13). On a clean S1 signal it tied with the T-Beam (2026-11-17,
+[CHIP_SELECTION](docs/CHIP_SELECTION.md#s1-is-a-separate-question)).
 
-The mechanism is visible in the counters. It has the **highest conversion of any
-board here (80% of receiver triggers became frames)** and by far the fewest
-triggers. It is the most conservative receiver in the set - it rarely attempts a
-marginal start, and rarely wastes one. That is why it hears less: on this
-workload, willingness to attempt weak frames is what buys coverage.
+Two measured limits stand. On a T1 attenuator bench (2026-08-31) two SX1262
+boards still decoded where it had already lost the signal, about 4–5 dB further.
+And like the SX1262 it has no error tolerance in its sync detection: a
+transmitter 6% off-rate is lost entirely, where the SX1276 still decodes some
+frames. Its RSSI reads about 6 dB below the SX1276's on the same frames.
 
 Still one board, one flat, one person, and none of it separates the chip from
 this driver. The opt-in stays for that reason, not because the driver is
@@ -215,6 +217,27 @@ This board has no USB-serial bridge, so `logger:` needs
 has more than one u.FL socket, and only one of them is the sub-GHz path — the
 wrong socket gives perfect silence with no error anywhere.
 
+## Receiver without the home network (ESP-NOW bridge)
+
+When the meters are out of Wi-Fi reach (basement, garage, stairwell), the
+receiver can stay there with no network at all. A second ESP32 inside the
+network, the **bridge**, takes its frames over ESP-NOW and publishes them to MQTT
+as that receiver; the add-on sees an ordinary board.
+
+```text
+meters --868 MHz--> receiver (no network) --ESP-NOW--> bridge (home Wi-Fi) --MQTT--> add-on
+```
+
+- No setup on either side: the receiver finds the bridge's channel by itself.
+- Nothing is lost while the bridge or MQTT is away: the receiver buffers frames
+  (1500 in PSRAM) until the bridge confirms they reached MQTT.
+- On site, a phone on the receiver's hotspot shows the link and the last meters,
+  and updates the firmware.
+
+Ready files for every example board and the bridge:
+[`examples/repeater-espnow/`](examples/repeater-espnow/README.md). The receiver
+side uses `repeater: true`.
+
 ## Documentation
 
 Main documentation lives in `docs/`. Examples live in `examples/`.
@@ -228,6 +251,7 @@ Start here:
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 - [`docs/DIAGNOSTIC.md`](docs/DIAGNOSTIC.md)
 - [`examples/README.md`](examples/README.md)
+- [`examples/repeater-espnow/README.md`](examples/repeater-espnow/README.md) - receiver without the home network (ESP-NOW bridge)
 
 Deeper notes:
 

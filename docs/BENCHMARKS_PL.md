@@ -188,6 +188,28 @@ SX1276 może wyglądać lepiej w `summary`, bo `adaptive` odrzuca problematyczne
 
 ---
 
+## 3. S1 na czystym sygnale (stanowisko tłumikowe, 17.11.2026)
+
+To nie test terenowy: płytka-nadajnik wysyła poprawną ramkę S1 na 869,850 MHz
+przez tłumiki 2×30 dB przed anteną, zmniejszając moc o 1 dB na krok, 20–30 ramek
+na krok. Każdy odbiornik dzieli jedną antenę z `LR1121` przez rozgałęźnik; wynik
+to moc, przy której odbiera połowę ramek, jako różnica wobec `LR1121` w tym samym
+przebiegu.
+
+| płytka | układ | wobec `LR1121` |
+|---|---|---|
+| Waveshare | LR1121 | 0 dB (odniesienie) |
+| LilyGO T-Beam | SX1262 | 0 dB |
+| LilyGO T3-S3 | SX1276 | ≈ −1 dB |
+| Heltec V4 | SX1262 | ≈ −1 dB |
+| SIH Reader | CC1101 | ≈ −5 dB |
+| XIAO ESP32-S3 + Wio | SX1262 | ≈ −8 dB |
+
+±1–2 dB. Progi, odczytanie wyniku i co zmienia w praktyce:
+[CHIP_SELECTION, S1](CHIP_SELECTION_PL.md#s1-to-osobne-pytanie).
+
+---
+
 ## Końcowy wniosek benchmarkowy
 
 ### `SX1276`

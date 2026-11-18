@@ -9,14 +9,16 @@ Practical radio-selection guide for `wmbus_radio`. Four radios are supported:
 
 - **House / a few meters / quiet RF / mostly slow T1** → `SX1276` is often enough.
 - **Apartment block / many meters / frequent packets / larger packets** → choose `SX1262`.
-- **S1 meters you can barely hear** → use `SX1276`. See [S1 is a separate question](#s1-is-a-separate-question).
+- **S1 meters** → on a clean signal `LR1121`, `SX1276` and `SX1262` hear S1 within about 1 dB of each other (bench, 2026-11-17). On real meters `SX1276` still catches more, because it tolerates off-spec transmitters; the antenna and its place decide the rest. `CC1101` is about 5 dB weaker. See [S1 is a separate question](#s1-is-a-separate-question).
 - **C1 meters** → `SX1262` in `listen_mode: both` now hears them (10 C1 meters on a T-Beam, re-measured 2026-10-01 after the sync-word fix). `SX1276` in `both` heard 14. See [C1 is a separate question too](#c1-is-a-separate-question-too).
 - **Mixed T1 + C1 on one device** → no measurable T1 cost on `SX1262`, `LR1121` or `SX1276` since the 2026-09-30 fix; `CC1101` not re-measured.
 - **Two dedicated devices** (`T1-only` and `C1-only`) → no longer needed: one device in `both` is enough on `SX1262`, `LR1121` and `SX1276`.
 - **`CC1101`** → only if that is the hardware you already own. It is behind an
   explicit safety gate and is not the chip to buy for this project.
-- **`LR1121`** → newest and the strongest receiver measured here so far, but the
-  least proven. Treat it as a working starting point, not a supported default.
+- **`LR1121`** → newest. On a shared antenna it heard more meters than the
+  `SX1276` (2026-11-11) and it tied for best on clean S1 (2026-11-17), but it is one
+  board and the youngest driver. Treat it as a working starting point, not a
+  supported default.
 
 ## Why the difference exists
 
@@ -31,18 +33,25 @@ Practical radio-selection guide for `wmbus_radio`. Four radios are supported:
 
 `CC1101` is a much older and simpler part. It works, but its read path is the
 slowest of the four (the FIFO poll deadline is 1800 µs against 1000 µs on
-`SX1276`), and its S1 support is a raw sniffer rather than a receive path.
+`SX1276`). Since 2026-11-13 it has its own S1 modem profile; on S1 it is about
+5 dB less sensitive than the other three.
 
-`LR1121` is the newest silicon, and the comparison that used to be missing has
-since been made: weeks beside four other receivers in one flat, then on an
-attenuator bench with a shared input. **It came last.** Over 12 hours it heard 48
-meters where a T-Beam SX1262 on an identical antenna heard 113, and on the bench
-it was the first to lose the signal entirely. Swapping antennas ruled the antenna
-out - it lost while holding the better one.
+`LR1121` is the newest silicon. An earlier version of this page said it **came
+last**; that did not survive a fair comparison. It rested on RSSI corrected with a
+−11 dB offset that also contained a worse antenna position (the `LR1121` had its
+antenna on a very short pigtail). On **one antenna through a splitter**
+(2026-11-11, outputs swapped between phases) the `LR1121` reads **6 dB lower** than
+the `SX1276` on the same frames, received about **twice as many frames** and
+**174–190 meters against 121–136**, and caught 86–98% of the weakest frames the
+`SX1276` decoded. A T-Beam `SX1262` on the other splitter output heard 0.84 of its
+meters (2026-11-12/13). On clean S1 (2026-11-17) it tied with the best `SX1262`.
+On a T1 attenuator bench (2026-08-31) two `SX1262` boards still decoded about
+4–5 dB further than it, so on T1 its edge on the shared antenna is not raw
+sensitivity.
 
-Its front end is not the problem. It converts 80% of its receiver triggers into
-frames, the best figure in the set, and it triggers least often. It is simply the
-most conservative receiver here, and on this workload caution costs coverage.
+What stays true: it has no error tolerance in its preamble/sync detection (like
+the `SX1262`), so a transmitter a few percent off-rate is lost entirely - see
+[S1 is a separate question](#s1-is-a-separate-question).
 
 One flat and one board of each type, so this ranks these five samples rather than
 the silicon.
@@ -56,7 +65,11 @@ The biggest factors are:
 3. **RF density / apartment-block noise**,
 4. **single-mode vs `both` scheduling**,
 5. **which link mode you actually need** — T1/C1 and S1 do not rank the radios
-   the same way.
+   the same way,
+6. **the antenna and its place** — a 10 cm antenna instead of the 6 cm one that
+   came with the board gave a Heltec V4 about **+5 dB** and a XIAO about **+3 dB**
+   per meter (2026-10-15, same boards, same spot), more than most chip-to-chip
+   differences on this page.
 
 The number of meters alone is not the whole story. A few fast meters can hurt more than many slow ones.
 
@@ -69,7 +82,7 @@ The number of meters alone is not the whole story. A few fast meters can hurt mo
 | Fast meters around 30–60 s | weak | often weak | recommended | good |
 | Larger packets under time pressure | weak | weak | recommended | good |
 | `both` on one device | not recommended | **fine** - no measurable T1 cost | **fine** - no measurable T1 cost | fine - no measurable T1 cost |
-| S1 meters near the noise floor | raw sniffer only | **recommended** | weaker, see below | promising, single test |
+| S1 meters near the noise floor | about 5 dB weaker | **recommended** - same sensitivity, tolerates off-spec meters | same sensitivity on a clean signal, no tolerance | same sensitivity on a clean signal, no tolerance |
 | C1 meters | untested here | **best** in `both` (14 C1 meters) | **good** in `both`, see below | hears the C1 meters within its (shorter) T1 range |
 | Need maximum reliability | no | limited | recommended | not yet provable |
 | Availability of a second opinion | wide | wide | wide | one board, one house |
@@ -84,30 +97,63 @@ In the tested apartment-block environment on ESPHome `2026.3.2`:
 
 This threshold is **practical, not absolute**. It depends on the building, signal levels, and RF load.
 
+Since 2026-11-15 `sx1262_rx_bandwidth` defaults to **234 kHz** (was 312 kHz,
+inherited and never measured for T1). Measured on 2026-11-12/13 against an
+`LR1121` on a splitter: a T-Beam caught **52.5%** of the `LR1121`'s frames at
+−110…−105 dBm with 234 kHz against 30.6% with 312 kHz, heard 0.84 of its meters
+against 0.76, and caught 77% of its C1 frames against 60%.
+
 ## S1 is a separate question
 
 S1 does not rank the radios the way T1 does, so the T1 table above does not carry
-over. Measured on 2026-08-01 and 2026-08-14:
+over.
 
-- `SX1262` decodes S1 down to roughly **−82 dBm** and fails at **−85 dBm**. Three
-  independent methods agreed on that threshold.
-- `SX1276` decoded the same real transmission, in the same second, at
-  **−99/−100 dBm**.
-- The gap is therefore about **3–10 dB**, and in the tested building the whole
-  local S1 population arrives at or below the `SX1262` threshold.
+**Measured on a clean signal, 2026-11-17.** A transmitter board sent a correct S1
+frame on 869.850 MHz (no real meter there) through 2×30 dB attenuators, stepping
+its power down 1 dB at a time, 20–30 frames per step. Each board shared one antenna
+with an `LR1121` through a splitter, so every result is a difference to the
+`LR1121` **in the same run** (the `LR1121` itself moves 1.5–3 dB between runs).
+The threshold is the power at which a board receives half the frames.
 
-**`SX1262` is not defective at S1. It is simply less sensitive there.** No AGC or
-register tuning recovered the difference; the experiments that appeared to help
-did not survive an A–B–A repeat and were removed from the code.
+| board | chip | vs `LR1121` | 50% threshold, ≈ LilyGO scale |
+|---|---|---|---|
+| Waveshare | LR1121 | **0 dB** (reference) | ≈ −103.5 dBm |
+| LilyGO T-Beam | SX1262 | **0 dB** | ≈ −103.5 dBm |
+| LilyGO T3-S3 | SX1276 | **≈ −1 dB** | −102.6 dBm |
+| Heltec V4 | SX1262 | **≈ −1 dB** | ≈ −102.5 dBm |
+| SIH Reader | CC1101 | **≈ −5 dB** | ≈ −98.5 dBm |
+| XIAO ESP32-S3 + Wio | SX1262 | **≈ −8 dB** | ≈ −95.5 dBm |
 
-Practical rule: **`SX1276` for S1, `SX1262` for T1.** If you need both, that is an
-argument for two devices rather than one compromise.
+Accuracy about ±1–2 dB. "LilyGO scale" is the LilyGO's own RSSI plus the measured
+difference to the `LR1121` - an approximation, not laboratory dBm at the connector.
 
-`CC1101` in `listen_mode: s1` runs its own S1 modem profile (TI AN067 Radio
-Link A: 32.768 kcps, 47 kHz, 271 kHz filter) on the development branch since 2026-11-13; before that
-it stayed on the T1 rate and only caught the sync. Not measured yet. `LR1121` received S1
-correctly on the first attempt, but only from a workshop transmitter at −59 dBm,
-which proves the path works and says nothing about sensitivity.
+What it means:
+
+- **`LR1121`, `SX1276` and `SX1262` hear a clean S1 signal equally**, within a
+  decibel. In the same hours on real meters one board caught 256 S1
+  transmissions and another 58 - that is not sensitivity.
+- **On real meters two things decide.** First, tolerance to the transmitter: real
+  meters are off in frequency, chip rate or preamble, and the `SX1276` has an error
+  tolerance in its preamble detector (`sx1276_preamble_tolerance`, default 10) that
+  `SX1262` and `LR1121` do not have - at −6% chip rate the `SX1276` still decoded
+  8.4% of the frames, both `SX1262` boards and the `LR1121` none (2026-09-05).
+  Second, the antenna and its place: a LilyGO on its own, longest antenna gained
+  about 5 dB over the splitter, about 3.5 dB of it the splitter loss.
+- **`CC1101` is about 5 dB weaker on S1**, a real radio difference: meters that
+  reach the `SX1276` at −96…−101 dBm are below its threshold, which is why on the
+  test site it received no real S1 meter while decoding a strong test frame 99%.
+  It runs its own S1 modem profile (TI AN067 Radio Link A) since 2026-11-13.
+- **The XIAO sample is about 8 dB weaker** than the other two `SX1262` boards -
+  that board with its antenna path, not the chip.
+
+**Withdrawn:** "`SX1262` fails at −85 dBm on S1, 3–10 dB behind `SX1276`"
+(2026-08). It compared RSSI read by different boards, which are not on one scale:
+at its threshold the Heltec read −87 dBm where the `LR1121` read −109 dBm for the
+same signal.
+
+Practical rule for S1: **antenna and place first.** Any of `LR1121`, `SX1276`,
+`SX1262` hears clean S1 equally; with many weak, older meters prefer `SX1276` for
+its tolerance; avoid `CC1101` for weak S1.
 
 ## C1 is a separate question too
 
@@ -237,8 +283,10 @@ clamp) but the size of the effect elsewhere is unknown.
 - `both` is always a compromise on one radio.
 - Software can improve margins, but it does not remove the hardware class difference between these parts.
 - **RSSI values are not comparable between boards.** A board with an external
-  LNA/FEM reads 13–15 dB higher on identical frames. Comparing absolute dBm
-  across two different boards measures the front end, not the reception.
+  LNA/FEM reads 13–15 dB higher on identical frames. On one shared antenna
+  (2026-11-11/17) the `LR1121` reads about 6 dB below the `SX1276` LilyGO, and the
+  Heltec V4 about 15 dB above it. Comparing absolute dBm across two different
+  boards measures the front end, not the reception.
 - **Frame counts are only comparable when the boards stand in the same place.**
   They do not, in any of the tests quoted here, so every cross-chip number above
   describes a board in a position, not a chip in isolation. How much the position

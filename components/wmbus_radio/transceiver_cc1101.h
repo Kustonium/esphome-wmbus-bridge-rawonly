@@ -69,11 +69,17 @@ class CC1101 : public RadioTransceiver {
   uint32_t idle_refresh_skipped_{0};
   uint32_t state_wait_timeouts_{0};
   uint8_t last_wait_state_{0};
-  // S1 takes TI's 0x05 (15/16 sync bits, no carrier sense) as AN067 Radio Link A
-  // does; T1/C1 keep 0x06 unless cc1101_sync_15_16.
   // SYNC_MODE (SWRS061I p.44): 0x06 = 16/16 + carrier sense, 0x05 = 15/16 +
-  // carrier sense, 0x02 / 0x01 = the same without carrier sense. S1 keeps TI's
-  // 0x05.
+  // carrier sense, 0x02 / 0x01 = the same without carrier sense. T1/C1 keep
+  // 0x06 unless cc1101_sync_15_16, and honor cc1101_carrier_sense.
+  //
+  // S1 is always TI's 0x05 (AN067 Radio Link A), whatever those two options
+  // say. Measured 2026-11-16: without carrier sense, noise matched the 0x7696
+  // sync ~230 times a minute at 15/16 and ~25 at 16/16, all with a bad CRC, and
+  // no real weak S1 frame came through either way; a strong fake S1 frame from
+  // a nearby transmitter was decoded 714/720 with 0x05. The CC1101 simply does
+  // not hear the weak S1 meters that the SX1276 and LR1121 decode at the same
+  // place; the bench switches that tested this are gone.
   uint8_t exp_mdmcfg2_() const {
     if (this->s1_()) return 0x05;
     uint8_t m = this->sync_15_16_ ? 0x05 : 0x06;

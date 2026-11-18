@@ -103,6 +103,16 @@ jobs:
           # entry only the default (empty) path is ever compiled.
           - name: forward_meters schema (SX1276 / esp32)
             config: tests/ci/forward_meters_ci.yaml
+          # repeater: true without mqtt:/wifi: - the only build without USE_MQTT,
+          # so the only proof that no MQTT call site bypasses mqtt_access.h.
+          - name: repeater, no mqtt (SX1276 / esp32)
+            config: tests/ci/repeater_ci.yaml
+          # The ESP-NOW repeater example: both halves. They pull in a header and a
+          # package from their own folder, copied next to the flattened config below.
+          - name: repeater example, node (SX1262 Heltec V4 / esp32-s3)
+            config: examples/repeater-espnow/node_sx1262_heltec_v4.yaml
+          - name: repeater example, bridge (esp32-c3)
+            config: examples/repeater-espnow/bridge_esp32c3.yaml
           # The bench transmitter under tests/tools/. Same argument as the
           # LR1121 entry: no other configuration selects wmbus_tx, so without
           # this it is compiled nowhere. It lived outside version control until
@@ -148,6 +158,10 @@ jobs:
           mkdir -p ci-build
           flat="ci-build/$(basename "$CONFIG")"
           cp "$CONFIG" "$flat"
+          # Configs that include a header or a package from their own folder
+          # (examples/repeater-espnow) need those files next to the copy.
+          cp "$(dirname "$CONFIG")"/*.h ci-build/ 2>/dev/null || true
+          cp "$(dirname "$CONFIG")"/*_common.yaml ci-build/ 2>/dev/null || true
           # Dummy secrets so config validation passes (compile-only, never flashed).
           cat > ci-build/secrets.yaml <<'EOF'
           wifi_ssid: "ci-build"
@@ -155,6 +169,7 @@ jobs:
           mqtt_broker: "127.0.0.1"
           mqtt_user: "ci"
           mqtt_password: "ci"
+          repeater_ap_password: "ci-build-password"
           EOF
           # Build the component from THIS checkout, not the published github repo.
           sed -i "s|github://Kustonium/esphome-wmbus-bridge-rawonly@main|{ type: local, path: ${GITHUB_WORKSPACE}/components }|" "$flat"
@@ -167,7 +182,8 @@ jobs:
           sed -i "s|path: components$|path: ${GITHUB_WORKSPACE}/tests/tools/wmbus_tx/components|" "$flat"
           echo "FLAT_CONFIG=$flat" >> "$GITHUB_ENV"
           echo "----- effective external_components -----"
-          grep -n -A2 "external_components" "$flat"
+          # The repeater bridge uses no external component, so grep may match nothing.
+          grep -n -A2 "external_components" "$flat" || echo "(none - config uses no external component)"
 
       - name: Compile firmware
         run: esphome compile "$FLAT_CONFIG"

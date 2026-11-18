@@ -47,7 +47,8 @@ mqtt:
   # PL: zwykłe MQTT na 1883; nie włączaj TLS bez pewności co do certu brokera
   #     (zły/nieznany cert blokuje połączenie ESP).
   port: 1883
-  skip_cert_cn_check: true
+  # EN: no skip_cert_cn_check here: since ESPHome 2026.11 it switches TLS on.
+  # PL: bez skip_cert_cn_check: od ESPHome 2026.11 ta opcja włącza TLS.
 
 api:
   # Keep the Native API available (Home Assistant, esphome logs, OTA over API)
@@ -252,6 +253,19 @@ wmbus_radio:
   #     zastępcza nie jest wysyłana. Dodatek wMBus MQTT Bridge robi z tego
   #     osobną encję siły sygnału dla każdej płytki, co pozwala je porównać.
   # publish_rssi: true  # default: false
+  # EN: Language of the device log: en or pl. MQTT payloads are not affected.
+  # PL: Język logu płytki: en albo pl. Nie zmienia danych w MQTT.
+  # log_language: pl  # default: en
+  # EN: RAM buffer for telegrams while MQTT is down, in MQTT messages (one
+  #     telegram = 2); 0 = off. See docs/BUFFER_QOS_TIMESTAMP.md.
+  # PL: Bufor telegramów w RAM na czas braku MQTT, w wiadomościach MQTT (jeden
+  #     telegram = 2); 0 = wyłączony. Patrz docs/BUFFER_QOS_TIMESTAMP_PL.md.
+  # mqtt_buffer_size: 64  # default: 0
+  # EN: Board without the home network: no MQTT at all, frames leave only through
+  #     on_frame (e.g. over ESP-NOW to a bridge). Ready setup: examples/repeater-espnow/.
+  # PL: Płytka bez sieci domowej: bez MQTT, ramki wychodzą tylko przez on_frame
+  #     (np. przez ESP-NOW do mostu). Gotowy układ: examples/repeater-espnow/.
+  # repeater: true  # default: false
 
   # Optional 15-minute per-meter statistics for selected IDs.
   # highlight_meters:  # default: []

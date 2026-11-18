@@ -173,19 +173,21 @@ Rewizje układu: akceptowane są moduły zgłaszające zarówno `VERSION=0x14`, 
 Obsługa LR1121 jest eksperymentalna i wymaga jawnego włączenia. Na płytce
 Waveshare ESP32-S3-LR1121-HF (SKU 34011) zdekodowała realny ruch T1, C1 i S1.
 
-Chodziła już tygodniami obok czterech innych odbiorników w jednym mieszkaniu,
-więc brakujące porównanie zostało zrobione. Nie wypada dla niej korzystnie:
-w oknie 12 h usłyszała **48 liczników wobec 113 u T-Beama na SX1262**, przy
-identycznej antenie 10 cm, tym samym firmwarze i tym samym oknie. Na stanowisku
-tłumikowym była pierwszą płytką, która straciła sygnał całkowicie, podczas gdy
-dwie płytki SX1262 dekodowały jeszcze 92,9% ramek. Zamiana anten między nimi
-wykluczyła antenę: LR1121 przegrywał, mając tę lepszą.
+Wcześniejsza wersja tej sekcji mówiła, że słyszy dużo mniej niż pozostałe płytki
+(48 liczników wobec 113 u T-Beama na SX1262 w 12 h). W tym porównaniu płytki
+stały na różnych antenach i w różnych miejscach, a `LR1121` miał antenę na bardzo
+krótkim pigtailu. **Na jednej antenie przez rozgałęźnik to najmocniejszy odbiornik
+z zestawu:** wobec LilyGO na SX1276 (11.11.2026, z zamianą wyjść między fazami)
+odebrał mniej więcej dwa razy więcej ramek i 174–190 liczników wobec 121–136,
+a T-Beam na SX1262 na drugim wyjściu usłyszał 0,84 jego liczników (12–13.11.2026).
+Na czystym sygnale S1 zremisował z T-Beamem (17.11.2026,
+[CHIP_SELECTION](docs/CHIP_SELECTION_PL.md#s1-to-osobne-pytanie)).
 
-Mechanizm widać w licznikach. Ma **najwyższą konwersję z całej stawki (80%
-wyzwoleń odbiornika zamieniło się w ramki)** i zdecydowanie najmniej wyzwoleń.
-To najostrożniejszy odbiornik z zestawu - rzadko podejmuje próbę przy słabym
-starcie i rzadko ją marnuje. Dlatego słyszy mniej: przy tym obciążeniu to
-gotowość do próbowania kupuje zasięg.
+Zostają dwa zmierzone ograniczenia. Na stanowisku tłumikowym T1 (31.08.2026) dwie
+płytki SX1262 dekodowały jeszcze tam, gdzie on już stracił sygnał, ok. 4–5 dB
+dalej. I tak jak SX1262 nie ma tolerancji błędu w wykrywaniu synchronizacji:
+nadajnik odbiegający o 6% od szybkości ginie całkowicie, a SX1276 część ramek
+jeszcze dekoduje. Jego RSSI czyta ok. 6 dB niżej niż SX1276 na tych samych ramkach.
 
 To nadal jedna płytka, jedno mieszkanie, jedna osoba, i nic z tego nie oddziela
 układu od tego sterownika. Jawne włączenie zostaje z tego powodu, a nie dlatego,
@@ -216,6 +218,27 @@ Płytka nie ma mostka USB-UART, więc `logger:` wymaga
 więcej niż jedno gniazdo u.FL, a torem sub-GHz jest tylko jedno z nich — złe
 gniazdo daje idealną ciszę bez żadnego błędu.
 
+## Odbiornik bez sieci domowej (most ESP-NOW)
+
+Gdy liczniki są poza zasięgiem Wi-Fi (piwnica, garaż, klatka schodowa),
+odbiornik może tam stać zupełnie bez sieci. Druga płytka ESP32, która jest
+w sieci, czyli **most**, odbiera od niego ramki przez ESP-NOW i publikuje je do
+MQTT jako ten odbiornik; dodatek widzi zwykłą płytkę.
+
+```text
+liczniki --868 MHz--> odbiornik (bez sieci) --ESP-NOW--> most (Wi-Fi domowe) --MQTT--> dodatek
+```
+
+- Po żadnej stronie nic się nie ustawia: odbiornik sam znajduje kanał mostu.
+- Nic nie ginie, gdy most albo MQTT chwilowo nie działa: odbiornik trzyma ramki
+  w buforze (1500 w PSRAM), dopóki most nie potwierdzi, że trafiły do MQTT.
+- Na miejscu telefon połączony z hotspotem odbiornika pokazuje łącze i ostatnie
+  liczniki, a także pozwala wgrać nowy wsad.
+
+Gotowe pliki dla każdej płytki z przykładów i dla mostu:
+[`examples/repeater-espnow/`](examples/repeater-espnow/README_PL.md). Odbiornik
+korzysta z `repeater: true`.
+
 ## Dokumentacja
 
 Główna dokumentacja jest w `docs/`. Przykłady są w `examples/`.
@@ -229,6 +252,7 @@ Zacznij tutaj:
 - [`docs/TROUBLESHOOTING_PL.md`](docs/TROUBLESHOOTING_PL.md)
 - [`docs/DIAGNOSTIC_PL.md`](docs/DIAGNOSTIC_PL.md)
 - [`examples/README_PL.md`](examples/README_PL.md)
+- [`examples/repeater-espnow/README_PL.md`](examples/repeater-espnow/README_PL.md) - odbiornik bez sieci domowej (most ESP-NOW)
 
 Głębsze notatki:
 

@@ -1,0 +1,97 @@
+# ESP-NOW repeater NODE - SX1276 LilyGO T3-S3
+#
+# Generated from examples/SX1276/LilygoT3S3/SX1276_T3S3_clean.yaml:
+# same board, pins and radio settings; wifi: and mqtt: are gone, the
+# repeater package (repeater_node_common.yaml) and repeater: true + on_frame
+# are added. Needs repeater_node.h and repeater_node_common.yaml next to it,
+# and repeater_ap_password in secrets.yaml. See README.md in this folder.
+#
+# After flashing, the board is NOT on your network: update it from
+# http://192.168.4.1 on its hotspot "${devicename}", or over USB.
+
+substitutions:
+  devicename: esphome-wmbus-lilygo-t3s3
+  friendly_name: "wMBus Bridge LilyGO T3-S3"
+
+packages:
+  repeater_node: !include repeater_node_common.yaml
+
+esphome:
+  name: ${devicename}
+  friendly_name: ${friendly_name}
+  min_version: 2026.1.3
+  name_add_mac_suffix: false
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  cpu_frequency: 160MHz
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Kustonium/esphome-wmbus-bridge-rawonly@main
+    components: [wmbus_radio]
+    refresh: 0s
+
+logger:
+  level: info
+  logs:
+    mqtt: warn
+    component: warn
+
+api:
+  # A standalone MQTT receiver must not reboot because no Native API client is
+  # connected. ESPHome's default is reboot_timeout: 15min, which restarted these
+  # boards every 15 minutes (measured 2026-08-20/21: 51 distinct boot_id per
+  # board in one night, median 900 s apart). 0s disables that watchdog only -
+  # Native API and time: platform: homeassistant keep working.
+  reboot_timeout: 0s
+ota:
+  - platform: esphome
+
+spi:
+  id: spi_lora
+  clk_pin: GPIO05
+  mosi_pin: GPIO06
+  miso_pin: GPIO03
+
+# Reception timestamp: SNTP first, HA time as a fallback. If only
+# `homeassistant` is listed and HA API is not connected, the clock
+# never gets set and /rx frames go out without `received_at` - the
+# add-on then reports "no timestamp" indefinitely. SNTP works from
+# WiFi alone, so it recovers frames even before HA sees the board.
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - pl.pool.ntp.org
+      - 0.pool.ntp.org
+  - platform: homeassistant
+    id: ha_time
+
+wmbus_radio:
+  radio_type: SX1276
+  spi_id: spi_lora
+  cs_pin: GPIO07
+  reset_pin: GPIO08
+  irq_pin:
+    number: GPIO33
+    mode:
+      input: true
+      pullup: true
+  listen_mode: t1
+  listen_mode_filter_after_parse: false
+  diagnostic_mode: normal
+
+  # --- repeater node -----------------------------------------------------
+  # No MQTT on this board; every frame goes into the node buffer and over
+  # ESP-NOW to the bridge (repeater_node.h).
+  repeater: true
+  on_frame:
+    then:
+      - lambda: |-
+          const auto &raw = frame->data();
+          char id8[9] = "????????";
+          if (raw.size() >= 8) snprintf(id8, sizeof(id8), "%02X%02X%02X%02X", raw[7], raw[6], raw[5], raw[4]);
+          wmbus_repeater_node::send_frame(raw, frame->rssi(), (uint8_t) frame->link_mode(), id8);

@@ -353,3 +353,37 @@ board initializes, the log looks fine, and reception is bad or absent:
 - **LR1121** — `tcxo_voltage`, `tcxo_startup_ticks`, `rx_bandwidth` against the
   required `2*fdev + bitrate`, `payload_length`, `rx_boosted`, and the
   calibration stages behind the known `HF_XOSC_START` transient.
+
+## Hiding meter IDs on screenshots
+
+For a forum post or an issue report, the log can show stand-ins instead of real
+meter IDs. Add a switch to the board's YAML:
+
+```yaml
+switch:
+  - platform: template
+    name: "Anonymize"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - lambda: esphome::wmbus_radio::set_log_anonymize(true);
+    turn_off_action:
+      - lambda: esphome::wmbus_radio::set_log_anonymize(false);
+```
+
+Turn it on, take the screenshot, turn it off.
+
+- **Only the log text changes:** `Have data … id:`, `★ [id:…]`, `METER … id=`,
+  `TARGET`, `FREQERR`, the buffer's per-meter lists. The raw hex of truncated or
+  dropped packets is replaced by `(hidden: anonymize on)`. MQTT, the add-on,
+  `on_frame` and anything forwarded keep the real IDs.
+- **The stand-in:** every digit of the ID plus the matching digit of today's date
+  (UTC, `YYYYMMDD`), modulo 10; hex letters shift within `A`-`F`. On 2026-11-17
+  `03528107` becomes `23789214`. On one day the same meter gets the same
+  stand-in on every board, so screenshots from two boards still line up.
+- **Without a clock** (no `time:` and nothing has set it) IDs show as `????????`,
+  never the real value.
+- **This is a cover, not encryption.** The method is public; anyone who knows
+  the day can undo it. It keeps real IDs off a public page, nothing more.
+- Lines printed before the switch was turned on, such as the boot
+  configuration report with `highlight_meters`, are not changed.

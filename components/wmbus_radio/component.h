@@ -20,6 +20,7 @@
 #include "esphome/components/spi/spi.h"
 // Keep component lightweight (no full wmbusmeters stack)
 #include "link_mode.h"
+#include "mqtt_access.h"
 
 #include "packet.h"
 #include "runtime_settings.h"
@@ -59,6 +60,11 @@ public:
   void set_target_topic(const std::string &topic) { this->target_topic_ = topic; }
   void set_target_log(bool enabled) { this->target_log_ = enabled; }
   void set_publish_radio_raw(bool enabled) { this->publish_radio_raw_ = enabled; }
+  // repeater: true -> radio front end only, no MQTT at all (see mqtt_access.h).
+  void set_repeater(bool enabled) {
+    this->repeater_ = enabled;
+    g_repeater_mode = enabled;
+  }
   void set_publish_rssi(bool enabled) {
     this->publish_rssi_ = enabled;
     this->publish_rssi_opt_.set_yaml(enabled ? 1 : 0);
@@ -342,6 +348,7 @@ protected:
   std::string target_topic_{};
   bool target_log_{true};
   bool publish_radio_raw_{false};
+  bool repeater_{false};
   bool publish_rssi_{false};
 
   // Per-topic QoS, see the set_*_qos() setters above.
@@ -433,6 +440,11 @@ protected:
   // reads "drops caused by the current, or most recent, broker outage".
   // The lifetime mqtt_outbox_dropped_total_ above is never reset.
   uint32_t mqtt_outbox_dropped_this_outage_{0};
+  // mqtt_buffer_size: 0 (buffer off): frames not published while the broker is
+  // away are only COUNTED, and reported in ONE line when the link comes back -
+  // not through the outbox drop statistics, which exist for the buffer.
+  uint32_t unbuffered_lost_frames_{0};
+  uint32_t unbuffered_outage_start_ms_{0};
   uint32_t mqtt_outbox_refused_heap_this_outage_{0};  // subset of the above refused at the door by the 40 KB heap valve
   // Per-meter drops this outage, keyed by the printable meter id (raw A-field
   // when available, else the BCD id) - i.e. the value the receive log prints

@@ -68,6 +68,7 @@ examples/SX1276/LilygoT3S3/
 examples/SX1276/LilygoT3V3TCXO/
 examples/CC1101/
 examples/LR1121/Waveshare ESP32-S3-LR1121-HF/
+examples/repeater-espnow/        receiver without the home network + ESP-NOW bridge
 ```
 
 For normal use, keep:

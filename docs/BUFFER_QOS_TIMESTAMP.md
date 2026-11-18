@@ -21,6 +21,12 @@ silently skipped. The telegram is lost, not delayed.
 `mqtt_buffer_size` (**default `0` — the feature is off until you set it**,
 range `0`-`8192`, or `auto` — see below) sets a RAM FIFO queue.
 
+With `0` the buffer statistics stay silent: no 30 s "outbox stats" lines, no
+per-meter drop list, and the `buffer_dropped_*` sensors do not count. Frames
+lost while the broker was away are reported in one line when it comes back:
+`MQTT back after 42 s - 18 frame(s) not published (mqtt_buffer_size: 0)`.
+A board with `repeater: true` has no MQTT at all and reports nothing.
+
 **The unit is queued MQTT messages, not telegrams.** One received telegram
 enqueues two of them: the raw frame on `.../telegram` and its metadata
 companion on `.../rx`, which is published for every forwarded frame. So

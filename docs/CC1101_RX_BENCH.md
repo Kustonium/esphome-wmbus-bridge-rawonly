@@ -7,7 +7,7 @@ Build all phases from the same dev commit. Both new options default to false.
 
 | `wmbus_radio` option | Default | Effect |
 |---|---|---|
-| `cc1101_sync_15_16` | `false` | T1/C1: 0x06 (16/16 + CS) versus 0x05 (15/16 + CS — **both keep the carrier-sense gate**, SWRS061I p. 44). S1 has its own 0x05 profile. |
+| `cc1101_sync_15_16` | `false` | T1/C1: 0x06 (16/16 + CS) versus 0x05 (15/16 + CS — **both keep the carrier-sense gate**, SWRS061I p. 44). S1 is always TI's 0x05 (15/16 + CS), whatever this and `cc1101_carrier_sense` say. Tested 2026-11-16: without CS, noise matched the S1 sync ~230/min (15/16) or ~25/min (16/16), all bad CRC, and no real weak S1 frame came through; a strong fake S1 frame was decoded 714/720 with 0x05. The CC1101 does not hear weak S1 meters that SX1276/LR1121 decode. |
 | `cc1101_carrier_sense` | `true` | `false` = sync without carrier sense (0x02, with `sync_15_16` 0x01). YAML only: no longer on the add-on tile since 2026-11-16 (off was measured harmful); a value stored by an older build is dropped at boot. |
 | `cc1101_rx_bandwidth` | `232khz` | T1/C1 RX filter: `232khz` (default since 2026-11-16, measured better), `325khz` (TI AN067 link B), `270khz`. YAML only since 2026-11-16; a value stored from the add-on during the test is dropped at boot. |
 | `cc1101_rx_state_wait` | `false` | SIDLE → wait IDLE → SFRX → SRX → wait RX. |

@@ -1,0 +1,133 @@
+# ESP-NOW repeater - NODE package (shared by every node_*.yaml in this folder).
+#
+# Turns a wM-Bus receiver into a node WITHOUT the home network: its Wi-Fi is only
+# its own hotspot (status page + firmware upload), frames go over ESP-NOW to the
+# bridge (bridge_esp32c3.yaml), which publishes them to MQTT as this board.
+#
+# Needs in secrets.yaml:
+#   repeater_ap_password: "at least 8 characters"
+#
+# IMPORTANT: after this firmware is on the board, Home Assistant / ESPHome on your
+# network can NOT update it any more (the board is not on your network). Updates:
+#   - phone/laptop connected to the hotspot -> http://192.168.4.1 -> OTA Update
+#     (file from ESPHome: Install -> Manual download -> OTA format), or
+#   - USB.
+# The hotspot password is the only protection of that page and of the upload field.
+
+esphome:
+  includes:
+    - repeater_node.h
+  on_boot:
+    # Start the hotspot directly on the last bridge channel (from flash). Without
+    # this ESPHome starts it on channel 1 and the node moves it a moment later,
+    # which drops a phone/laptop that was just connecting.
+    # Priority 600: after globals are restored (800), before Wi-Fi starts (250).
+    - priority: 600
+      then:
+        - lambda: |-
+            const uint8_t ch = id(repeater_channel);
+            if (ch >= 1 && ch <= 13) {
+              auto ap = wifi::global_wifi_component->get_ap();
+              ap.set_channel(ch);
+              wifi::global_wifi_component->set_ap(ap);
+            }
+    - priority: -100
+      then:
+        - lambda: wmbus_repeater_node::start("${devicename}", id(repeater_channel));
+
+wifi:
+  # Hotspot only - the node does not know the home network.
+  ap:
+    ssid: "${devicename}"
+    password: !secret repeater_ap_password
+  power_save_mode: none
+
+web_server:
+  port: 80
+  version: 3
+  # Page built into the firmware: a phone on the hotspot has no internet, and
+  # without this v3 waits for its script from oi.esphome.io.
+  local: true
+
+ota:
+  # Firmware upload from http://192.168.4.1 - the only way to update the node
+  # without USB once it is off the home network.
+  - platform: web_server
+
+globals:
+  - id: repeater_channel
+    type: uint8_t
+    restore_value: true
+    initial_value: '1'
+
+interval:
+  - interval: 20ms
+    then:
+      - lambda: |-
+          const uint8_t ch = wmbus_repeater_node::loop();
+          if (ch != 0) id(repeater_channel) = ch;
+
+text_sensor:
+  - platform: template
+    name: "Bridge"
+    icon: mdi:access-point-network
+    lambda: return wmbus_repeater_node::status_text();
+    update_interval: 3s
+  - platform: template
+    name: "Last meters"
+    icon: mdi:counter
+    lambda: return wmbus_repeater_node::last_meters_text();
+    update_interval: 3s
+
+sensor:
+  - platform: template
+    name: "Link to bridge"
+    unit_of_measurement: dBm
+    device_class: signal_strength
+    lambda: return wmbus_repeater_node::link_rssi();
+    update_interval: 5s
+  # Delivered = published to MQTT by the bridge. A frame waits in the buffer and
+  # is retried; it is lost only when the buffer overflows.
+  - platform: template
+    name: "Frames delivered"
+    accuracy_decimals: 0
+    lambda: return wmbus_repeater_node::sent();
+    update_interval: 10s
+  - platform: template
+    name: "Buffered"
+    accuracy_decimals: 0
+    lambda: return wmbus_repeater_node::queued();
+    update_interval: 3s
+  - platform: template
+    name: "Buffer peak"
+    accuracy_decimals: 0
+    lambda: return wmbus_repeater_node::max_queued();
+    update_interval: 10s
+  - platform: template
+    name: "Buffer capacity"
+    accuracy_decimals: 0
+    lambda: return wmbus_repeater_node::capacity();
+    update_interval: 60s
+  - platform: template
+    name: "Frames lost (buffer full)"
+    accuracy_decimals: 0
+    lambda: return wmbus_repeater_node::dropped();
+    update_interval: 10s
+  - platform: template
+    name: "Send failures (retried)"
+    accuracy_decimals: 0
+    lambda: return wmbus_repeater_node::failed();
+    update_interval: 10s
+
+switch:
+  # Screenshots for a forum post: masks meter IDs in the log and in "Last meters".
+  # Transport is untouched. Key = UTC date; the clock comes from the bridge.
+  - platform: template
+    name: "Anonymize"
+    icon: mdi:incognito
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - lambda: esphome::wmbus_radio::set_log_anonymize(true);
+    turn_off_action:
+      - lambda: esphome::wmbus_radio::set_log_anonymize(false);

@@ -352,3 +352,39 @@ Poza raportem każde radio loguje te kontrole, których niepowodzenie jest
 - **LR1121** — `tcxo_voltage`, `tcxo_startup_ticks`, `rx_bandwidth` wobec
   wymaganego `2*fdev + bitrate`, `payload_length`, `rx_boosted` oraz etapy
   kalibracji przy znanym stanie przejściowym `HF_XOSC_START`.
+
+## Ukrywanie numerów liczników na zrzutach
+
+Do posta na forum albo zgłoszenia log może pokazywać zastępcze numery zamiast
+prawdziwych. Dopisz w YAML płytki przełącznik:
+
+```yaml
+switch:
+  - platform: template
+    name: "Anonimizacja"
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+    turn_on_action:
+      - lambda: esphome::wmbus_radio::set_log_anonymize(true);
+    turn_off_action:
+      - lambda: esphome::wmbus_radio::set_log_anonymize(false);
+```
+
+Włączasz, robisz zrzut, wyłączasz.
+
+- **Zmienia się tylko tekst logu:** `Odebrano dane … id:`, `★ [id:…]`,
+  `LICZNIK … id=`, `TARGET`, `FREQERR`, listy liczników w statystykach bufora.
+  Surowy hex uciętych i odrzuconych pakietów zastępuje `(ukryte: anonimizacja)`.
+  MQTT, dodatek, `on_frame` i wszystko, co jest przekazywane dalej, dostają
+  prawdziwe numery.
+- **Numer zastępczy:** każda cyfra ID plus odpowiadająca jej cyfra dzisiejszej
+  daty (UTC, `RRRRMMDD`), modulo 10; litery hex przesuwają się w obrębie `A`-`F`.
+  17.11.2026 `03528107` zmienia się w `23789214`. W danym dniu ten sam licznik
+  dostaje ten sam numer na każdej płytce, więc zrzuty z dwóch płytek da się
+  zestawić.
+- **Bez zegara** (brak `time:` i nikt go nie ustawił) numery pokazują się jako
+  `????????`, nigdy jako prawdziwe.
+- **To zasłona, nie szyfrowanie.** Metoda jest publiczna; kto zna dzień zrzutu,
+  odwróci ją. Chroni tylko przed wystawieniem prawdziwych numerów na widok.
+- Linie wypisane przed włączeniem przełącznika, np. raport konfiguracji przy
+  starcie z `highlight_meters`, się nie zmieniają.

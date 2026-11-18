@@ -4,6 +4,8 @@
 
 Publiczne przykłady są dla płytek SX1262, SX1276 i CC1101.
 
+[repeater-espnow/](repeater-espnow/README_PL.md): odbiornik przy licznikach bez sieci domowej, przekazujący ramki przez ESP-NOW do płytki-mostu, która publikuje je do MQTT. Pliki płytki dla każdej płytki z przykładów.
+
 Obsługa CC1101 jest dostępna, ale nadal eksperymentalna. Wymaga jawnego włączenia w YAML oraz poprawnego podłączenia GDO0/GDO2. Ten przykład jest przeznaczony do zastosowań zaawansowanych/testowych, a nie jako rekomendowana ścieżka dla zwykłych użytkowników.
 
 ## Model topiców

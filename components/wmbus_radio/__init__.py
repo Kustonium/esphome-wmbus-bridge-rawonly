@@ -23,7 +23,10 @@ _LOGGER = logging.getLogger(__name__)
 
 CODEOWNERS = ["@SzczepanLeon", "@kubasaw", "@Kustonium"]
 
-DEPENDENCIES = ["esp32", "spi", "mqtt"]
+# mqtt is NOT a hard dependency any more: repeater: true builds a radio front
+# end without an mqtt: block (frames leave through on_frame, e.g. ESP-NOW).
+# Every other config still needs mqtt:, enforced in _validate_mqtt_present.
+DEPENDENCIES = ["esp32", "spi"]
 
 # Single public component only.
 # Everything needed by the raw-only bridge lives inside wmbus_radio, so the user
@@ -61,6 +64,7 @@ CONF_TARGET_LOG = "target_log"
 CONF_PUBLISH_RADIO_RAW = "publish_radio_raw"
 CONF_PUBLISH_RSSI = "publish_rssi"
 CONF_FORWARD_METERS = "forward_meters"
+CONF_REPEATER = "repeater"
 
 # Per-topic MQTT QoS (0/1/2). Every default below matches the value that was
 # previously hardcoded, so an existing YAML with none of these set keeps
@@ -609,6 +613,11 @@ BASE_CONFIG_SCHEMA = (
             # Publish the measured RSSI of each forwarded meter frame to
             # wmbus/<topic_name>/rssi/<meter_id>. Disabled by default.
             cv.Optional(CONF_PUBLISH_RSSI, default=False): cv.boolean,
+            # Radio front end only: no MQTT at all (no telegram/rx/diag topics,
+            # no outbox, no outage statistics). Frames leave only through
+            # on_frame - e.g. a receiver at the meter that hands them over
+            # ESP-NOW to a bridge board with network. Lets the YAML drop mqtt:.
+            cv.Optional(CONF_REPEATER, default=False): cv.boolean,
             # Whitelist of meter IDs allowed on the RAW telegram topic. Accepts
             # either an explicit list, or `true` to reuse highlight_meters so the
             # same IDs are not written twice. Empty (default) forwards every
@@ -817,7 +826,7 @@ _REPORT_RADIO = {
                CONF_LR1121_SYNC_PROBE, CONF_LR1121_DRAIN, CONF_LR1121_AUTO_LENGTH),
 }
 
-_REPORT_OUTPUT = (CONF_TOPIC_NAME, CONF_TELEGRAM_TOPIC, CONF_PUBLISH_RSSI,
+_REPORT_OUTPUT = (CONF_REPEATER, CONF_TOPIC_NAME, CONF_TELEGRAM_TOPIC, CONF_PUBLISH_RSSI,
                   CONF_FORWARD_METERS, CONF_TARGET_METER_ID, CONF_PUBLISH_RADIO_RAW,
                   CONF_TELEGRAM_QOS, CONF_RSSI_QOS, CONF_HEALTH_QOS, CONF_DIAGNOSTIC_QOS,
                   CONF_RX_QOS, CONF_MQTT_BUFFER_SIZE, CONF_BUFFER_PRIORITY)
@@ -1124,10 +1133,27 @@ def _validate_log_language_consistent(config):
     return config
 
 
+def _validate_mqtt_present(config):
+    # Since repeater: true exists, mqtt is no longer in DEPENDENCIES - so the
+    # "you forgot mqtt:" error ESPHome used to give for free has to be given
+    # here, for every instance that actually publishes.
+    full = fv.full_config.get()
+    if "mqtt" in full:
+        return config
+    for c in full.get("wmbus_radio", []):
+        if isinstance(c, dict) and not c.get(CONF_REPEATER, False):
+            raise cv.Invalid(
+                "wmbus_radio needs an mqtt: block (or repeater: true for a board that only "
+                "passes frames on through on_frame) / wmbus_radio wymaga sekcji mqtt: "
+                "(albo repeater: true dla plytki, ktora tylko przekazuje ramki przez on_frame)."
+            )
+    return config
+
+
 # Final validation: the target framework is only reliably known once every
 # component has been validated, so this cannot live in CONFIG_SCHEMA. The
 # language check needs every instance, which is also only known here.
-FINAL_VALIDATE_SCHEMA = cv.All(_validate_framework, _validate_log_language_consistent)
+FINAL_VALIDATE_SCHEMA = cv.All(_validate_framework, _validate_log_language_consistent, _validate_mqtt_present)
 
 
 async def to_code(config):
@@ -1417,6 +1443,7 @@ async def to_code(config):
     cg.add(var.set_target_log(config.get(CONF_TARGET_LOG, True)))
     cg.add(var.set_publish_radio_raw(config.get(CONF_PUBLISH_RADIO_RAW, False)))
     cg.add(var.set_publish_rssi(config.get(CONF_PUBLISH_RSSI, False)))
+    cg.add(var.set_repeater(config[CONF_REPEATER]))
 
     cg.add(var.set_telegram_qos(config[CONF_TELEGRAM_QOS]))
     cg.add(var.set_rssi_qos(config[CONF_RSSI_QOS]))

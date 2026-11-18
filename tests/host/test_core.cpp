@@ -152,6 +152,16 @@ static std::vector<uint8_t> encode_s1_manchester(const std::vector<uint8_t> &dec
   return out;
 }
 
+static std::vector<uint8_t> prepend_bits(const std::vector<uint8_t> &raw, size_t prefix_bits) {
+  std::vector<uint8_t> out((prefix_bits + raw.size() * 8U + 7U) / 8U, 0);
+  for (size_t bit = 0; bit < raw.size() * 8U; bit++) {
+    const uint8_t value = (uint8_t) ((raw[bit >> 3U] >> (7U - (bit & 7U))) & 1U);
+    const size_t shifted = prefix_bits + bit;
+    out[shifted >> 3U] |= (uint8_t) (value << (7U - (shifted & 7U)));
+  }
+  return out;
+}
+
 static void make_manchester_erasure(std::vector<uint8_t> &raw, size_t decoded_bit) {
   const size_t first_chip = decoded_bit * 2U;
   for (size_t chip = first_chip; chip <= first_chip + 1U; chip++)
@@ -344,6 +354,19 @@ static void test_packet_s1_frame_conversion() {
   check(frame->rssi() == -83, "S1 frame RSSI is retained");
   check(frame->format() == "A", "S1 frame format A is detected");
   check(frame->as_raw() == base_frame_body(), "S1 frame strips Manchester coding and DLL CRC");
+}
+
+static void test_packet_s1_shifted_fifo_start_conversion() {
+  const auto encoded = encode_s1_manchester(format_a_with_crc());
+  for (size_t bit_offset = 1; bit_offset < 8; bit_offset++) {
+    const auto raw = prepend_bits(encoded, bit_offset);
+    Packet packet = make_packet(raw, -82, LinkMode::S1);
+
+    auto frame = packet.convert_to_frame();
+    check(frame.has_value(), "S1 frame is found at every bit offset in the first FIFO byte");
+    if (frame)
+      check(frame->as_raw() == base_frame_body(), "shifted S1 FIFO start restores exact frame");
+  }
 }
 
 static void test_packet_t1_bad_crc_is_rejected() {
@@ -615,6 +638,7 @@ int main() {
   test_packet_t1_frame_conversion();
   test_packet_c1_frame_conversion();
   test_packet_s1_frame_conversion();
+  test_packet_s1_shifted_fifo_start_conversion();
   test_packet_t1_bad_crc_is_rejected();
   test_packet_t1_truncated_is_rejected();
   test_packet_c1_unknown_preamble_is_rejected();

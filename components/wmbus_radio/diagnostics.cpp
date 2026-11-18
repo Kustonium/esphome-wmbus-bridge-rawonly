@@ -13,7 +13,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
-#include "esphome/components/mqtt/mqtt_client.h"
+#include "mqtt_access.h"
 
 #include <algorithm>
 #include <cstring>
@@ -54,7 +54,7 @@ void Radio::publish_lr_pipeline_diag_(Packet *packet, bool valid) {
       ++this->lr_pipeline_length_;
     else ++this->lr_pipeline_other_;
   }
-  auto *client = mqtt::global_mqtt_client;
+  auto *client = mqtt_client();
   // `dev` only since 2026-09-28 (was every mode from `low`): LR1121 bench
   // instrumentation. The counters above still run, they are cheap.
   if (!this->diag_verbose_ || this->diag_topic_.empty() || client == nullptr || !client->is_connected()) return;
@@ -143,7 +143,7 @@ bool Radio::should_publish_packet_event_(const Packet *packet) const {
 
 void Radio::publish_rx_path_event_(const char *event, const char *stage, const char *detail, int rssi) {
   if (!this->diag_publish_rx_path_events_) return;
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected() || this->diag_topic_.empty()) return;
 
   const uint32_t now_ms = (uint32_t) esphome::millis();
@@ -167,7 +167,7 @@ void Radio::publish_rx_path_event_(const char *event, const char *stage, const c
 // Publish a suggestion event, throttled to once per hour per code.
 // Suggestions are not retained — they are one-time actionable hints.
 // yaml_snippet is a ready-to-copy YAML fragment the user can paste directly.
-static void publish_suggestion_(esphome::mqtt::MQTTClientComponent *mqtt,
+static void publish_suggestion_(MqttClient *mqtt,
                                 const std::string &topic,
                                 std::unordered_map<std::string, uint32_t> &last_ms,
                                 uint32_t now_ms,
@@ -262,7 +262,7 @@ bool Radio::front_end_hint_(const RxPathCounters &rp, const StrongestFrame &sf, 
 void Radio::maybe_publish_suggestion_(uint32_t now_ms) {
   if (!this->diag_publish_suggestion_) return;
   if (this->diag_topic_.empty()) return;
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   const std::string topic = this->diag_suggestion_topic_();
@@ -425,7 +425,7 @@ void Radio::maybe_publish_health_(uint32_t now_ms) {
   // loop of MQTT connect, not after a full interval.
   if (this->last_health_ms_ != 0 && (now_ms - this->last_health_ms_) < HEALTH_INTERVAL_MS_) return;
 
-  auto *mqtt = mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;  // retry next loop; do not advance timer
   this->last_health_ms_ = now_ms;
 
@@ -498,7 +498,7 @@ void Radio::maybe_publish_diag_summary_(uint32_t now_ms) {
   if (elapsed < this->diag_summary_interval_ms_) return;
   this->last_diag_summary_ms_ = now_ms;
 
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   const char *listen_mode = (this->radio != nullptr)
@@ -1003,7 +1003,7 @@ void Radio::maybe_publish_diag_15min_summary_(uint32_t now_ms) {
   if (elapsed < this->DIAG_15MIN_INTERVAL_MS_) return;
   this->last_diag_15min_summary_ms_ = now_ms;
 
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   const char *listen_mode = (this->radio != nullptr)
@@ -1497,7 +1497,7 @@ void Radio::maybe_publish_diag_60min_summary_(uint32_t now_ms) {
   if (elapsed < this->DIAG_60MIN_INTERVAL_MS_) return;
   this->last_diag_60min_summary_ms_ = now_ms;
 
-  auto *mqtt = esphome::mqtt::global_mqtt_client;
+  auto *mqtt = mqtt_client();
   if (mqtt == nullptr || !mqtt->is_connected()) return;
 
   const char *listen_mode = (this->radio != nullptr)

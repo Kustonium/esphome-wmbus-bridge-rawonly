@@ -41,24 +41,32 @@ Inside the `lambda:` block the variable `frame` is a pointer to the received fra
 | `frame->link_mode()` | `LinkMode` | `LISTEN_MODE_T1`, `LISTEN_MODE_C1`, `LISTEN_MODE_S1` |
 | `frame->format()` | `std::string` | Frame format string, e.g. `"T1 A"` |
 | `frame->try_get_meter_id(uint32_t &id)` | `bool` | Extract meter ID from the frame; returns `false` if extraction fails |
-| `frame->mark_as_handled()` | `void` | Suppress the built-in MQTT publish for this frame |
+| `frame->mark_as_handled()` | `void` | Count the frame as handled (the log says "handled by N handlers"); does **not** stop the MQTT publish |
 
 ## mark_as_handled
 
-Setting `mark_as_handled: true` in the trigger block tells the component to skip the
-built-in MQTT publish after your `on_frame` lambda runs. Use this when your lambda
-handles all forwarding and you do not want the frame published twice.
+`mark_as_handled: true` in the trigger block only counts the frame as handled: the
+log line after the triggers reads "Telegram handled by N handlers" instead of
+"not handled by any handler". It does **not** suppress the built-in MQTT publish -
+that publish runs before the `on_frame` triggers, so by the time your lambda sees
+the frame it has already gone out.
+
+To stop the built-in publish:
+
+- `repeater: true` - no MQTT at all; frames leave only through `on_frame` (a board
+  that hands them on, e.g. over ESP-NOW, and may have no `mqtt:` block);
+- `forward_meters:` - publish only the listed meters.
 
 ```yaml
 on_frame:
   - mark_as_handled: true
     then:
       - lambda: |-
-          // custom forwarding — built-in MQTT publish is suppressed
+          // the frame is counted as handled; MQTT publish already ran
           std::string hex = frame->as_hex();
 ```
 
-Without `mark_as_handled: true` the built-in MQTT publish still runs after your lambda.
+Earlier versions of this page said `mark_as_handled` suppresses the MQTT publish. The code never did that; the page was wrong (corrected 2026-11-17).
 
 ## Filtering by meter ID
 

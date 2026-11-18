@@ -362,8 +362,10 @@ enters `STDBY_XOSC`; if the calibration lines afterwards read
 Frames arriving but truncated: raise `payload_length` — NES frames are 245 raw
 bytes, so `255` is the working value.
 
-For S1 specifically, remember the ranking is different from T1: `SX1276` is the
-radio proven at the S1 noise floor. See [`CHIP_SELECTION.md`](CHIP_SELECTION.md).
+For S1 specifically: on a clean signal `LR1121`, `SX1276` and `SX1262` are within
+about 1 dB, so weak S1 reception is mostly the antenna and its place. On real
+meters `SX1276` still catches more because it tolerates off-spec transmitters;
+`CC1101` is about 5 dB weaker. See [`CHIP_SELECTION.md`](CHIP_SELECTION.md#s1-is-a-separate-question).
 
 ## 17. The board reboots every 15 minutes
 
