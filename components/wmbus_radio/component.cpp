@@ -182,7 +182,11 @@ std::string Radio::forward_whitelist_summary_() const {
   const size_t bcd_n = this->forward_meter_ids_.size();
   const size_t raw_n = this->forward_meter_raw_ids_.size();
   if (bcd_n == 0 && raw_n == 0)
-    return LOG_TR("disabled - every decoded frame is published", "wylaczona - publikowana jest kazda ramka");
+    return this->forward_meters_runtime_modified_
+               ? LOG_TR("disabled (modified at runtime) - every decoded frame is published",
+                        "wylaczona (zmieniono w trakcie pracy) - publikowana jest kazda ramka")
+               : LOG_TR("disabled - every decoded frame is published",
+                        "wylaczona - publikowana jest kazda ramka");
 
   // List the parsed IDs, not just the count: a mistyped entry is only obvious
   // when the resulting values are visible. Each form is printed the way the log
@@ -212,8 +216,10 @@ std::string Radio::forward_whitelist_summary_() const {
   if (bcd_n + raw_n > log_limit)
     ids += ", ... (+" + std::to_string(bcd_n + raw_n - log_limit) + ")";
 
-  return std::to_string(bcd_n + raw_n) + " ids" +
-         (this->forward_meters_inherited_ ? " (from highlight_meters)" : "") + ": " + ids;
+  std::string suffix = this->forward_meters_inherited_ ? " (from highlight_meters)" : "";
+  if (this->forward_meters_runtime_modified_) suffix += " (modified at runtime)";
+
+  return std::to_string(bcd_n + raw_n) + " ids" + suffix + ": " + ids;
 }
 
 static bool radio_supports_preamble_retry_(const RadioTransceiver *radio) {
@@ -235,6 +241,22 @@ static inline uint8_t rssi_abort_bucket_(int rssi_dbm) {
   if (rssi_dbm > -90)  return 2;
   if (rssi_dbm > -100) return 3;
   return 4;
+}
+
+void Radio::set_forward_meters(const std::string &csv) {
+  this->forward_meters_csv_ = csv;
+  this->forward_meters_inherited_ = false;
+  this->forward_meters_runtime_modified_ = true;
+  this->forward_meter_ids_.clear();
+  this->forward_meter_raw_ids_.clear();
+  parse_meter_id_csv_(this->forward_meters_csv_, this->forward_meter_ids_,
+                      this->forward_meter_raw_ids_, "forward_meters");
+  if (this->setup_done_) {
+    this->recompute_buffer_quotas_();
+  }
+  ESP_LOGI(TAG, LOG_TR("Forward whitelist updated at runtime: %s",
+                       "Zaktualizowano whiteliste przekazywania: %s"),
+           this->forward_whitelist_summary_().c_str());
 }
 
 void Radio::setup() {
@@ -333,54 +355,6 @@ void Radio::setup() {
   // number entity).
   this->recompute_buffer_quotas_();
   this->setup_done_ = true;
-
-  // Dynamic MQTT whitelist control:
-  // Subscribe to <prefix>/whitelist/set and <prefix>/whitelist/get
-  if (mqtt::global_mqtt_client != nullptr) {
-    // Derive base prefix from telegram_topic_ (e.g. "wmbus/wmbus-gateway/telegram" -> "wmbus/wmbus-gateway")
-    std::string base_topic = "wmbus/" + App.get_name();
-    size_t slash_pos = this->telegram_topic_.rfind('/');
-    if (slash_pos != std::string::npos && slash_pos > 0) {
-      base_topic = this->telegram_topic_.substr(0, slash_pos);
-    }
-    const std::string set_topic = base_topic + "/whitelist/set";
-    const std::string get_topic = base_topic + "/whitelist/get";
-    const std::string active_topic = base_topic + "/whitelist/active";
-
-    auto publish_active_whitelist = [this, active_topic]() {
-      if (mqtt::global_mqtt_client != nullptr && mqtt::global_mqtt_client->is_connected()) {
-        std::string status = this->forward_whitelist_summary_();
-        mqtt::global_mqtt_client->publish(active_topic, status, 0, true);
-      }
-    };
-
-    mqtt::global_mqtt_client->subscribe(
-        set_topic,
-        [this, publish_active_whitelist](const std::string &topic, const std::string &payload) {
-          std::string csv = payload;
-          if (csv == "CLEAR" || csv == "clear" || csv == "NONE" || csv == "none") {
-            csv.clear();
-          }
-          this->forward_meters_csv_ = csv;
-          this->forward_meters_inherited_ = false;
-          this->forward_meter_ids_.clear();
-          this->forward_meter_raw_ids_.clear();
-          parse_meter_id_csv_(this->forward_meters_csv_, this->forward_meter_ids_,
-                              this->forward_meter_raw_ids_, "forward_meters");
-          this->recompute_buffer_quotas_();
-          ESP_LOGI(TAG, "Dynamic MQTT whitelist updated: %s",
-                   this->forward_whitelist_summary_().c_str());
-          publish_active_whitelist();
-        },
-        0);
-
-    mqtt::global_mqtt_client->subscribe(
-        get_topic,
-        [publish_active_whitelist](const std::string &topic, const std::string &payload) {
-          publish_active_whitelist();
-        },
-        0);
-  }
 
   if (!this->mqtt_outbox_meter_quotas_.empty()) {
     std::string quota_list;

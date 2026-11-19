@@ -145,6 +145,9 @@ public:
   // provided as a CSV string in YAML (list is joined in python). An empty list
   // forwards every decoded frame, which is the pre-existing behaviour.
   void set_forward_meters_csv(const std::string &csv) { this->forward_meters_csv_ = csv; }
+  // Runtime setter for ESPHome lambdas (e.g. mqtt: on_message: id(radio).set_forward_meters(x);).
+  // Empty string disables filtering and forwards all decoded frames.
+  void set_forward_meters(const std::string &csv);
   // True when the list was inherited from highlight_meters (forward_meters: true).
   // Only affects logging, so a later edit to highlight_meters that silently changes
   // what gets published is traceable in the boot log.
@@ -558,6 +561,7 @@ protected:
   std::vector<uint32_t> forward_meter_ids_{};
   std::vector<uint32_t> forward_meter_raw_ids_{};
   bool forward_meters_inherited_{false};
+  bool forward_meters_runtime_modified_{false};
 
   // Highlight configuration
   std::string highlight_meters_csv_{};
