@@ -26,6 +26,12 @@
 // 65535 -> 1 continues as 65536+ (epoch), and a node restart gets a NEW boot_id
 // (a new series, not "out of order"). Committed only after a successful publish.
 //
+// Add-on view of the node: the node's health pulse (HELLO) is published as
+// wmbus/<node>/health, its configuration report and settings (0x13, in parts) as
+// retained wmbus/<node>/diag/config and .../diag/settings, and the add-on's
+// wmbus/<node>/set/<key> commands are passed to the node (0x14). So the add-on
+// shows and switches the node like a board with its own MQTT.
+//
 // Log language: Polish when built with -DWMBUS_LOG_LANG_PL (see the bridge YAML),
 // English otherwise.
 
@@ -41,6 +47,7 @@
 
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
+#include "esphome/core/application.h"
 #include "esphome/components/espnow/espnow_component.h"
 #include "esphome/components/mqtt/mqtt_client.h"
 
@@ -90,10 +97,39 @@ struct Board {
   uint32_t a_fail{0};      // failures on the node (retries, probes)
   uint32_t a_dropped{0};   // frames lost on the node (buffer full / too long)
   uint16_t a_queue{0};     // frames waiting in the node buffer
+  // node health pulse (newer node): published by the bridge as <name>/health
+  bool has_health{false};
+  uint32_t hello_ms{0};      // when the last HELLO with a pulse arrived
+  uint32_t a_uptime_s{0};
+  uint32_t a_rx_total{0};
+  int32_t a_rx_age_s{-1};    // -1 = the node has not received a frame yet
+  int8_t a_rssi{1};          // 1 = none
+  std::string a_chip;
+  std::string a_mode;
+};
+
+// One JSON document from the node (config or settings), joined from 0x13 parts.
+struct Blob {
+  uint8_t version{0};
+  uint8_t parts{0};
+  uint32_t have{0};          // bit per part received (up to 32 parts)
+  std::string part[32];
+  bool pending{false};       // complete, waiting for MQTT to publish it
+  std::string json;
+};
+
+// A set/<key> command waiting to be passed to the node.
+struct PendingSet {
+  std::string key;
+  std::string value;
+  uint8_t tries{0};
 };
 
 struct Ctx {
   esphome::espnow::ESPNowComponent *now{nullptr};
+  Blob blob[2];                 // [0] config, [1] settings - of the accepted node
+  std::string subscribed;       // node name whose set/+ topic is subscribed
+  PendingSet pending_set;
   uint64_t *accepted{nullptr};  // 0 = none
   uint32_t boot_id{0};
   std::vector<Board> boards;    // every node heard (candidates + accepted)
@@ -149,6 +185,9 @@ static bool is_accepted(const uint8_t *mac) { return g.accepted && *g.accepted =
 static void accept(const uint8_t *mac) {
   *g.accepted = mac64(mac);
   g.last_seq = -1;
+  g.blob[0] = Blob();  // documents of a previous node do not belong to this one
+  g.blob[1] = Blob();
+  g.pending_set = PendingSet();
   ESP_LOGI(TAG, RPT_TR("node ACCEPTED %s", "PRZYJETA plytka %s"), mac_str(mac).c_str());
 }
 
@@ -183,6 +222,11 @@ static void send_ack(const uint8_t *to) {
   p.push_back((u >> 24) & 0xFF);
   // "Ready": the bridge has MQTT and can publish. 0 -> the node keeps frames buffered.
   p.push_back(mqtt_ready() ? 1 : 0);
+  // Largest packet this bridge takes (espnow max_payload_size): the node does not send
+  // a frame that would not fit, so a long frame cannot block its buffer.
+  const uint16_t mx = (uint16_t) esphome::espnow::ESPNOW_MAX_DATA_LEN;
+  p.push_back(mx & 0xFF);
+  p.push_back(mx >> 8);
   g.now->send(to, p);  // auto_add_peer adds the node as a peer
 }
 
@@ -192,7 +236,11 @@ inline void setup(esphome::espnow::ESPNowComponent *now, uint64_t *accepted_glob
   g.boot_id = esp_random();
 }
 
-static void handle_hello(const uint8_t *src, int rssi, const uint8_t *data, uint8_t size) {
+// Defined further down (add-on settings through the bridge).
+static void ensure_set_subscription(const Board &b);
+static void send_set(const uint8_t *to);
+
+static void handle_hello(const uint8_t *src, int rssi, const uint8_t *data, uint16_t size) {
   Board &b = touch(src, rssi);
   if (size >= 3) {
     const uint8_t n = data[2];
@@ -203,13 +251,41 @@ static void handle_hello(const uint8_t *src, int rssi, const uint8_t *data, uint
       b.a_dropped = st[4] | (st[5] << 8) | (st[6] << 16) | ((uint32_t) st[7] << 24);
       b.a_queue = st[8] | (st[9] << 8);
       b.has_stats = true;
+      // pulse (optional): uptime u32, rx u32, age of the last frame u32 (0xFFFFFFFF = none),
+      // RSSI i8, [len][chip], [len][listen mode]
+      size_t o = 3 + n + 10;
+      if (o + 13 + 2 <= size) {
+        auto rd32 = [&](size_t i) {
+          return (uint32_t) data[i] | ((uint32_t) data[i + 1] << 8) | ((uint32_t) data[i + 2] << 16) |
+                 ((uint32_t) data[i + 3] << 24);
+        };
+        b.a_uptime_s = rd32(o);
+        b.a_rx_total = rd32(o + 4);
+        const uint32_t age = rd32(o + 8);
+        b.a_rx_age_s = age == 0xFFFFFFFFu ? -1 : (int32_t) age;
+        b.a_rssi = (int8_t) data[o + 12];
+        o += 13;
+        const uint8_t cl = data[o];
+        if (o + 1 + cl + 1 <= size) {
+          b.a_chip.assign((const char *) data + o + 1, cl);
+          o += 1 + cl;
+          const uint8_t ml = data[o];
+          if (o + 1 + ml <= size) b.a_mode.assign((const char *) data + o + 1, ml);
+        }
+        b.has_health = true;
+        b.hello_ms = esphome::millis();
+      }
     }
   }
   if (*g.accepted == 0) accept(src);
   send_ack(src);
+  if (is_accepted(src)) {
+    ensure_set_subscription(b);
+    if (!g.pending_set.key.empty()) send_set(src);
+  }
 }
 
-static void handle_data(const uint8_t *src, int rssi, const uint8_t *data, uint8_t size) {
+static void handle_data(const uint8_t *src, int rssi, const uint8_t *data, uint16_t size) {
   // 0x01: [type][seq2][rssi][mode][frame]                  (older, no time)
   // 0x02: [type][seq2][rssi][mode][UTC s u32][ms u16][frame]  (reception time on the node)
   const bool timed = data[0] == 0x02;
@@ -343,8 +419,98 @@ static void handle_data(const uint8_t *src, int rssi, const uint8_t *data, uint8
            (int) frssi, rssi, (unsigned) flen);
 }
 
+static void publish_blob(const Board &b, int kind) {
+  Blob &x = g.blob[kind];
+  if (!x.pending) return;
+  auto *m = esphome::mqtt::global_mqtt_client;
+  if (m == nullptr || !m->is_connected() || b.name.empty()) return;
+  const std::string topic = "wmbus/" + b.name + (kind == 0 ? "/diag/config" : "/diag/settings");
+  if (m->publish(topic, x.json, 0, true)) {
+    x.pending = false;
+    ESP_LOGI(TAG, RPT_TR("%s: %s published for the node (%u B)", "%s: %s opublikowane za plytke (%u B)"), b.name.c_str(),
+             kind == 0 ? "diag/config" : "diag/settings", (unsigned) x.json.size());
+  }
+}
+
+static void handle_blob(const uint8_t *src, int rssi, const uint8_t *data, uint16_t size) {
+  // [0x13][kind 1/2][version][part][parts][bytes]
+  if (size < 6) {
+    g.n_bad++;
+    return;
+  }
+  Board &b = touch(src, rssi);
+  if (!is_accepted(src)) return;
+  const uint8_t kind = data[1], version = data[2], part = data[3], parts = data[4];
+  if (kind < 1 || kind > 2 || parts == 0 || parts > 32 || part >= parts) {
+    g.n_bad++;
+    return;
+  }
+  Blob &x = g.blob[kind - 1];
+  if (x.version != version || x.parts != parts) {  // a new document: start over
+    x.version = version;
+    x.parts = parts;
+    x.have = 0;
+  }
+  x.part[part].assign((const char *) data + 5, size - 5);
+  x.have |= 1u << part;
+  const uint32_t all = parts == 32 ? 0xFFFFFFFFu : ((1u << parts) - 1);
+  if (x.have != all) return;
+  x.json.clear();
+  for (uint8_t i = 0; i < parts; i++) x.json += x.part[i];
+  x.have = 0;
+  x.pending = true;
+  if (kind == 2) g.pending_set.tries = 0;  // new settings from the node: the last command landed
+  if (kind == 2) g.pending_set.key.clear();
+  publish_blob(b, kind - 1);
+}
+
+static void send_set(const uint8_t *to) {
+  if (g.now == nullptr || g.pending_set.key.empty()) return;
+  if (g.pending_set.tries >= 3) {
+    g.pending_set.key.clear();
+    return;
+  }
+  const std::string &k = g.pending_set.key, &v = g.pending_set.value;
+  std::vector<uint8_t> p;
+  p.push_back(0x14);
+  p.push_back((uint8_t) k.size());
+  p.insert(p.end(), k.begin(), k.end());
+  p.push_back((uint8_t) v.size());
+  p.insert(p.end(), v.begin(), v.end());
+  g.now->send(to, p);
+  g.pending_set.tries++;
+}
+
+// Subscribe wmbus/<node>/set/+ for the accepted node (once per name; the MQTT
+// client renews it after a reconnect). A command goes to the node at once and
+// again with its next HELLOs (up to 3 sends) until the node reports settings again.
+static void ensure_set_subscription(const Board &b) {
+  auto *m = esphome::mqtt::global_mqtt_client;
+  if (m == nullptr || !m->is_connected() || b.name.empty() || g.subscribed == b.name) return;
+  if (!g.subscribed.empty()) m->unsubscribe("wmbus/" + g.subscribed + "/set/+");
+  g.subscribed = b.name;
+  const std::string prefix = "wmbus/" + b.name + "/set/";
+  m->subscribe(
+      prefix + "+",
+      [prefix](const std::string &topic, const std::string &payload) {
+        if (topic.size() <= prefix.size() || topic.compare(0, prefix.size(), prefix) != 0) return;
+        const std::string key = topic.substr(prefix.size());
+        if (key.size() > 32 || payload.size() > 200) return;
+        g.pending_set.key = key;
+        g.pending_set.value = payload;
+        g.pending_set.tries = 0;
+        ESP_LOGI(TAG, RPT_TR("set/%s = '%s' from the add-on -> node", "set/%s = '%s' z dodatku -> plytka"), key.c_str(),
+                 payload.c_str());
+        for (auto &n : g.boards)
+          if (is_accepted(n.mac)) send_set(n.mac);
+      },
+      1);
+  ESP_LOGI(TAG, RPT_TR("listening for add-on settings on %s+", "nasluch ustawien z dodatku na %s+"), prefix.c_str());
+}
+
 // Called from on_receive and on_broadcast of the espnow component.
-inline void on_packet(const esphome::espnow::ESPNowRecvInfo &info, const uint8_t *data, uint8_t size) {
+// size is uint16_t: with espnow max_payload_size > 250 (ESP-NOW v2) a packet is longer than 255 B.
+inline void on_packet(const esphome::espnow::ESPNowRecvInfo &info, const uint8_t *data, uint16_t size) {
   if (size < 1) return;
   const int rssi = info.rx_ctrl != nullptr ? info.rx_ctrl->rssi : 0;
   switch (data[0]) {
@@ -354,6 +520,9 @@ inline void on_packet(const esphome::espnow::ESPNowRecvInfo &info, const uint8_t
     case 0x01:
     case 0x02:
       handle_data(info.src_addr, rssi, data, size);
+      break;
+    case 0x13:
+      handle_blob(info.src_addr, rssi, data, size);
       break;
     default:
       g.n_bad++;
@@ -416,6 +585,35 @@ inline std::string candidates_text() {
     s += t;
   }
   return s.empty() ? RPT_TR("none", "brak") : s;
+}
+
+// The accepted node's pulse as wmbus/<name>/health - same fields as wmbus_radio
+// (uptime_s, rx_total, sec_since_last_rx, rssi, chip, listen_mode) plus
+// "via":"espnow", the bridge name and the link RSSI, so the add-on knows the
+// board is behind a bridge (and has no settings it could change). Call every
+// 60 s; nothing is published when the last pulse is older than 60 s (the node is
+// silent - the add-on then sees the pulse stop).
+inline void publish_health() {
+  auto *m = esphome::mqtt::global_mqtt_client;
+  if (m == nullptr || !m->is_connected()) return;
+  for (auto &b : g.boards) {
+    if (is_accepted(b.mac)) {
+      publish_blob(b, 0);  // a document that arrived while MQTT was down
+      publish_blob(b, 1);
+    }
+    if (!is_accepted(b.mac) || !b.has_health || b.name.empty()) continue;
+    const uint32_t age_ms = esphome::millis() - b.hello_ms;
+    if (age_ms > 60000) continue;
+    const uint32_t age_s = age_ms / 1000U;
+    const long since = b.a_rx_age_s < 0 ? -1L : (long) (b.a_rx_age_s + age_s);
+    char payload[320];
+    snprintf(payload, sizeof(payload),
+             "{\"uptime_s\":%lu,\"rx_total\":%lu,\"sec_since_last_rx\":%ld,\"rssi\":%d,"
+             "\"chip\":\"%s\",\"listen_mode\":\"%s\",\"via\":\"espnow\",\"bridge\":\"%s\",\"link_rssi\":%d}",
+             (unsigned long) (b.a_uptime_s + age_s), (unsigned long) b.a_rx_total, since, (int) b.a_rssi,
+             b.a_chip.c_str(), b.a_mode.c_str(), esphome::App.get_name().c_str(), b.rssi);
+    m->publish("wmbus/" + b.name + "/health", std::string(payload), 0, false);
+  }
 }
 
 inline std::string link_json_and_reset() {

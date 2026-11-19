@@ -44,6 +44,16 @@ enum class SX1276BusyEtherMode : uint8_t { NORMAL = 0, AGGRESSIVE = 1, ADAPTIVE 
 class Radio : public Component {
 public:
   void set_radio(RadioTransceiver *radio) { this->radio = radio; };
+
+  // For a board without MQTT (repeater: true) whose frames go out another way,
+  // e.g. the ESP-NOW repeater example: the same JSON this board publishes on
+  // <diag>/config and <diag>/settings when it has MQTT, and the entry point of
+  // <topic>/set/<key>. The transport carries them; the component stays the same.
+  // remote_config_json() is empty until the configuration report exists (a few
+  // seconds after boot).
+  std::string remote_config_json();
+  std::string remote_settings_json();
+  void apply_remote_setting(const std::string &key, const std::string &payload);
   void set_diag_topic(const std::string &topic) { this->diag_topic_ = topic; }
 
   // Always-on radio health pulse + ESP-side meter flags (independent of
@@ -151,6 +161,12 @@ public:
   // provided as a CSV string in YAML (list is joined in python). An empty list
   // forwards every decoded frame, which is the pre-existing behaviour.
   void set_forward_meters_csv(const std::string &csv) { this->forward_meters_csv_ = csv; }
+  // Replace the forward_meters list while running, for a lambda in the user's own
+  // YAML (e.g. mqtt: on_message: -> id(radio).set_forward_meters(x);). Empty
+  // string = forward every decoded frame. The component has no topic of its own
+  // for this on purpose; the change is logged and shown as CHANGED at runtime in
+  // <diag>/config, so a board filtered this way is never filtered silently.
+  void set_forward_meters(const std::string &csv);
   // True when the list was inherited from highlight_meters (forward_meters: true).
   // Only affects logging, so a later edit to highlight_meters that silently changes
   // what gets published is traceable in the boot log.
@@ -570,6 +586,8 @@ protected:
   std::vector<uint32_t> forward_meter_ids_{};
   std::vector<uint32_t> forward_meter_raw_ids_{};
   bool forward_meters_inherited_{false};
+  bool forward_meters_runtime_modified_{false};  // set_forward_meters() was called
+  std::string forward_meters_yaml_line_;           // the report line as YAML set it
 
   // Highlight configuration
   std::string highlight_meters_csv_{};
@@ -877,6 +895,8 @@ protected:
   // with it off they go to <topic_base>/diag/... so a board can still be
   // switched from the add-on (including switching diagnostics on).
   std::string settings_topic_(const char *leaf) const;
+  std::string config_json_();
+  std::string settings_json_();
   void publish_settings_();
   void on_set_listen_mode_(const std::string &payload);
   void on_set_radio_setting_(const std::string &key, const std::string &payload);
@@ -943,5 +963,10 @@ protected:
   std::string diag_mode_str_{"off"};
   std::string meter_stats_str_{"off"};
 };
+
+// The Radio instance (set in setup()); one per firmware. Lets code outside the
+// component (e.g. the ESP-NOW repeater example) reach remote_*() above.
+extern Radio *global_radio;
+
 } // namespace wmbus_radio
 } // namespace esphome

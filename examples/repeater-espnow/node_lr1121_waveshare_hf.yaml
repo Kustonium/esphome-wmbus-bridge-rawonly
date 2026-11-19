@@ -21,6 +21,8 @@
 substitutions:
   devicename: wmbus-lr1121
   friendly_name: "wMBus Bridge LR1121"
+  radio_chip: LR1121      # also shown in the add-on (health pulse)
+  radio_listen_mode: both
 
 packages:
   repeater_node: !include repeater_node_common.yaml
@@ -95,7 +97,7 @@ spi:
   mosi_pin: GPIO45
 
 wmbus_radio:
-  radio_type: LR1121
+  radio_type: ${radio_chip}
   lr1121_allow_experimental: true
   cs_pin: GPIO42
   reset_pin: GPIO39
@@ -103,7 +105,7 @@ wmbus_radio:
   irq_pin:
     number: GPIO38
     mode: input
-  listen_mode: both
+  listen_mode: ${radio_listen_mode}
   tcxo_voltage: "3.0v"
   tcxo_startup_ticks: 3000
   payload_length: 255

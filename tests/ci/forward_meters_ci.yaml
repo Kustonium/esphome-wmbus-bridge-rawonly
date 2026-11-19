@@ -52,6 +52,11 @@ mqtt:
   username: !secret mqtt_user
   password: !secret mqtt_password
   port: 1883
+  # set_forward_meters(): the runtime list, wired the way its docs show.
+  on_message:
+    - topic: wmbus/ci_explicit/whitelist/set
+      then:
+        - lambda: 'id(ci_explicit_radio).set_forward_meters(x);'
   # EN: no skip_cert_cn_check here: since ESPHome 2026.11 it switches TLS on.
   # PL: bez skip_cert_cn_check: od ESPHome 2026.11 ta opcja włącza TLS.
 
@@ -88,6 +93,7 @@ wmbus_radio:
 
   # Explicit whitelist, independent of highlight_meters.
   - topic_name: ci_explicit
+    id: ci_explicit_radio
     radio_type: SX1276
     cs_pin: GPIO2
     reset_pin: GPIO4

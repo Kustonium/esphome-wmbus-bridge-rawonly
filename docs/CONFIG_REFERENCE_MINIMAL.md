@@ -13,7 +13,7 @@
 | `diagnostic_mode` | `off` | public | `off`, `low`, `normal`, `debug`, `dev` |
 | `log_language` | `en` | public | language of the device log text: `en` or `pl`; only the chosen one is compiled in. MQTT payloads are not affected |
 | `highlight_meters` | empty | public | meter IDs for highlighting and statistics in `normal/debug`; **does not filter MQTT** |
-| `forward_meters` | empty | public | whitelist of IDs published on `wmbus/<topic_name>/telegram`; a list or `true` to use `highlight_meters`; empty forwards everything |
+| `forward_meters` | empty | public | whitelist of IDs published on `wmbus/<topic_name>/telegram`; a list or `true` to use `highlight_meters`; empty forwards everything. Advanced: your own lambda can replace it while running with `id(<wmbus_radio id>).set_forward_meters("id1,id2")` (empty string = all), e.g. from `mqtt: on_message:`; the change is logged and `<diag>/config` shows it as CHANGED at runtime |
 | `publish_rssi` | `false` | public | publish each meter's latest frame RSSI on `wmbus/<topic_name>/rssi/<meter_id>`; see below |
 | `repeater` | `false` | public | radio front end only: no MQTT at all (no topics, no buffer, no outage statistics), frames leave only through `on_frame` (e.g. ESP-NOW to a bridge board, ready setup in [`examples/repeater-espnow`](../examples/repeater-espnow/README.md)); the YAML may then omit `mqtt:` |
 | `receiver_task_stack_size` | `3072` | advanced | separate RX task stack size; range `2048..16384` |

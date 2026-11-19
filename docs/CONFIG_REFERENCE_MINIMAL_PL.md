@@ -13,7 +13,7 @@
 | `diagnostic_mode` | `off` | publiczna | `off`, `low`, `normal`, `debug`, `dev` |
 | `log_language` | `en` | publiczna | język komunikatów w logu urządzenia: `en` albo `pl`; do firmware trafia tylko wybrany. Nie wpływa na dane MQTT |
 | `highlight_meters` | puste | publiczna | ID liczników do wyróżnienia i statystyk w `normal/debug`; **nie filtruje MQTT** |
-| `forward_meters` | puste | publiczna | whitelista ID publikowanych na `wmbus/<topic_name>/telegram`; lista ID albo `true` = użyj `highlight_meters`; puste = wysyłaj wszystko |
+| `forward_meters` | puste | publiczna | whitelista ID publikowanych na `wmbus/<topic_name>/telegram`; lista ID albo `true` = użyj `highlight_meters`; puste = wysyłaj wszystko. Dla zaawansowanych: własna lambda może ją podmienić w trakcie pracy przez `id(<id wmbus_radio>).set_forward_meters("id1,id2")` (pusty tekst = wszystko), np. z `mqtt: on_message:`; zmiana trafia do logu, a `<diag>/config` pokazuje ją jako CHANGED at runtime |
 | `publish_rssi` | `false` | publiczna | publikuj RSSI ostatniej ramki każdego licznika na `wmbus/<topic_name>/rssi/<meter_id>`; patrz sekcja niżej |
 | `repeater` | `false` | publiczna | tylko odbiornik radiowy: bez MQTT w ogóle (bez tematów, bufora i statystyk awarii), ramki wychodzą tylko przez `on_frame` (np. ESP-NOW do płytki-mostu, gotowy układ w [`examples/repeater-espnow`](../examples/repeater-espnow/README_PL.md)); YAML może wtedy nie mieć `mqtt:` |
 | `receiver_task_stack_size` | `3072` | zaawansowana | stos osobnego taska RX, zakres `2048..16384` |

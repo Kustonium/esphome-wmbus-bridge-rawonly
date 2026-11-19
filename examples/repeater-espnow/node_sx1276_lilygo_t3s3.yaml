@@ -12,6 +12,8 @@
 substitutions:
   devicename: esphome-wmbus-lilygo-t3s3
   friendly_name: "wMBus Bridge LilyGO T3-S3"
+  radio_chip: SX1276      # also shown in the add-on (health pulse)
+  radio_listen_mode: t1
 
 packages:
   repeater_node: !include repeater_node_common.yaml
@@ -71,7 +73,7 @@ time:
     id: ha_time
 
 wmbus_radio:
-  radio_type: SX1276
+  radio_type: ${radio_chip}
   spi_id: spi_lora
   cs_pin: GPIO07
   reset_pin: GPIO08
@@ -80,7 +82,7 @@ wmbus_radio:
     mode:
       input: true
       pullup: true
-  listen_mode: t1
+  listen_mode: ${radio_listen_mode}
   listen_mode_filter_after_parse: false
   diagnostic_mode: normal
 

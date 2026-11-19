@@ -170,6 +170,8 @@ jobs:
           mqtt_user: "ci"
           mqtt_password: "ci"
           repeater_ap_password: "ci-build-password"
+          repeater_web_username: "ci"
+          repeater_web_password: "ci-build-password"
           EOF
           # Build the component from THIS checkout, not the published github repo.
           sed -i "s|github://Kustonium/esphome-wmbus-bridge-rawonly@main|{ type: local, path: ${GITHUB_WORKSPACE}/components }|" "$flat"

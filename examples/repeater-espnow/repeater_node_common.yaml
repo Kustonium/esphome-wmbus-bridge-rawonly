@@ -5,14 +5,24 @@
 # bridge (bridge_esp32c3.yaml), which publishes them to MQTT as this board.
 #
 # Needs in secrets.yaml:
-#   repeater_ap_password: "at least 8 characters"
+#   repeater_ap_password: "12+ characters"   # the hotspot (WPA2)
+#   repeater_web_username: "admin"
+#   repeater_web_password: "12+ characters"  # the status page AND the firmware upload
 #
 # IMPORTANT: after this firmware is on the board, Home Assistant / ESPHome on your
 # network can NOT update it any more (the board is not on your network). Updates:
 #   - phone/laptop connected to the hotspot -> http://192.168.4.1 -> OTA Update
 #     (file from ESPHome: Install -> Manual download -> OTA format), or
 #   - USB.
-# The hotspot password is the only protection of that page and of the upload field.
+# Two locks: the hotspot password (WPA2, encrypts the radio link) and the page
+# login (digest - the password is not sent in clear even over plain HTTP; it
+# also guards the firmware upload). ESPHome's web server has no HTTPS.
+# Lose the page password = update over USB.
+
+substitutions:
+  # Defaults; every node_*.yaml overrides them.
+  radio_chip: unknown
+  radio_listen_mode: unknown
 
 esphome:
   includes:
@@ -33,7 +43,9 @@ esphome:
             }
     - priority: -100
       then:
-        - lambda: wmbus_repeater_node::start("${devicename}", id(repeater_channel));
+        # radio_chip / radio_listen_mode: only for the health pulse the add-on shows
+        # (each node_*.yaml sets them and uses the same values in its wmbus_radio).
+        - lambda: wmbus_repeater_node::start("${devicename}", id(repeater_channel), "${radio_chip}", "${radio_listen_mode}");
 
 wifi:
   # Hotspot only - the node does not know the home network.
@@ -48,6 +60,10 @@ web_server:
   # Page built into the firmware: a phone on the hotspot has no internet, and
   # without this v3 waits for its script from oi.esphome.io.
   local: true
+  auth:
+    username: !secret repeater_web_username
+    password: !secret repeater_web_password
+    type: digest
 
 ota:
   # Firmware upload from http://192.168.4.1 - the only way to update the node
@@ -109,7 +125,7 @@ sensor:
     lambda: return wmbus_repeater_node::capacity();
     update_interval: 60s
   - platform: template
-    name: "Frames lost (buffer full)"
+    name: "Frames lost (buffer full / too long)"
     accuracy_decimals: 0
     lambda: return wmbus_repeater_node::dropped();
     update_interval: 10s

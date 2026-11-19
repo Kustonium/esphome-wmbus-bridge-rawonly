@@ -2,6 +2,23 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## `forward_meters` can be replaced at runtime from your own lambda
+
+- **New `set_forward_meters("id1,id2,...")`** - the idea and the implementation are the work of **Alexander Streit** ([@probutus](https://github.com/probutus), [PR #40](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/pull/40)); this release adds only the `<diag>/config` report of the change. For several boards fed from one meter list kept in wmbusmeters: wire it yourself, e.g. `mqtt: on_message:` with `id(radio).set_forward_meters(x);`. An empty string forwards every frame. The component has no topic or option for this on purpose; nothing changes unless you write the lambda.
+- The change is logged, and `<diag>/config` is published again with `forward_meters: … (CHANGED at runtime; YAML: …)`, so a board filtered this way is never filtered silently. The same list arriving again (a retained message after a reconnect) does nothing.
+
+---
+
+## ESP-NOW repeater (in progress): the add-on sees the node like a board
+
+- **If you use the example from 1.36:** add `repeater_web_username` and `repeater_web_password` to `secrets.yaml`, build the bridge with ESPHome 2026.11 or newer, and flash both boards, the bridge first. After this update the node page asks for its login; without that password the node can only be updated over USB.
+- **Health pulse through the bridge.** The node's uptime, frame count, RSSI, chip and listen mode reach the add-on as `wmbus/<node>/health` with `"via":"espnow"`: the node shows as alive, and its tile reads "behind ESP-NOW bridge <bridge> · link -70 dBm" instead of "older firmware".
+- **Configuration and settings through the bridge.** The node's configuration report and radio settings appear in the add-on; listen mode, RX gain and long packets can be changed there (the node stores the setting and restarts, as a board with MQTT does). `diagnostic_mode` and `publish_rssi` are not offered with `repeater: true`, since such a board has no MQTT. In the component: `remote_config_json()`, `remote_settings_json()`, `apply_remote_setting()`.
+- **Full wM-Bus frames.** The bridge uses ESP-NOW v2 (`espnow: max_payload_size: 300`), so frames up to 256 B fit; before, frames over 239 B were dropped. The node status shows the limit ("frames up to 289 B"); with an older bridge the node counts a longer frame as lost instead of blocking its buffer.
+- **Login on the node page.** Digest authentication guards the page and the firmware upload; the example README has a Security section.
+
+---
+
 ## Docs: receivers re-ranked after the shared-antenna and clean-S1 measurements
 
 - **S1:** on a clean signal (attenuator bench, 2026-11-17) `LR1121`, `SX1276` and `SX1262` are within about 1 dB; `CC1101` about 5 dB weaker; one XIAO sample 8 dB weaker. The 2026-08 rule "`SX1276` for S1, `SX1262` for T1" (based on RSSI across boards) is withdrawn; on real meters the `SX1276` lead comes from its preamble error tolerance and from antenna/position. Table and method in CHIP_SELECTION and BENCHMARKS.

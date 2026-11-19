@@ -12,6 +12,8 @@
 substitutions:
   devicename: xiao-seed-esp-s3
   friendly_name: "wMBus Bridge XIAO ESP32-S3"
+  radio_chip: SX1262      # also shown in the add-on (health pulse)
+  radio_listen_mode: t1
 
 packages:
   repeater_node: !include repeater_node_common.yaml
@@ -68,7 +70,7 @@ spi:
   mosi_pin: GPIO9
 
 wmbus_radio:
-  radio_type: SX1262
+  radio_type: ${radio_chip}
   cs_pin: GPIO41
   reset_pin: GPIO42
   busy_pin: GPIO40
@@ -96,7 +98,7 @@ wmbus_radio:
   # bytes: a three-phase electricity meter does, a water or heat meter does not.
   # Check your longest decoded frame before enabling it prophylactically.
   long_gfsk_packets: false
-  listen_mode: t1
+  listen_mode: ${radio_listen_mode}
   listen_mode_filter_after_parse: false
   diagnostic_mode: normal
 
