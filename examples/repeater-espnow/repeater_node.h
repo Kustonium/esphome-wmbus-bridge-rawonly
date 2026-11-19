@@ -30,11 +30,26 @@
 //
 // Packets (first byte = type):
 //   0x10 HELLO  node->bridge  [0x10][ver=1][name len][name][send fails u32][dropped u32][queued u16]
+//               then (optional, the health pulse the bridge publishes as <name>/health):
+//               [uptime s u32][radio frames u32][s since last frame u32, 0xFFFFFFFF = none]
+//               [average RSSI i8, 1 = none][len][radio chip][len][listen mode]
 //   0x11 ACK    bridge->node  [0x11][channel][accepted 0/1][UTC s u32 LE, 0 = unknown][ready 0/1]
+//                             [max packet u16 LE] (missing = 250, an older bridge)
 //               The node has no SNTP; the time sets its clock (received_at, log anonymizing).
 //   0x12 D-ACK  bridge->node  [0x12][seq hi][seq lo] - frame seq published to MQTT
 //   0x02 DATA   node->bridge  [0x02][seq hi][seq lo][RSSI][mode][rx UTC s u32 LE][ms u16 LE][frame]
+//               Up to 11 + 256 B: a wM-Bus frame is at most 256 B. Above 250 B this needs
+//               ESP-NOW v2 (ESP-IDF 5.4+ on both sides) and a bridge built with
+//               espnow max_payload_size >= 267; the bridge says its limit in the ACK and a
+//               frame that would not fit is counted as lost instead of blocking the buffer.
 //   0x01 DATA   older format without the time - the bridge still accepts it.
+//   0x13 BLOB   node->bridge  [0x13][kind 1=config 2=settings][version][part][parts][bytes]
+//               The JSON the component would publish on <diag>/config and <diag>/settings,
+//               in parts of up to BLOB_PART bytes; the bridge joins them and publishes them
+//               retained as wmbus/<name>/diag/config and .../diag/settings.
+//   0x14 SET    bridge->node  [0x14][key len][key][value len][value]
+//               A wmbus/<name>/set/<key> message from the add-on; the node hands it to the
+//               component exactly as a board with MQTT would (stored, then a restart).
 //
 // Log/status language: Polish with `log_language: pl` in wmbus_radio, English otherwise.
 
@@ -55,6 +70,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/hal.h"
 #include "esphome/components/wmbus_radio/log_anon.h"  // same ID masking as the component log
+#include "esphome/components/wmbus_radio/component.h"  // global_radio: config, settings, set/<key>
 
 namespace wmbus_repeater_node {
 
@@ -75,15 +91,20 @@ static const uint32_t RESCAN_AFTER_MS = 120000; // search again after this long 
 static const uint8_t FAIL_LIMIT = 3;            // failures in a row = link lost
 static const uint32_t RETRY_MS = 50;            // retry gap while the link is still up
 static const uint32_t PROBE_MS = 2000;          // HELLO probe while the link is lost
+static const size_t BLOB_PART = 200;            // config/settings bytes per packet
+static const uint32_t BLOB_REFRESH_MS = 1800000;  // resend config/settings every 30 min
+static const uint32_t BLOB_WAIT_MS = 5000;      // configuration report not ready yet: retry
+static const size_t MAX_FRAME = 256;            // longest wM-Bus frame (L-field 255 + 1)
+static const size_t DATA_HDR = 11;              // 0x02 DATA header
 static const uint32_t INFLIGHT_TIMEOUT_MS = 500;
 static const uint32_t DATA_ACK_TIMEOUT_MS = 400; // time for the bridge to confirm publishing
 static const size_t BUFFER_FRAMES_PSRAM = 1500; // 1500 x 252 B = ~370 kB PSRAM, 30-60 min of traffic
-static const size_t BUFFER_FRAMES_RAM = 100;    // board without PSRAM: ~25 kB of plain RAM
+static const size_t BUFFER_FRAMES_RAM = 100;    // board without PSRAM: ~27 kB of plain RAM
 
 // A frame in the buffer, without copying.
 struct FrameView {
   const uint8_t *d;
-  uint8_t n;
+  uint16_t n;
   size_t size() const { return n; }
   uint8_t operator[](size_t i) const { return d[i]; }
 };
@@ -92,7 +113,7 @@ struct FrameView {
 // fragmentation, all of it in PSRAM (std::deque<std::vector> would use plain RAM).
 class FrameRing {
  public:
-  static const size_t SLOT = 252;  // [length][up to 250 B of packet]
+  static const size_t SLOT = 2 + 11 + 256;  // [length u16 LE][DATA header + longest wM-Bus frame]
   bool init(size_t want_psram, size_t fallback) {
     this->slots_ = (uint8_t *) heap_caps_malloc(want_psram * SLOT, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (this->slots_ != nullptr) {
@@ -110,7 +131,7 @@ class FrameRing {
   bool in_psram() const { return this->psram_; }
   FrameView front() const {
     const uint8_t *s = this->slot_(this->head_);
-    return {s + 1, s[0]};
+    return {s + 2, (uint16_t) (s[0] | (s[1] << 8))};
   }
   void pop_front() {
     if (this->n_ == 0) return;
@@ -118,10 +139,11 @@ class FrameRing {
     this->n_--;
   }
   bool push_back(const std::vector<uint8_t> &p) {
-    if (this->cap_ == 0 || this->n_ >= this->cap_ || p.size() > SLOT - 1) return false;
+    if (this->cap_ == 0 || this->n_ >= this->cap_ || p.size() > SLOT - 2) return false;
     uint8_t *s = this->slot_((this->head_ + this->n_) % this->cap_);
-    s[0] = (uint8_t) p.size();
-    memcpy(s + 1, p.data(), p.size());
+    s[0] = (uint8_t) (p.size() & 0xFF);
+    s[1] = (uint8_t) (p.size() >> 8);
+    memcpy(s + 2, p.data(), p.size());
     this->n_++;
     return true;
   }
@@ -146,7 +168,7 @@ class FrameRing {
 };
 
 enum class State : uint8_t { BOOT, SCAN, PAUSE, LINKED, LOST };
-enum class Flight : uint8_t { NONE, DATA, HELLO };
+enum class Flight : uint8_t { NONE, DATA, HELLO, BLOB };
 
 struct LastMeter {
   char id[9];
@@ -174,6 +196,7 @@ struct Ctx {
   bool c3_known{false};
   bool accepted{false};
   bool c3_no_mqtt{false};
+  uint16_t c3_max{250};         // largest packet the bridge takes (from its ACK)
   int link_rssi{0};
   uint16_t seq{1};  // 1..65535, never 0 - like wmbus_radio (the add-on rejects 0)
   uint32_t sent{0};             // frames delivered (published by the bridge)
@@ -185,6 +208,20 @@ struct Ctx {
   LastMeter last[5]{};
   uint8_t last_n{0};
   bool started{false};
+  // health pulse for the add-on (HELLO -> bridge -> <name>/health)
+  std::string chip{"unknown"};
+  std::string listen_mode{"unknown"};
+  uint32_t rx_total{0};     // frames from the radio (also those that did not fit the buffer)
+  uint32_t last_rx_ms{0};
+  int32_t rssi_avg_x16{0};  // moving average of RSSI x16
+  bool rssi_valid{false};
+  // config / settings for the add-on (0x13), sent part by part when the link is idle
+  std::string blob[2];      // [0] config JSON, [1] settings JSON
+  uint8_t blob_kind{0};     // 0 or 1 while sending
+  uint8_t blob_part{0};
+  uint8_t blob_version{0};
+  bool blob_sending{false};
+  uint32_t blob_due_ms{0};  // next (re)send; 0 = as soon as linked
 };
 static Ctx g;
 
@@ -196,12 +233,30 @@ static uint8_t ack_accepted;
 static int8_t ack_rssi;
 static uint32_t ack_time;  // 0 = bridge sent no time
 static uint8_t ack_ready;  // 1 = bridge has MQTT
+static uint16_t ack_max;   // largest packet the bridge takes
 static std::atomic<bool> dack_flag{false};
 static std::atomic<uint16_t> dack_seq{0};
 static std::atomic<int> sent_result{-1};  // -1 none, 0 failure, 1 success (packet in the air)
 static std::atomic<uint32_t> tx_fail{0};  // all failures (frames + HELLO)
+// set/<key> from the bridge (0x14), applied in loop()
+static std::atomic<bool> set_flag{false};
+static char set_key[33];
+static char set_value[201];
 
 static void on_recv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (len >= 3 && data[0] == 0x14) {  // set/<key> from the add-on, via the bridge
+    if (set_flag.load() || !g.c3_known || memcmp(info->src_addr, g.c3_mac, 6) != 0) return;
+    const int kl = data[1];
+    if (kl < 1 || kl > 32 || 2 + kl + 1 > len) return;
+    const int vl = data[2 + kl];
+    if (vl > 200 || 3 + kl + vl > len) return;
+    memcpy(set_key, data + 2, kl);
+    set_key[kl] = '\0';
+    memcpy(set_value, data + 3 + kl, vl);
+    set_value[vl] = '\0';
+    set_flag.store(true);
+    return;
+  }
   if (len >= 3 && data[0] == 0x12) {  // frame published confirmation
     dack_seq.store(((uint16_t) data[1] << 8) | data[2]);
     dack_flag.store(true);
@@ -216,6 +271,7 @@ static void on_recv(const esp_now_recv_info_t *info, const uint8_t *data, int le
                          ((uint32_t) data[6] << 24))
                       : 0;
   ack_ready = len >= 8 ? data[7] : 1;
+  ack_max = len >= 10 ? (uint16_t) (data[8] | (data[9] << 8)) : 250;
   ack_flag.store(true);
 }
 
@@ -291,6 +347,18 @@ static bool send_hello(const uint8_t *to) {
   const uint16_t q = (uint16_t) std::min<size_t>(g.queue.size(), 0xFFFF);
   p.push_back(q & 0xFF);
   p.push_back(q >> 8);
+  // health pulse
+  const uint32_t now = esphome::millis();
+  put32(p, now / 1000U);
+  put32(p, g.rx_total);
+  put32(p, g.rx_total > 0 ? (uint32_t) ((now - g.last_rx_ms) / 1000U) : 0xFFFFFFFFu);
+  p.push_back((uint8_t) (int8_t) (g.rssi_valid ? g.rssi_avg_x16 / 16 : 1));
+  const uint8_t cl = (uint8_t) std::min<size_t>(g.chip.size(), 16);
+  p.push_back(cl);
+  p.insert(p.end(), g.chip.begin(), g.chip.begin() + cl);
+  const uint8_t ml = (uint8_t) std::min<size_t>(g.listen_mode.size(), 16);
+  p.push_back(ml);
+  p.insert(p.end(), g.listen_mode.begin(), g.listen_mode.begin() + ml);
   return transmit(to, p.data(), p.size(), Flight::HELLO);
 }
 
@@ -303,6 +371,11 @@ static void set_lost(uint32_t now, const char *why) {
 }
 
 static void set_linked(uint32_t now) {
+  if (g.state == State::LOST) {
+    // The bridge may have restarted meanwhile: send config/settings again, whole.
+    g.blob_sending = false;
+    g.blob_due_ms = now;
+  }
   if (g.state == State::LOST)
     ESP_LOGI(TAG, RPT_TR("link to bridge back after %u s - %u frame(s) in the buffer", "lacze z mostem wrocilo po %u s - w buforze %u ramek"), (unsigned) ((now - g.lost_since_ms) / 1000),
              (unsigned) g.queue.size());
@@ -319,9 +392,13 @@ static void start_scan() {
 }
 
 // Call once, after Wi-Fi is up (on_boot with a low priority).
-inline void start(const std::string &topic_name, uint8_t saved_channel) {
+// chip / listen_mode: only for the health pulse in the add-on (e.g. "SX1262", "t1").
+inline void start(const std::string &topic_name, uint8_t saved_channel, const char *chip = nullptr,
+                  const char *listen_mode = nullptr) {
   if (g.started) return;
   g.name = topic_name;
+  if (chip != nullptr) g.chip = chip;
+  if (listen_mode != nullptr) g.listen_mode = listen_mode;
   g.channel = (saved_channel >= 1 && saved_channel <= 13) ? saved_channel : 1;
   esp_err_t err = esp_now_init();
   if (err != ESP_OK) {
@@ -337,6 +414,50 @@ inline void start(const std::string &topic_name, uint8_t saved_channel) {
   start_scan();  // start from the last known channel
   ESP_LOGI(TAG, RPT_TR("start: name '%s', looking for the bridge from channel %u, buffer %u frames (%s)", "start: nazwa '%s', szukam mostu od kanalu %u, bufor %u ramek (%s)"), g.name.c_str(),
            (unsigned) g.channel, (unsigned) g.queue.capacity(), g.queue.in_psram() ? "PSRAM" : "RAM");
+}
+
+// Config / settings for the add-on: taken from the component when a send starts,
+// so a refresh always carries what is in effect now.
+static bool blob_prepare() {
+  auto *radio = esphome::wmbus_radio::global_radio;
+  if (radio == nullptr) return false;
+  g.blob[0] = radio->remote_config_json();
+  g.blob[1] = radio->remote_settings_json();
+  if (g.blob[0].empty() || g.blob[1].empty()) return false;
+  g.blob_kind = 0;
+  g.blob_part = 0;
+  g.blob_version++;
+  g.blob_sending = true;
+  return true;
+}
+
+static uint8_t blob_parts(const std::string &b) { return (uint8_t) ((b.size() + BLOB_PART - 1) / BLOB_PART); }
+
+static void blob_send_part() {
+  const std::string &b = g.blob[g.blob_kind];
+  const uint8_t parts = blob_parts(b);
+  const size_t off = (size_t) g.blob_part * BLOB_PART;
+  const size_t n = std::min(BLOB_PART, b.size() - off);
+  std::vector<uint8_t> p;
+  p.reserve(n + 5);
+  p.push_back(0x13);
+  p.push_back(g.blob_kind + 1);
+  p.push_back(g.blob_version);
+  p.push_back(g.blob_part);
+  p.push_back(parts);
+  p.insert(p.end(), b.begin() + off, b.begin() + off + n);
+  transmit(g.c3_mac, p.data(), p.size(), Flight::BLOB);
+}
+
+static void blob_advance(uint32_t now) {
+  if (++g.blob_part < blob_parts(g.blob[g.blob_kind])) return;
+  g.blob_part = 0;
+  if (++g.blob_kind < 2) return;
+  g.blob_sending = false;
+  g.blob[0].clear();
+  g.blob[1].clear();
+  g.blob_due_ms = now + BLOB_REFRESH_MS;
+  ESP_LOGD(TAG, RPT_TR("configuration and settings sent to the bridge", "konfiguracja i ustawienia wyslane do mostu"));
 }
 
 // Outcome of the packet in the air.
@@ -380,6 +501,7 @@ static void settle_flight(uint32_t now) {
   // A broadcast while scanning has no radio ACK - its outcome says nothing about the bridge.
   if (g.state == State::SCAN || g.state == State::PAUSE) return;
 
+  if (ok && kind == Flight::BLOB) blob_advance(now);
   if (ok) {
     if (kind == Flight::DATA && !g.queue.empty()) {
       g.queue.pop_front();
@@ -406,6 +528,13 @@ inline uint8_t loop() {
 
   settle_flight(now);
 
+  if (set_flag.load()) {
+    auto *radio = esphome::wmbus_radio::global_radio;
+    ESP_LOGI(TAG, RPT_TR("set/%s = '%s' from the add-on (via the bridge)", "set/%s = '%s' z dodatku (przez most)"), set_key, set_value);
+    if (radio != nullptr) radio->apply_remote_setting(set_key, set_value);
+    set_flag.store(false);
+  }
+
   if (ack_flag.load()) {
     memcpy(g.c3_mac, ack_mac, 6);
     g.c3_known = true;
@@ -413,6 +542,10 @@ inline uint8_t loop() {
     g.accepted = ack_accepted != 0;
     g.link_rssi = ack_rssi;
     g.last_ack_ms = now;
+    if (ack_max != g.c3_max)
+      ESP_LOGI(TAG, RPT_TR("bridge takes packets up to %u B (frames up to %u B)", "most przyjmuje pakiety do %u B (ramki do %u B)"),
+               (unsigned) ack_max, (unsigned) (ack_max > DATA_HDR ? ack_max - DATA_HDR : 0));
+    g.c3_max = ack_max;
     // Clock from the bridge: set it when unset or more than 60 s off.
     if (ack_time > 1700000000u) {
       const time_t mine = ::time(nullptr);
@@ -484,7 +617,24 @@ inline uint8_t loop() {
       if (g.accepted && !g.queue.empty() && (int32_t) (now - g.retry_at_ms) >= 0)
       {
         const FrameView f = g.queue.front();
+        if (f.n > g.c3_max) {
+          // An older bridge (or a smaller max_payload_size) cannot take it: retrying would
+          // block every frame behind it. Count it as lost, like a full buffer.
+          g.queue.pop_front();
+          g.dropped++;
+          ESP_LOGW(TAG, RPT_TR("frame of %u B is longer than the bridge takes (%u B) - lost; set espnow max_payload_size: 300 on the bridge",
+                               "ramka %u B dluzsza niz przyjmuje most (%u B) - utracona; ustaw na moscie espnow max_payload_size: 300"),
+                   (unsigned) (f.n - DATA_HDR), (unsigned) g.c3_max);
+          break;
+        }
         transmit(g.c3_mac, f.d, f.n, Flight::DATA);
+        break;
+      }
+      // Frames first; config/settings only when the buffer is empty.
+      if (g.accepted && g.queue.empty() && (int32_t) (now - g.retry_at_ms) >= 0) {
+        if (!g.blob_sending && (int32_t) (now - g.blob_due_ms) >= 0 && !blob_prepare())
+          g.blob_due_ms = now + BLOB_WAIT_MS;
+        if (g.blob_sending) blob_send_part();
       }
       break;
 
@@ -508,6 +658,14 @@ inline uint8_t loop() {
 
 // From on_frame: the frame goes into the buffer; loop() sends it when the link allows.
 inline void send_frame(const std::vector<uint8_t> &raw, int8_t rssi, uint8_t mode, const char *meter_id) {
+  g.rx_total++;
+  g.last_rx_ms = esphome::millis();
+  if (!g.rssi_valid) {
+    g.rssi_avg_x16 = rssi * 16;
+    g.rssi_valid = true;
+  } else {
+    g.rssi_avg_x16 += (rssi * 16 - g.rssi_avg_x16) / 8;
+  }
   if (g.last_n < 5) g.last_n++;
   for (int i = 4; i > 0; i--) g.last[i] = g.last[i - 1];
   snprintf(g.last[0].id, sizeof(g.last[0].id), "%s", meter_id != nullptr ? meter_id : "????????");
@@ -515,7 +673,7 @@ inline void send_frame(const std::vector<uint8_t> &raw, int8_t rssi, uint8_t mod
   g.last[0].rssi = rssi;
   g.last[0].ms = esphome::millis();
 
-  if (!g.started || raw.size() > 239) {  // 250 B ESP-NOW - 11 B header
+  if (!g.started || raw.size() > MAX_FRAME) {  // cannot happen with a valid wM-Bus frame
     g.dropped++;
     return;
   }
@@ -523,7 +681,7 @@ inline void send_frame(const std::vector<uint8_t> &raw, int8_t rssi, uint8_t mod
   gettimeofday(&tv, nullptr);
   const bool clock_ok = tv.tv_sec > 1700000000;
   std::vector<uint8_t> p;
-  p.reserve(raw.size() + 11);
+  p.reserve(raw.size() + DATA_HDR);
   p.push_back(0x02);
   p.push_back(g.seq >> 8);
   p.push_back(g.seq & 0xFF);
@@ -556,7 +714,8 @@ inline std::string status_text() {
   char b[160];
   if (!g.started) return RPT_TR("ESP-NOW did not start", "radio ESP-NOW nie wystartowalo");
   if (g.state == State::LINKED && g.accepted)
-    snprintf(b, sizeof(b), RPT_TR("CONNECTED - channel %u, link %d dBm%s", "POLACZONA - kanal %u, lacze %d dBm%s"), (unsigned) g.channel, g.link_rssi,
+    snprintf(b, sizeof(b), RPT_TR("CONNECTED - channel %u, link %d dBm, frames up to %u B%s", "POLACZONA - kanal %u, lacze %d dBm, ramki do %u B%s"),
+             (unsigned) g.channel, g.link_rssi, (unsigned) (g.c3_max > DATA_HDR ? g.c3_max - DATA_HDR : 0),
              g.queue.size() > 1 ? RPT_TR(", draining buffer", ", oproznia bufor") : "");
   else if (g.state == State::LINKED)
     snprintf(b, sizeof(b), RPT_TR("bridge hears this board but has NOT accepted it - accept it on the bridge page", "most slyszy, ale NIE PRZYJAL tej plytki - przyjmij ja na stronie mostu"));

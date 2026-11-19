@@ -12,6 +12,8 @@
 substitutions:
   devicename: esphome-wmbus-cc1101
   friendly_name: "wMBus Bridge CC1101"
+  radio_chip: CC1101      # also shown in the add-on (health pulse)
+  radio_listen_mode: t1
 
 packages:
   repeater_node: !include repeater_node_common.yaml
@@ -70,7 +72,7 @@ spi:
   miso_pin: GPIO7
 
 wmbus_radio:
-  radio_type: CC1101
+  radio_type: ${radio_chip}
   cc1101_allow_experimental: true
 
   frequency: 868.950
@@ -84,7 +86,7 @@ wmbus_radio:
     number: GPIO2
     mode: input
 
-  listen_mode: t1
+  listen_mode: ${radio_listen_mode}
   listen_mode_filter_after_parse: false
 
   topic_name: "cc1101"

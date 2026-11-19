@@ -12,6 +12,8 @@
 substitutions:
   devicename: esphome-wmbus-heltec-v2
   friendly_name: "wMBus Bridge Heltec V2"
+  radio_chip: SX1276      # also shown in the add-on (health pulse)
+  radio_listen_mode: t1
 
 packages:
   repeater_node: !include repeater_node_common.yaml
@@ -69,13 +71,13 @@ time:
     id: ha_time
 
 wmbus_radio:
-  radio_type: SX1276
+  radio_type: ${radio_chip}
   cs_pin: GPIO18
   reset_pin: GPIO14
   irq_pin:
     number: GPIO35
     mode: input
-  listen_mode: t1
+  listen_mode: ${radio_listen_mode}
   listen_mode_filter_after_parse: false
   diagnostic_mode: normal
 

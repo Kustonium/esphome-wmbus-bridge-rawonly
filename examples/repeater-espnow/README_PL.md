@@ -34,7 +34,9 @@ folderu w ESPHome; tak samo YAML mostu z `repeater_bridge.h`.
 W `secrets.yaml`, poza zwykłymi wpisami:
 
 ```yaml
-repeater_ap_password: "co najmniej 8 znaków"   # hotspot płytki
+repeater_ap_password: "12+ znaków"    # hotspot płytki (WPA2)
+repeater_web_username: "admin"        # logowanie na stronie płytki
+repeater_web_password: "12+ znaków"   # chroni też wgrywanie wsadu
 ```
 
 Nie ma pliku płytki dla LilyGO T3 V3 TCXO: jej przykład się nie waliduje
@@ -57,7 +59,7 @@ Nazwą płytki w dodatku jest jej `esphome.name`.
 ## Na miejscu, z telefonem
 
 Płytka zawsze wystawia hotspot nazwany jak ona (`esphome-wmbus-heltec-v4`, …).
-Połącz telefon albo laptopa i otwórz `http://192.168.4.1`:
+Połącz telefon albo laptopa i otwórz `http://192.168.4.1` (zapyta o logowanie strony):
 
 | Encja | Znaczenie |
 |---|---|
@@ -66,7 +68,7 @@ Połącz telefon albo laptopa i otwórz `http://192.168.4.1`:
 | **Link to bridge** | sygnał ESP-NOW od mostu |
 | **Frames delivered** | opublikowane przez most do MQTT |
 | **Buffered / Buffer peak / Buffer capacity** | czeka teraz / najwięcej dotąd / pojemność |
-| **Frames lost (buffer full)** | jedyny licznik prawdziwych strat |
+| **Frames lost (buffer full / too long)** | jedyny licznik prawdziwych strat |
 | **Send failures (retried)** | ruch na łączu, nie straty |
 | **OTA Update** | wgranie pliku wsadu (ESPHome: *Install → Manual download → format OTA*). Po wgraniu strona zostaje na „Update Successful!”; wróć na `http://192.168.4.1/` |
 
@@ -110,6 +112,24 @@ w buforze, ma swój prawdziwy czas.
 w seq), `dup` (rozpoznane ponowienia), `foreign`, RSSI łącza oraz liczniki samej
 płytki `a_dropped`, `a_send_fail`, `a_queue` (przeżywają restart mostu).
 
+**W dodatku.** Płytka dokłada do swojego `HELLO` czas pracy, liczbę ramek, średnie
+RSSI, układ radia i tryb nasłuchu; most co 60 s publikuje je jako
+`wmbus/<płytka>/health` (ten sam puls, który wysyła zwykła płytka) z
+`"via":"espnow"`, swoją nazwą i RSSI łącza. Dodatek pokazuje wtedy, że płytka
+żyje, a jej kafelek ma napis *za mostem ESP-NOW*, np. `SX1262 · t1 · most:
+esphome-wmbus-repeater-bridge · łącze -70 dBm`. Układ i tryb pochodzą z `radio_chip` /
+`radio_listen_mode` w `substitutions` płytki; z tych samych wartości korzysta jej
+`wmbus_radio`.
+
+Płytka wysyła też opis konfiguracji i ustawienia komponentu (ten JSON, który płytka
+z MQTT publikuje na `<diag>/config` i `<diag>/settings`) w kawałkach, gdy jej bufor
+jest pusty: po starcie, po powrocie łącza i co 30 min. Most publikuje je jako
+retained, więc dodatek pokazuje konfigurację płytki i jej panel ustawień.
+Ustawienie zmienione w dodatku (`wmbus/<płytka>/set/<klucz>`) idzie przez most do
+płytki, która je zapisuje i się restartuje, tak samo jak płytka z MQTT; most
+powtarza polecenie przy kolejnych `HELLO` (do 3 razy), dopóki płytka znów nie
+zgłosi ustawień.
+
 **Zrzuty ekranu.** Obie płytki mają przełącznik *Anonymize*: numery liczników
 w logu i na stronie są zamazane (ta sama metoda co `set_log_anonymize`, patrz
 [DIAGNOSTIC](../../docs/DIAGNOSTIC_PL.md)). MQTT dostaje prawdziwe numery.
@@ -123,14 +143,31 @@ w otwartej przestrzeni i ok. 9 dB w budynku; ściana działowa 3–5 dB, ceglana
 jedno piętro przez klatkę schodową; zewnętrzna antena 2,4 GHz na którejkolwiek
 płytce (XIAO ESP32-S3, niektóre wersje T-Beam) dodaje 3–6 dB.
 
+## Bezpieczeństwo
+
+- **Hotspot:** WPA2 z `repeater_ap_password`. Szyfruje łącze radiowe, więc HTTP
+  strony nie jest czytelne bez tego hasła. Daj 12+ znaków.
+- **Logowanie na stronie:** `repeater_web_username` / `repeater_web_password`,
+  uwierzytelnianie digest: hasło nie leci otwartym tekstem i chroni też
+  **wgrywanie wsadu**, więc samo hasło hotspotu nie wystarczy, żeby wgrać coś na
+  płytkę. Bez hasła strony płytkę zaktualizujesz już tylko przez USB.
+- **Bez HTTPS:** serwer www ESPHome nie obsługuje TLS (a certyfikat samopodpisany
+  zamieniłby to tylko na ostrzeżenie przeglądarki). Ochroną są dwa hasła wyżej.
+- **Płytka nie jest w Twojej sieci:** jedyne wyjście to ESP-NOW do mostu, który
+  przekazuje ramki i nic więcej, więc przejęta płytka nie jest drogą do LAN.
+- **ESP-NOW bez szyfrowania:** niesie ramki, które liczniki i tak nadają otwarcie
+  w eterze; liczniki z AES zostają zaszyfrowane od początku do końca.
+
 ## Ograniczenia
 
+- **Kontrolki w dodatku:** działa tylko *Żyje*; *Radio*, *Nadąża* i *Odbiór*
+  zostają szare, bo płytka nie wysyła podsumowań diagnostyki.
 - **Jedna płytka na most.** Most przekazuje jedną przyjętą płytkę.
-- **Ramki do 239 bajtów** (ESP-NOW mieści 250, minus nagłówek). Ramki wM-Bus T1/C1
-  na typowym osiedlu są dużo krótsze.
-- **Bez szyfrowania.** Szyfrowanie ESP-NOW jest wyłączone. Liczniki i tak nadają
-  otwarcie w eterze; liczniki z AES zostają zaszyfrowane od początku do końca.
-- **Strona płytki nie ma logowania**; chroni ją hasło hotspotu, łącznie z wgrywaniem
-  wsadu.
+- **Długie ramki wymagają ESPHome 2026.11 na moście.** Ramka wM-Bus ma do 256 B;
+  z nagłówkiem 11 B to więcej niż 250 B klasycznego ESP-NOW, więc most korzysta
+  z ESP-NOW v2 (`espnow: max_payload_size: 300`, ESPHome 2026.11+; ESP-IDF 5.4+
+  na płytce już mówi v2). Przy starszym moście albo domyślnych 250 płytka liczy
+  ramki dłuższe niż 239 B jako utracone („Frames lost”) i pisze o tym w logu,
+  zamiast blokować bufor.
 - Wymaga komponentu z `repeater:` (`wmbus_radio` z `repeater: true` nic nie
   publikuje przez MQTT; patrz [CONFIG_REFERENCE_MINIMAL](../../docs/CONFIG_REFERENCE_MINIMAL_PL.md)).
