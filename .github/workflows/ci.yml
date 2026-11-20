@@ -62,6 +62,15 @@ jobs:
       - name: Run host parser tests
         run: ./build/test_core
 
+      - name: Test stream-capture length helpers (c1/both)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Wno-unused-variable \
+            -Itests/host -Icomponents/wmbus_radio \
+            tests/host/test_frame_length.cpp \
+            components/wmbus_radio/decode3of6.cpp \
+            -o build/test_frame_length
+          ./build/test_frame_length
+
       - name: Test CC1101 RX state waits and idle-refresh guards
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -Icomponents/wmbus_radio \

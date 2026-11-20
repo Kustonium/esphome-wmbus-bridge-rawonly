@@ -20,6 +20,14 @@
 // publishes succeeded. Without MQTT nothing is confirmed and the node keeps the
 // frames in its buffer. A frame retried because a confirmation was lost is
 // recognised by seq and confirmed again without a second publish.
+// The frame topics go out with QoS 1 (WMBUS_BRIDGE_FRAME_QOS): with QoS 0 a
+// successful publish only means the MQTT client took the message, so a link
+// that dropped silently swallowed frames for the ~20 s until the client noticed
+// (bench 20.11: 63 of 22171 frames in 9 such gaps, ESP-NOW itself lost none).
+// With QoS 1 the ESP-IDF MQTT client keeps each frame until the broker
+// acknowledges it and sends it again after reconnecting. A frame may then
+// (rarely) arrive twice: the add-on counts the repeated seq as out of order, not
+// as missing, and the decoder publishes the same values again.
 //
 // seq in /rx follows the wmbus_radio contract the add-on expects: >= 1 and
 // rising within one boot_id. The node counts 16-bit (1..65535), so a wrap
@@ -54,6 +62,10 @@
 namespace wmbus_repeater_bridge {
 
 static const char *const TAG = "repeater_bridge";
+
+#ifndef WMBUS_BRIDGE_FRAME_QOS
+#define WMBUS_BRIDGE_FRAME_QOS 1
+#endif
 
 #ifdef WMBUS_LOG_LANG_PL
 #define RPT_TR(en, pl) pl
@@ -398,8 +410,8 @@ static void handle_data(const uint8_t *src, int rssi, const uint8_t *data, uint1
 
   auto *m = esphome::mqtt::global_mqtt_client;
   const bool published = m != nullptr && m->is_connected() &&
-                         m->publish("wmbus/" + b.name + "/telegram", hex, 0, false) &&
-                         m->publish("wmbus/" + b.name + "/rx", std::string(rx), 0, false);
+                         m->publish("wmbus/" + b.name + "/telegram", hex, WMBUS_BRIDGE_FRAME_QOS, false) &&
+                         m->publish("wmbus/" + b.name + "/rx", std::string(rx), WMBUS_BRIDGE_FRAME_QOS, false);
   if (!published) {
     ESP_LOGW(TAG, RPT_TR("publish of seq=%u failed - frame stays in the node buffer", "publikacja seq=%u nieudana - ramka zostaje w buforze plytki"), (unsigned) seq);
     return;

@@ -11,6 +11,7 @@
 
 [![CI][ci-shield]][ci]
 [![Aktywność commitów][commits-shield]][commits]
+[![Wersja ESPHome budowana w CI][esphome-shield]][ci]
 
 <!-- Dynamiczne plakietki wskazują repozytorium stable, z którego instalują
      użytkownicy. Przy przenoszeniu dokumentacji z dev zachowaj te adresy.
@@ -27,6 +28,7 @@
 [lr1121-shield]: https://img.shields.io/badge/LR1121-experimental-yellow.svg
 [ci-shield]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml/badge.svg
 [ci]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml
+[esphome-shield]: https://img.shields.io/pypi/v/esphome?label=ESPHome%20%28CI%20nightly%29&logo=esphome&color=blue
 [commits-shield]: https://img.shields.io/github/commit-activity/y/Kustonium/esphome-wmbus-bridge-rawonly
 [commits]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/commits/main
 
@@ -43,7 +45,7 @@ Most radiowy Wireless M-Bus / wM-Bus RAW-to-MQTT dla ESPHome, ukierunkowany na S
 > gotowy YAML płytki i dodanie liczników kliknięciem. Reszta tego README jest dla tych, którzy
 > chcą wiedzieć więcej.
 
-> ✅ **Zweryfikowano na ESPHome 2026.7.0** — czyste kompilacje na wszystkich trzech płytkach testowych w CI.
+> ✅ **Kompiluje się na ESPHome 2026.11** — każda płytka z przykładów, sprawdzane w CI przy każdej zmianie i co noc na najnowszej stabilnej wersji ESPHome. Repozytorium deweloperskie kompiluje się też co noc na najnowszej **becie** ESPHome, żeby złapać błędy kompilacji przed wydaniem. Łapie to tylko błędy kompilacji: zmiana zachowania, która dalej się kompiluje (np. `skip_cert_cn_check` włączające TLS w 2026.11), widać tylko w changelogu bety.
 
 ## Czym jest ten projekt
 

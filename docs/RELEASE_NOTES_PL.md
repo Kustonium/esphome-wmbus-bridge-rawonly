@@ -2,6 +2,13 @@
 
 [English version](RELEASE_NOTES.md)
 
+## SX1262 w `c1`/`both` kończy każde przechwycenie na długości ramki; most przedłużacza publikuje z QoS 1
+
+- **SX1262 z `long_gfsk_packets: true` w `c1` lub `both`:** ścieżka strumieniowa dla długich ramek przycinała przechwycenie do długości ramki tylko w `t1` i `s1`. W `c1`/`both` każde przechwycenie szło do limitu 512 bajtów, przez co tryb długich ramek był włączony na stałe, a odbiornik przy każdej ramce był zajęty przez cały limit. Teraz przechwycenie kończy się razem z ramką (C1 i T1 rozróżnia pierwszy bajt, tak jak robił już LR1121); przechwycenie, z którego nie da się odczytać długości, nadal idzie do limitu jak dotąd. Odczytów SPI jest ok. 60 % mniej, odbiór u zgłaszającego bez zmian. Znalazł, poprawił i przetestował **[@hackbaellchen](https://github.com/hackbaellchen)** ([zgłoszenie #45](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/issues/45)), razem z testem hosta długości. Przy `long_gfsk_packets: false` (domyślnie) nic się nie zmienia.
+- **Most przedłużacza ESP-NOW publikuje ramki z QoS 1.** Przy QoS 0 ramka liczyła się jako opublikowana, gdy przyjął ją klient MQTT, więc gdy łącze Wi-Fi/MQTT mostu po cichu padło, ramki z następnych ok. 20 s przepadały, choć płytka zdążyła je już usunąć z bufora (stanowisko: 63 z 22 171 ramek w 9 krótkich zerwaniach; samo ESP-NOW nie zgubiło żadnej). Teraz klient MQTT trzyma każdą ramkę do potwierdzenia przez broker. **Wgraj tylko most**; płytka bez zmian. Rzadki duplikat dodatek pokaże jako ramkę poza kolejnością, a nie brakującą.
+
+---
+
 ## `forward_meters` można podmienić w trakcie pracy własną lambdą
 
 - **Nowe `set_forward_meters("id1,id2,...")`** - pomysł i implementacja to praca **Alexandra Streita** ([@probutus](https://github.com/probutus), [PR #40](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/pull/40)); w tym wydaniu dodano tylko zgłaszanie zmiany w `<diag>/config`. Dla kilku płytek zasilanych jedną listą liczników z wmbusmeters: podłączasz to sam, np. `mqtt: on_message:` z `id(radio).set_forward_meters(x);`. Pusty tekst przepuszcza każdą ramkę. Komponent celowo nie ma do tego tematu ani opcji; nic się nie zmienia, dopóki nie napiszesz lambdy.

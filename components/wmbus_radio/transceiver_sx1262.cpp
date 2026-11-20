@@ -938,6 +938,7 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
   uint8_t state_index = 0;  // last read index (wraps 0..255)
   size_t s1_expected_raw_len = 0;
   size_t t1_expected_raw_len = 0;
+  bool ct_len_undecidable = false;  // c1/both: header seen, no length derivable
 
   // Instrumentation for the capture itself, not for its contents.
   //
@@ -1085,6 +1086,41 @@ bool SX1262::capture_rx_stream_(uint16_t trigger_irq) {
           this->rx_buffer_.resize(t1_expected_raw_len);
           copied = t1_expected_raw_len;
           exit_reason = "t1_length";
+          break;
+        }
+      } else {
+        // listen_mode c1 or both. Until this branch existed, neither mode ever
+        // derived a length here, so every streamed capture ran to buffer_cap
+        // (512 bytes) for exactly the reasons given at expected_raw_len_t1():
+        // RX_DONE cannot fire and the demodulator never falls silent. With
+        // long_gfsk_packets the hold is renewed by any capture >= 250 bytes, and
+        // a 512-byte capture always is - so one long meter in range kept the
+        // stream path on permanently, every C1 frame went through it, and each
+        // capture held the receiver for the full cap instead of the frame.
+        //
+        // Same decision as the LR1121 drain: 0x54 first -> C1 arithmetic,
+        // otherwise T1 (both only).
+        //
+        // Unlike the T1 branch there is deliberately NO early exit when the
+        // header yields no length: such a capture keeps the old behaviour (run
+        // to the cap) so the raw-drain fallback upstream still gets the whole
+        // stream to work with. This keeps the change strictly conservative:
+        // the length is only ever used to cut a capture short, never to
+        // abandon one, so no frame the old path could recover is lost here.
+        const bool allow_t1 = (this->listen_mode_ != LISTEN_MODE_C1);
+        if (t1_expected_raw_len == 0 && !ct_len_undecidable) {
+          t1_expected_raw_len = expected_raw_len_c1_or_t1(this->rx_buffer_, allow_t1);
+          if (t1_expected_raw_len == 0 && raw_len_undecidable_c1_or_t1(this->rx_buffer_, allow_t1)) {
+            ct_len_undecidable = true;
+            ESP_LOGD(TAG, "Stream capture: no length from header %02X %02X %02X, keeping cap %u",
+                     this->rx_buffer_[0], this->rx_buffer_.size() > 1 ? this->rx_buffer_[1] : 0,
+                     this->rx_buffer_.size() > 2 ? this->rx_buffer_[2] : 0, (unsigned) capture_cap);
+          }
+        }
+        if (t1_expected_raw_len != 0 && copied >= t1_expected_raw_len) {
+          this->rx_buffer_.resize(t1_expected_raw_len);
+          copied = t1_expected_raw_len;
+          exit_reason = (this->rx_buffer_[0] == 0x54U) ? "c1_length" : "t1_length";
           break;
         }
       }

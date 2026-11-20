@@ -2,6 +2,13 @@
 
 [Polska wersja](RELEASE_NOTES_PL.md)
 
+## SX1262 in `c1`/`both` stops every capture at the frame's length; the repeater bridge publishes with QoS 1
+
+- **SX1262 with `long_gfsk_packets: true` in `c1` or `both`:** the long-frame stream path cut a capture at the frame's length only in `t1` and `s1`. In `c1`/`both` every capture ran to the 512-byte limit, which kept the long-frame mode on for good and held the receiver for the whole limit on every frame. Now the capture ends with the frame (C1 or T1 told apart by the first byte, as the LR1121 already did); a capture whose length cannot be read still runs to the limit as before. SPI reads drop by about 60 %, reception stays the same on the reporter's site. Found, fixed and tested by **[@hackbaellchen](https://github.com/hackbaellchen)** ([issue #45](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/issues/45)), including a host test of the lengths. With `long_gfsk_packets: false` (the default) nothing changes.
+- **ESP-NOW repeater bridge publishes frames with QoS 1.** With QoS 0 a frame counted as published once the MQTT client took it, so when the bridge's Wi-Fi/MQTT link dropped silently, frames from the next ~20 s were lost although the node had already removed them from its buffer (bench: 63 of 22 171 frames in 9 short drops; ESP-NOW itself lost none). Now the MQTT client keeps each frame until the broker acknowledges it. **Flash only the bridge**; the node is unchanged. A rare duplicate shows in the add-on as out of order, not missing.
+
+---
+
 ## `forward_meters` can be replaced at runtime from your own lambda
 
 - **New `set_forward_meters("id1,id2,...")`** - the idea and the implementation are the work of **Alexander Streit** ([@probutus](https://github.com/probutus), [PR #40](https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/pull/40)); this release adds only the `<diag>/config` report of the change. For several boards fed from one meter list kept in wmbusmeters: wire it yourself, e.g. `mqtt: on_message:` with `id(radio).set_forward_meters(x);`. An empty string forwards every frame. The component has no topic or option for this on purpose; nothing changes unless you write the lambda.

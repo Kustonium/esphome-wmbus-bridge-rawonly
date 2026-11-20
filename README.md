@@ -11,11 +11,14 @@
 
 [![CI][ci-shield]][ci]
 [![Commit activity][commits-shield]][commits]
+[![ESPHome version built in CI][esphome-shield]][ci]
 
 <!-- Dynamic badges point to the stable repository users install from.
      Preserve these URLs when promoting documentation from dev. Avoid badges
      with a hard-coded maintenance year or ESPHome version; scheduled CI checks
-     compatibility. -->
+     compatibility. The ESPHome badge is dynamic: it shows the latest ESPHome
+     release on PyPI, which the nightly CI builds every example against (a red
+     CI badge next to it means that version breaks the build). -->
 
 [release-shield]: https://img.shields.io/github/v/release/Kustonium/esphome-wmbus-bridge-rawonly
 [releases]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/releases
@@ -27,6 +30,7 @@
 [lr1121-shield]: https://img.shields.io/badge/LR1121-experimental-yellow.svg
 [ci-shield]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml/badge.svg
 [ci]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/actions/workflows/ci.yml
+[esphome-shield]: https://img.shields.io/pypi/v/esphome?label=ESPHome%20%28CI%20nightly%29&logo=esphome&color=blue
 [commits-shield]: https://img.shields.io/github/commit-activity/y/Kustonium/esphome-wmbus-bridge-rawonly
 [commits]: https://github.com/Kustonium/esphome-wmbus-bridge-rawonly/commits/main
 
@@ -42,7 +46,7 @@ RAW-to-MQTT wireless M-Bus / wM-Bus radio bridge for ESPHome, focused on SX1262 
 > [**Quick start — meters in HA in 15 minutes**](docs/QUICKSTART.md): broker, add-on, a ready
 > board YAML and adding meters with a click. The rest of this README is for when you want more.
 
-> ✅ **Verified on ESPHome 2026.7.0** — clean builds on all three test boards in CI.
+> ✅ **Builds on ESPHome 2026.11** — every example board, checked in CI on each change and nightly against the latest stable ESPHome. The development repository also builds nightly against the newest ESPHome **beta**, to catch compile breaks before a release. That catches only compile errors: a change in behaviour that still compiles (such as `skip_cert_cn_check` turning TLS on in 2026.11) shows up only in the beta changelog.
 
 ## What this project is
 
