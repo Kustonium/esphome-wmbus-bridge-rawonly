@@ -200,5 +200,37 @@ inline size_t expected_raw_len_c1(const std::vector<uint8_t> &raw) {
   return 0;
 }
 
+// expected_raw_len_c1_or_t1: length for a capture armed on the shared 0x543D
+// sync word (listen_mode c1 or both), where the frame can be either mode.
+//
+// Same decision the LR1121 drain makes: the mode-C indicator 0x54 in the first
+// raw byte selects the C1 arithmetic, anything else is tried as T1. The two
+// cannot be confused: 0x54 starts with the 6-bit symbol 010101, which is not a
+// valid 3-of-6 code word, so no T1 frame can begin with that byte.
+//
+// `allow_t1` is false for listen_mode c1, where a non-C capture is noise.
+// Returns 0 when no length can be derived (yet).
+inline size_t expected_raw_len_c1_or_t1(const std::vector<uint8_t> &raw, bool allow_t1) {
+  if (raw.empty())
+    return 0;
+  if (raw[0] == 0x54U)
+    return expected_raw_len_c1(raw);  // needs 3 bytes, returns 0 before that
+  return allow_t1 ? expected_raw_len_t1(raw) : 0;
+}
+
+// True once enough bytes are present that expected_raw_len_c1_or_t1() will
+// never produce a length for this capture: both helpers only read the first
+// 3 (C1) or 2 (T1) raw bytes, so once those are in and yielded nothing,
+// further bytes change nothing.
+inline bool raw_len_undecidable_c1_or_t1(const std::vector<uint8_t> &raw, bool allow_t1) {
+  if (raw.empty())
+    return false;
+  if (raw[0] == 0x54U)
+    return raw.size() >= 3 && expected_raw_len_c1(raw) == 0;
+  if (!allow_t1)
+    return true;
+  return raw.size() >= 2 && expected_raw_len_t1(raw) == 0;
+}
+
 } // namespace wmbus_radio
 } // namespace esphome

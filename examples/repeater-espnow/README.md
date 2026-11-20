@@ -98,7 +98,9 @@ frames before it has MQTT. Without MQTT the bridge confirms nothing and the node
 keeps buffering (`bridge WITHOUT MQTT`). Three failures in a row mark the link lost
 at once; a probe every 2 s brings it back. A confirmation lost on the way makes the
 node send the frame again; the bridge recognises it by number and confirms without
-publishing twice.
+publishing twice. The bridge publishes frames with QoS 1, so a Wi-Fi/MQTT link
+that drops for a moment does not swallow them: the MQTT client keeps each frame
+until the broker acknowledges it and sends it again after reconnecting.
 
 **Buffer.** 1500 frames in PSRAM (~370 kB): about 50 minutes of daytime traffic
 from ~70 meters, hours at night. Boards without PSRAM get 100 frames in RAM. A

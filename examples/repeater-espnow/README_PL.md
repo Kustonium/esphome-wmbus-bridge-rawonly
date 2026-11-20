@@ -98,6 +98,9 @@ MQTT. Bez MQTT most niczego nie potwierdza, a płytka buforuje (`bridge WITHOUT
 MQTT`). Trzy nieudane wysyłki pod rząd oznaczają utratę łącza od razu; zapytanie co
 2 s przywraca łącze. Gdy potwierdzenie zginie po drodze, płytka wyśle ramkę
 ponownie, a most rozpozna ją po numerze i potwierdzi bez drugiej publikacji.
+Most publikuje ramki z QoS 1, więc chwilowe zerwanie Wi-Fi/MQTT ich nie połyka:
+klient MQTT trzyma każdą ramkę do potwierdzenia przez broker i po ponownym
+połączeniu wysyła ją jeszcze raz.
 
 **Bufor.** 1500 ramek w PSRAM (ok. 370 kB): ok. 50 minut dziennego ruchu przy
 ok. 70 licznikach, w nocy kilka godzin. Płytki bez PSRAM mają 100 ramek w RAM.
