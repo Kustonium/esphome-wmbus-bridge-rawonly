@@ -290,6 +290,7 @@ jobs:
           # them, so without them those links were 404 on stable.
           for item in README.md README_PL.md NOTICE SUPPORT.md SUPPORT_PL.md \
                       CONTRIBUTING.md CONTRIBUTING_PL.md \
+                      SECURITY.md SECURITY_PL.md \
                       .github/workflows/ci.yml \
                       .github/ISSUE_TEMPLATE/bug_report.yml; do
             if [[ -e "_dev/${item}" ]]; then
