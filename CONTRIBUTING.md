@@ -7,13 +7,16 @@ are all welcome. Issues and discussions can be in English or Polish.
 
 ## How a change gets in
 
-This repository publishes from a separate development tree, so a contribution
-does not land through the pull request branch itself — it is ported there first
-and arrives here as one squashed sync commit. Your commits will not appear in
-this repository's history even though the code is yours. Authorship is recorded
-in two other places instead: the port commit in the development tree names your
-original commits, and the comment that closes your pull request states
-explicitly that the code is yours.
+Development happens in a separate repository, and this one receives each
+release from it. A pull request here is tested there first, in its own branch,
+on real hardware. If it needs changes, they go onto your pull request branch
+as well (by you, or by me if "Allow edits by maintainers" is ticked), so the
+pull request always holds exactly the code that will be released. After the
+release that carries it, your pull request is merged here as it is: it shows
+as merged and your commits stay in this repository's history. It stays open
+until that release, so a few days of waiting are normal. If a pull request has
+to be rewritten substantially, it is closed with a comment instead; authorship
+is then kept in the development tree and in the attribution file.
 
 For a small fix, open a pull request directly. For anything that changes how
 the radio receives, open an issue or a discussion first, so we can agree on how

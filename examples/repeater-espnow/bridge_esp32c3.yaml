@@ -74,6 +74,13 @@ mqtt:
   # EN: no skip_cert_cn_check here: since ESPHome 2026.11 it switches TLS on.
   # PL: bez skip_cert_cn_check: od ESPHome 2026.11 ta opcja włącza TLS.
   port: 1883
+  # EN: publish through the MQTT client's queue. By default publish() blocks the
+  #     loop (QoS 1, two messages per frame); a slow network then trips the task
+  #     watchdog. Measured 26-27.11: 6 reboots a day before, 0 after.
+  # PL: publikacja przez kolejkę klienta MQTT. Domyślnie publish() blokuje pętlę
+  #     (QoS 1, dwie wiadomości na ramkę); przy wolnej sieci to wywołuje task
+  #     watchdog. Zmierzone 26-27.11: 6 restartów dziennie przed, 0 po.
+  idf_send_async: true
 
 # Clock for the node (it has no network): sent in every ACK. Also the key for
 # log anonymizing.

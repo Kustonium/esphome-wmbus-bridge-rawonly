@@ -130,6 +130,10 @@ api:
   reboot_timeout: 0s
 ota:
   - platform: esphome
+    # Optional: a password for firmware uploads over the network. Without it
+    # anyone on your network can flash the board. Add ota_password to
+    # secrets.yaml before uncommenting. See SECURITY.md.
+    # password: !secret ota_password
 # Reception timestamp: SNTP first, HA time as a fallback. If only
 # `homeassistant` is listed and HA API is not connected, the clock
 # never gets set and /rx frames go out without `received_at` - the

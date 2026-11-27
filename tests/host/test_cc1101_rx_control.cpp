@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "cc1101_rx_control.h"
 #include <cassert>
 #include <cstdint>
@@ -42,4 +43,17 @@ int main() {
   samples = 0;
   assert(!cc1101_idle_refresh_safe([&]() { return ++samples == 3; }, []() { return 0; },
                                   []() { return 0x0D; }));
+
+  // RXBYTES/MARCSTATE: a corrupt single read is dropped, two equal reads win.
+  {
+    std::vector<uint8_t> seq{0x7F, 0x05, 0x05};
+    unsigned n = 0;
+    assert(cc1101_stable_read([&]() { return seq.at(n++); }) == 0x05 && n == 3);
+    // Steady value: two reads.
+    n = 0;
+    assert(cc1101_stable_read([&]() { ++n; return uint8_t(0x0D); }) == 0x0D && n == 2);
+    // Value still changing (bytes arriving): bounded, returns the last read.
+    n = 0;
+    assert(cc1101_stable_read([&]() { return uint8_t(++n); }) == 6 && n == 6);
+  }
 }

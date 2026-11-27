@@ -4,6 +4,11 @@
 
 Ten projekt jest rozwijany po godzinach i nie jest ogólnym helpdeskiem.
 
+- **Najlepiej, jak mogę (best effort).** Projekt prowadzi jedna osoba po godzinach. Odpowiadam, kiedy mogę; nie ma gwarantowanego czasu reakcji.
+- **To nie jest firma.** Nie prowadzę działalności gospodarczej i nie wystawiam faktur. Nie ma płatnego wsparcia ani umowy serwisowej.
+- **Bez gwarancji.** Kod jest udostępniany na licencji GPL-3.0-or-later, bez jakiejkolwiek gwarancji (zobacz [LICENSE](LICENSE)). Za odczyty używane do rozliczeń odpowiadasz sam.
+- Jeśli projekt ci pomaga, [Buy Me a Coffee](https://buymeacoffee.com/Kustonium) jest mile widziane, ale nigdy niewymagane.
+
 ## Zanim otworzysz zgłoszenie
 
 Przeczytaj:

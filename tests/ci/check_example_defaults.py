@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Keep the commented options in the example YAMLs honest.
 
 The `*_commented.yaml` examples show optional settings as commented-out lines so
@@ -178,7 +179,8 @@ PROSE_CELLS = {"wymagane", "brak", "puste", "zależnie od trybu",
                "required", "none", "empty", "mode default", "esphome.name", ""}
 
 
-def check_reference(defaults: dict[str, object], path: pathlib.Path) -> list[str]:
+def check_reference(defaults: dict[str, object], path: pathlib.Path,
+                    require_rows: bool = True) -> list[str]:
     """Check the English `Default` or Polish `Domyślnie` column against the schema.
 
     This is where drift is least visible: nobody rereads a table of sixty rows,
@@ -213,9 +215,9 @@ def check_reference(defaults: dict[str, object], path: pathlib.Path) -> list[str
         checked += 1
         if not matches(cell, defaults[option]):
             problems.append(
-                f"docs/{path.name}:{lineno}: {option} is documented as "
+                f"{path.relative_to(ROOT).as_posix()}:{lineno}: {option} is documented as "
                 f"'{cell}' but the schema default is {defaults[option]!r}")
-    if checked == 0:
+    if checked == 0 and require_rows:
         problems.append(f"docs/{path.name}: no schema defaults checked; verify the table headers")
     return problems
 
@@ -286,8 +288,20 @@ def main() -> int:
                         f"({defaults[option]!r}) - comment it out, or add "
                         f"'# pinned: <reason>' if it is deliberate")
 
-    for name in ("CONFIG_REFERENCE_MINIMAL.md", "CONFIG_REFERENCE_MINIMAL_PL.md"):
+    # The two reference tables must exist and must have rows checked; every
+    # other Markdown file with a `Default` / `Domyślnie` column is checked too
+    # (option tables in DIAGNOSTIC, RADIO_OPTIONS_MINIMAL, CC1101_RX_BENCH,
+    # README_FULL, the example READMEs), so a default that changes in the schema
+    # cannot keep reading as true in any of them.
+    reference = ("CONFIG_REFERENCE_MINIMAL.md", "CONFIG_REFERENCE_MINIMAL_PL.md")
+    for name in reference:
         problems.extend(check_reference(defaults, ROOT / "docs" / name))
+    others = sorted(set(ROOT.glob("*.md")) | set((ROOT / "docs").glob("*.md"))
+                    | set(EXAMPLES.rglob("*.md")))
+    for path in others:
+        if path.parent == ROOT / "docs" and path.name in reference:
+            continue
+        problems.extend(check_reference(defaults, path, require_rows=False))
 
     for problem in problems:
         print(f"FAIL: {problem}", file=sys.stderr)

@@ -271,10 +271,10 @@ Starszy szczegółowy opis README przeniesiono do [`docs/README_FULL_PL.md`](doc
 
 Ten projekt jest celowo RAW-only i nie jest ogólnym helpdeskiem ESPHome/Home Assistant.
 
-Przed otwarciem issue przeczytaj [`SUPPORT_PL.md`](SUPPORT_PL.md).
+Przed otwarciem issue przeczytaj [`SUPPORT_PL.md`](SUPPORT_PL.md). Problemy bezpieczeństwa i to, co płytka wysyła przez MQTT: [`SECURITY_PL.md`](SECURITY_PL.md).
 
 ## Wkład w projekt
 
-To repozytorium publikuje z osobnego drzewa deweloperskiego, więc zmiana nie wchodzi przez gałąź pull requesta — jest tam najpierw przenoszona i trafia tutaj jednym zgniecionym commitem sync. Oznacza to, że Twoje commity nie pojawią się w historii tego repozytorium, mimo że kod jest Twój. Autorstwo jest odnotowywane w dwóch innych miejscach: commit przenoszący w drzewie deweloperskim wymienia Twoje oryginalne commity, a komentarz zamykający pull requesta mówi wprost, że kod jest Twój.
+Prace rozwojowe toczą się w osobnym repozytorium, a to dostaje z niego każde wydanie. Pull request złożony tutaj jest najpierw testowany tam, w osobnej gałęzi, na prawdziwym sprzęcie. Jeśli wymaga zmian, trafiają one także na gałąź Twojego pull requesta (od Ciebie albo ode mnie, jeśli zaznaczone jest „Allow edits by maintainers”), więc pull request zawsze zawiera dokładnie ten kod, który zostanie wydany. Po wydaniu, które go zawiera, Twój pull request jest scalany tutaj bez zmian: ma status „Merged”, a Twoje commity zostają w historii tego repozytorium. Do tego wydania pozostaje otwarty, więc kilka dni czekania to normalne. Jeśli pull request trzeba gruntownie przepisać, zostaje zamiast tego zamknięty z komentarzem; autorstwo jest wtedy zachowane w drzewie deweloperskim i w pliku z atrybucją.
 
 Od czego zacząć, jak uruchomić testy i jak zmierzyć zmianę w odbiorze radia: [CONTRIBUTING_PL.md](CONTRIBUTING_PL.md).

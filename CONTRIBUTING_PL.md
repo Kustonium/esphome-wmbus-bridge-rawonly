@@ -8,12 +8,17 @@ albo po angielsku.
 
 ## Jak zmiana trafia do repozytorium
 
-To repozytorium publikuje z osobnego drzewa deweloperskiego, więc zmiana nie
-wchodzi przez gałąź pull requesta — jest tam najpierw przenoszona i trafia tutaj
-jednym zgniecionym commitem sync. Twoje commity nie pojawią się w historii tego
-repozytorium, mimo że kod jest Twój. Autorstwo jest odnotowywane w dwóch innych
-miejscach: commit przenoszący w drzewie deweloperskim wymienia Twoje oryginalne
-commity, a komentarz zamykający pull requesta mówi wprost, że kod jest Twój.
+Prace rozwojowe toczą się w osobnym repozytorium, a to dostaje z niego każde
+wydanie. Pull request złożony tutaj jest najpierw testowany tam, w osobnej
+gałęzi, na prawdziwym sprzęcie. Jeśli wymaga zmian, trafiają one także na
+gałąź Twojego pull requesta (od Ciebie albo ode mnie, jeśli zaznaczone jest
+„Allow edits by maintainers”), więc pull request zawsze zawiera dokładnie ten
+kod, który zostanie wydany. Po wydaniu, które go zawiera, Twój pull request
+jest scalany tutaj bez zmian: ma status „Merged”, a Twoje commity zostają w
+historii tego repozytorium. Do tego wydania pozostaje otwarty, więc kilka dni
+czekania to normalne. Jeśli pull request trzeba gruntownie przepisać, zostaje
+zamiast tego zamknięty z komentarzem; autorstwo jest wtedy zachowane w drzewie
+deweloperskim i w pliku z atrybucją.
 
 Drobną poprawkę zgłoś od razu jako pull request. Przy wszystkim, co zmienia
 sposób odbioru radia, najpierw otwórz zgłoszenie albo dyskusję, żebyśmy ustalili,

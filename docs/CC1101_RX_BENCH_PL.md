@@ -11,7 +11,7 @@ Wszystkie fazy zbudować z tego samego commita dev. Nowe opcje domyślnie nie zm
 | `cc1101_carrier_sense` | `true` | `false` = sync bez carrier sense (0x02, z `sync_15_16` 0x01). Tylko w YAML: od 16.11.2026 nie ma tego na kafelku dodatku (wyłączenie zmierzone jako szkodliwe); wartość zapisana przez starszą wersję jest kasowana przy starcie. |
 | `cc1101_rx_bandwidth` | `232khz` | Filtr RX T1/C1: `232khz` (domyślne od 16.11.2026, zmierzone jako lepsze), `325khz` (TI AN067 link B), `270khz`. Od 16.11.2026 tylko w YAML; wartość zapisana z dodatku w czasie testu jest kasowana przy starcie. |
 | `cc1101_rx_state_wait` | `false` | SIDLE → czekaj na IDLE → SFRX → SRX → czekaj na RX. |
-| `cc1101_idle_rx_refresh` | `false` | Sprawdzanie co około 50 ms podczas oczekiwania na IRQ; odświeżenie tylko przy GDO2=0, pustym FIFO i stanie RX. |
+| `cc1101_idle_rx_refresh` | `false` | Sprawdzanie co około 50 ms podczas oczekiwania na IRQ; odświeżenie tylko przy GDO2=0, pustym FIFO i stanie RX. Dla jednego lub kilku liczników z długimi przerwami w ruchu, gdzie wyciąga odbiornik z zawieszenia. W gęstym ruchu (dziesiątki liczników) kosztuje: zmierzone 19–21.11.2026 przy ok. 350 licznikach (godzinowo A-B-B-A), mocne ramki o 2–3 punkty niżej z odświeżaniem, dlatego domyślnie wyłączone. |
 
 Scalić z istniejącym blokiem radia, zachowując piny:
 
