@@ -321,7 +321,12 @@ void CC1101::read_burst_(uint8_t address, uint8_t *data, size_t len) {
   if (!chip_ready_(status)) this->chip_not_ready_count_++;
 }
 
-uint8_t CC1101::rxbytes_raw_() { return this->read_status_(REG_RXBYTES); }
+// RXBYTES changes while bytes arrive, so one SPI read can be corrupt
+// (cc1101_stable_read). A corrupt count larger than the FIFO holds would read
+// past its end - an RX FIFO underflow and garbage in the frame.
+uint8_t CC1101::rxbytes_raw_() {
+  return cc1101_stable_read([this]() { return this->read_status_(REG_RXBYTES); });
+}
 uint8_t CC1101::rxbytes_count_() { return this->rxbytes_raw_() & 0x7F; }
 bool CC1101::rx_overflow_() { return (this->rxbytes_raw_() & 0x80) != 0; }
 
@@ -1133,7 +1138,9 @@ bool CC1101::take_frame_freq_error(int32_t *afc_hz, int32_t *fei_hz) {
 }
 
 optional<uint8_t> CC1101::drain_fifo_once_() {
-  if (this->rx_overflow_()) {
+  // One (stable) read for both the overflow bit and the count.
+  const uint8_t rxbytes_raw = this->rxbytes_raw_();
+  if ((rxbytes_raw & 0x80) != 0) {
     this->fifo_overrun_count_++;
     this->abort_requested_ = true;
     ESP_LOGW(TAG, LOG_TR("RX FIFO overflow", "Przepelnienie RX FIFO"));
@@ -1141,7 +1148,7 @@ optional<uint8_t> CC1101::drain_fifo_once_() {
     return {};
   }
 
-  const uint8_t rx_bytes = this->rxbytes_count_();
+  const uint8_t rx_bytes = rxbytes_raw & 0x7F;
   if (rx_bytes == 0) return {};
 
   if (!this->rssi_captured_) this->capture_rssi_();

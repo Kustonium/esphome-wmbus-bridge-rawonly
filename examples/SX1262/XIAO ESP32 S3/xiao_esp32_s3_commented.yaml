@@ -80,6 +80,10 @@ api:
   reboot_timeout: 0s
 ota:
   - platform: esphome
+    # Optional: a password for firmware uploads over the network. Without it
+    # anyone on your network can flash the board. Add ota_password to
+    # secrets.yaml before uncommenting. See SECURITY.md.
+    # password: !secret ota_password
 mdns:
   disabled: false
 # Reception timestamp: SNTP first, HA time as a fallback. If only

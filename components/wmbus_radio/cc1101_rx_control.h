@@ -31,5 +31,22 @@ bool cc1101_idle_refresh_safe(Sync sync, Bytes bytes, State state) {
   return !sync();
 }
 
+// A status register the radio updates while it is read (RXBYTES, MARCSTATE,
+// PKTSTATUS) can come back corrupt from a single SPI read - datasheet
+// section 10.3, about 80 ppm per read at the highest data rate, details in
+// the CC1101 errata. Read until two consecutive reads agree. Bounded, so a
+// value that keeps changing (bytes arriving) cannot spin forever: after
+// max_reads the last read is returned, which is what a single read gave.
+template<typename Read>
+uint8_t cc1101_stable_read(Read read, unsigned max_reads = 6) {
+  uint8_t value = read();
+  for (unsigned i = 1; i < max_reads; i++) {
+    const uint8_t again = read();
+    if (again == value) return value;
+    value = again;
+  }
+  return value;
+}
+
 }  // namespace wmbus_radio
 }  // namespace esphome

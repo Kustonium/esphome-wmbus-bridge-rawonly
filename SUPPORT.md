@@ -4,6 +4,11 @@
 
 This project is maintained in spare time and is not a general support desk.
 
+- **Best effort.** One person maintains it after hours. I answer when I can; there is no guaranteed response time.
+- **Not a business.** I do not run a company and do not issue invoices. There is no paid support or service contract.
+- **No warranty.** The code is provided under GPL-3.0-or-later, without warranty of any kind (see [LICENSE](LICENSE)). Readings used for billing are your responsibility.
+- If the project helps you, [Buy Me a Coffee](https://buymeacoffee.com/Kustonium) is welcome but never required.
+
 ## Before opening an issue
 
 Read:

@@ -11,7 +11,7 @@ Build all phases from the same dev commit. Both new options default to false.
 | `cc1101_carrier_sense` | `true` | `false` = sync without carrier sense (0x02, with `sync_15_16` 0x01). YAML only: no longer on the add-on tile since 2026-11-16 (off was measured harmful); a value stored by an older build is dropped at boot. |
 | `cc1101_rx_bandwidth` | `232khz` | T1/C1 RX filter: `232khz` (default since 2026-11-16, measured better), `325khz` (TI AN067 link B), `270khz`. YAML only since 2026-11-16; a value stored from the add-on during the test is dropped at boot. |
 | `cc1101_rx_state_wait` | `false` | SIDLE → wait IDLE → SFRX → SRX → wait RX. |
-| `cc1101_idle_rx_refresh` | `false` | Check approximately every 50 ms while waiting for IRQ; re-arm only with GDO2 low, FIFO empty and state RX. |
+| `cc1101_idle_rx_refresh` | `false` | Check approximately every 50 ms while waiting for IRQ; re-arm only with GDO2 low, FIFO empty and state RX. Meant for one or a few meters with long quiet gaps, where it pulls a receiver out of a hang. In dense traffic (tens of meters) it costs: measured 2026-11-19…21 over ~350 meters (hourly A-B-B-A), strong frames 2–3 points lower with refresh on, so it stays off by default. |
 
 Merge into the existing radio block, retaining the board pins:
 

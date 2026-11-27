@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
 #define ESP_LOGV(tag, fmt, ...) do { (void) (tag); } while (0)
